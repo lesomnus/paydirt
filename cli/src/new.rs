@@ -49,6 +49,7 @@ const TEMPLATE: &[(&str, &str)] = &[
         include_str!("../templates/app/src/access.rs"),
     ),
     ("trail.json", "{}\n"),
+    ("src/past.rs", include_str!("../templates/app/src/past.rs")),
     ("resources.json", "{\"entities\":[],\"previous\":false}\n"),
     (
         "src/providers.rs",

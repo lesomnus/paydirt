@@ -60,6 +60,7 @@ pub enum Packet {
     },
 }
 pub(crate) struct Session {
+    operations: std::collections::BTreeSet<String>,
     origin: Option<Call>,
     pub seen: crate::seen::Seen,
     changes: Vec<paydirt::watch::Change>,
@@ -107,6 +108,7 @@ impl Store {
                 })?;
                 self.session = Some(Session {
                     origin: None,
+                    operations: Default::default(),
                     seen: Default::default(),
                     changes: Vec::new(),
                     id,
@@ -170,6 +172,17 @@ impl Store {
             .ok_or_else(|| Fault::denied("unknown request transaction"))?;
         if let Some(e) = &session.failed {
             return Err(e.clone());
+        }
+        let beginning = call.method == "$begin_event";
+        let reference = match call.method.as_str() {
+            "$begin_event" | "$event" => call.request["cause"].as_str(),
+            "$event_facts" => call.request["event"].as_str(),
+            _ => None,
+        };
+        if reference.is_some_and(|key| !session.operations.contains(key)) {
+            return Err(Fault::precondition(
+                "operation belongs to another transaction",
+            ));
         }
         let scope = if session.frame.tenant.is_empty() {
             Scope::Account {
@@ -257,6 +270,13 @@ impl Store {
         } else {
             tx.call(call)
         };
+        if beginning
+            && let Ok(row) = &result
+            && row["done"] != true
+            && let Some(id) = row["id"].as_str()
+        {
+            session.operations.insert(id.into());
+        }
         session.failed = result.as_ref().err().cloned().or(tx.failed);
         result
     }

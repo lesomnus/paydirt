@@ -511,6 +511,10 @@ impl Transaction<'_> {
             )?)
             .map_err(|e| Fault::internal(e.to_string())),
             "$resource_visible" => self.visible_resource(e, req),
+            "$expire_past" => self.expire_history(req),
+            "$begin_event" => self.begin_event(e, req),
+            "$event_facts" => self.event_facts(e, &req["event"], req),
+            "$redact_reason" => self.redact_reason(req),
             "$event" => self.say(e, req),
             "$state" => self.past_state(e, req),
             "Add" => self.insert(e, req),
