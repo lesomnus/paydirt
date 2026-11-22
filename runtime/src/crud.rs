@@ -240,7 +240,13 @@ impl Transaction<'_> {
         let mut q = Query::new("");
         let mut where_ = self.wall(e, &mut q)?;
         for (f, v) in self.key_parts(e, key)? {
-            let b = self.resolved(f, v)?;
+            let b = if f.name == "alias" && f.number == 4 && f.kind == "STRING" {
+                Bind::Text(crate::naming::parse(
+                    v.as_str().ok_or_else(|| Fault::invalid("expected alias"))?,
+                )?)
+            } else {
+                self.resolved(f, v)?
+            };
             let p = q.param(b, self.db.dialect());
             where_.push(format!("r.{}={p}", quote(&f.column())));
         }

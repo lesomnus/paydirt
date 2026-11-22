@@ -189,7 +189,7 @@ fn validate(db: &mut dyn Driver, model: &Model) -> Result<()> {
         for field in db.rows(q)? {
             if !columns.contains(&field) {
                 return Err(Fault::precondition(format!(
-                    "schema drifted: unrecognized required column {table}.{field} has no default; review ALTER TABLE {} DROP COLUMN {}",
+                    "schema drifted: unrecognized required column {table}.{field} has no default. Review this repair before applying it:\nALTER TABLE {} DROP COLUMN {};",
                     quote(&table),
                     quote(&field)
                 )));
