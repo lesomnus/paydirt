@@ -17,6 +17,20 @@ pub fn generate(work: &Path) -> Result<()> {
     if !status.success() {
         return Err("could not resolve application policies".into());
     }
+    let binary = work.join("generated/storage/descriptors.binpb");
+    let status = Command::new("buf")
+        .current_dir(work)
+        .args([
+            "build",
+            "--as-file-descriptor-set",
+            "--exclude-source-info",
+            "-o",
+        ])
+        .arg(binary)
+        .status()?;
+    if !status.success() {
+        return Err("failed to export RPC descriptors".into());
+    }
     let image: Value = serde_json::from_slice(&fs::read(dest)?)?;
     let mut policies = BTreeMap::new();
     for file in image["file"].as_array().ok_or("expected files")? {

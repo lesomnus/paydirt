@@ -30,3 +30,6 @@ pub fn router(database: transport::Database, name: String) -> connectrpc::Router
     }
     storage::mount(connectrpc::Router::new(), database, &App(name))
 }
+
+#[cfg(target_arch="wasm32")]
+mod worker;
