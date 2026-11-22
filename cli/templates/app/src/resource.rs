@@ -41,6 +41,7 @@ impl ResourceService for Resources {
         ctx: RequestContext,
         req: ServiceRequest<'_, WatchRequest>,
     ) -> ServiceResult<ServiceStream<WatchEvent>> {
+        let ctx = Database::presence_request(ctx, || req.to_owned_message())?;
         let expr = req.to_owned_message().filter;
         if expr.len() > 16 << 10 {
             return Err(ConnectError::invalid_argument("filter exceeds 16 KiB"));
@@ -67,6 +68,7 @@ impl ResourceService for Resources {
             .subscribe(Default::default())
             .await
             .map_err(ConnectError::unavailable)?;
+        let lifetime = ctx.clone();
         let stream = async_stream::try_stream! {
             while let Some(batch)=events.next().await{
                 for change in &batch.map_err(ConnectError::resource_exhausted)?.changes{
@@ -95,6 +97,6 @@ impl ResourceService for Resources {
             }
             Err(ConnectError::resource_exhausted("resource subscription ended; reconcile with List"))?;
         };
-        Ok(Response::new(Box::pin(stream) as ServiceStream<WatchEvent>).with_header("paydirt-watch-ready","1"))
+        Ok(Response::new(Database::enforce_presence(&lifetime, Box::pin(stream))).with_header("paydirt-watch-ready","1"))
     }
 }

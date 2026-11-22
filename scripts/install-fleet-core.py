@@ -46,7 +46,7 @@ source = source.replace("database, &App(name)", "database.clone(), &App(name, st
 copyfile(repo / "tests/fleet/invitation.proto", app / "proto/app/invitation.proto")
 copyfile(repo / "tests/fleet/pair.rs", app / "src/pair.rs")
 overlay = app / "proto/ext/app/robot_svc.ext.proto"
-overlay.write_text(overlay.read_text().replace("service RobotService {", "service RobotService {\n  rpc Who(StreamNumber) returns (StreamNumber);\n  rpc Login(StreamNumber) returns (StreamNumber);\n  rpc Logout(StreamNumber) returns (StreamNumber);\n  rpc Reveal(StreamNumber) returns (Robot);\n  rpc RevealStream(StreamNumber) returns (stream Robot);\n  rpc InFlight(StreamNumber) returns (StreamNumber);\n  rpc Pause(StreamNumber) returns (StreamNumber);\n  rpc Collect(stream StreamNumber) returns (StreamNumber);\n  rpc Converse(stream StreamNumber) returns (stream StreamNumber);\n  rpc RenamePair(RobotRenamePairRequest) returns (Robot);\n  rpc Invited(RobotAllowanceRequest) returns (InvitationCount) { option (payday.method) = {account:{}}; }\n  rpc Allowance(RobotAllowanceRequest) returns (RobotAllowanceResponse);") + "\n" + (repo / "tests/fleet/pair.proto").read_text())
+overlay.write_text(overlay.read_text().replace("service RobotService {", "service RobotService {\n  rpc Recent(StreamNumber) returns (StreamNumber);\n  rpc PresenceWait(StreamNumber) returns (stream StreamNumber);\n  rpc Who(StreamNumber) returns (StreamNumber);\n  rpc Login(StreamNumber) returns (StreamNumber);\n  rpc Logout(StreamNumber) returns (StreamNumber);\n  rpc Reveal(StreamNumber) returns (Robot);\n  rpc RevealStream(StreamNumber) returns (stream Robot);\n  rpc InFlight(StreamNumber) returns (StreamNumber);\n  rpc Pause(StreamNumber) returns (StreamNumber);\n  rpc Collect(stream StreamNumber) returns (StreamNumber);\n  rpc Converse(stream StreamNumber) returns (stream StreamNumber);\n  rpc RenamePair(RobotRenamePairRequest) returns (Robot);\n  rpc Invited(RobotAllowanceRequest) returns (InvitationCount) { option (payday.method) = {account:{}}; }\n  rpc Allowance(RobotAllowanceRequest) returns (RobotAllowanceResponse);") + "\n" + (repo / "tests/fleet/pair.proto").read_text())
 source = "mod pair;\n" + source.replace("services::app::RobotServiceOverlay { next, layer: robot::Fleet(self.1.clone()) }", """let core=services::app::RobotServiceOverlay { next, layer: robot::Fleet(self.1.clone()) };
             services::app::RobotServiceOverlay { next:core, layer:pair::Pair(self.1.clone()) }""")
 lib.write_text(source)
@@ -85,3 +85,9 @@ with (app / "src/operator.rs").open("a") as operator:
     operator.write((repo / "tests/fleet/operator-types.rs").read_text())
 
 (app / "resources.json").write_text('{"entities":["app.Cell","app.Robot"],"previous":true}\n')
+
+copyfile(repo / "tests/fleet/presence.rs", app / "src/presence_fixture.rs")
+with lib.open("a") as library:
+    library.write("\npub mod presence_fixture;\n")
+hook = 'if let Ok(path) = std::env::var("PAYDIRT_POLICY_FILE")'
+main.write_text(main.read_text().replace(hook, 'db = fleet::presence_fixture::install(db);\n    ' + hook))

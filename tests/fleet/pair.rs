@@ -17,6 +17,44 @@ impl Drop for Active {
 
 #[allow(refining_impl_trait)]
 impl<N: RobotService> RobotServiceLayer<N> for Pair {
+    async fn recent(
+        &self,
+        _: &N,
+        ctx: RequestContext,
+        _: ServiceRequest<'_, StreamNumber>,
+    ) -> ServiceResult<StreamNumber> {
+        let parties = ctx
+            .extensions()
+            .get::<crate::transport::presence::Parties>()
+            .ok_or_else(|| connectrpc::ConnectError::unauthenticated("no authenticated person"))?;
+        let now = chrono::Utc::now();
+        let age = std::time::Duration::from_secs(60);
+        if parties.actor.method != "badge"
+            || !parties.actor.fresh(now, age)
+            || !parties
+                .caller
+                .as_ref()
+                .is_some_and(|c| c.method == "oidc" && c.fresh(now, age))
+        {
+            return Err(connectrpc::ConnectError::permission_denied(
+                "recent proof from person and device required",
+            ));
+        }
+        Response::ok(StreamNumber {
+            value: 1,
+            ..Default::default()
+        })
+    }
+    async fn presence_wait(
+        &self,
+        _: &N,
+        _: RequestContext,
+        _: ServiceRequest<'_, StreamNumber>,
+    ) -> ServiceResult<connectrpc::ServiceStream<StreamNumber>> {
+        Response::ok(Box::pin(
+            async_stream::stream! { yield Ok(StreamNumber{value:1,..Default::default()}); std::future::pending::<()>().await; },
+        ))
+    }
     #[cfg(not(target_arch = "wasm32"))]
     async fn who(
         &self,

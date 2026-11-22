@@ -38,6 +38,7 @@ fn exercise(url: &str) {
         sets: None,
         tenants: None,
         caller_tenant: None,
+        presence: None,
         trace: vec![1; 16],
         action: "/app.RobotService/Move".into(),
     };

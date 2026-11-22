@@ -22,6 +22,8 @@ pub struct Frame {
     #[serde(default)]
     pub caller_tenant: Option<Vec<u8>>,
     #[serde(default)]
+    pub presence: Option<String>,
+    #[serde(default)]
     pub trace: Vec<u8>,
     pub action: String,
 }

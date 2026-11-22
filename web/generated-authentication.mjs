@@ -1,4 +1,5 @@
 // Local discovery, keys and Connect introspection use the same external fleet server as applications.
+import {presenceCases} from "./generated-presence.mjs";
 import assert from "node:assert/strict";
 import {createServer} from "node:http";
 import {generateKeyPairSync,randomBytes,sign} from "node:crypto";
@@ -10,6 +11,8 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {setTimeout as delay} from "node:timers/promises";
 const tmp=await mkdtemp(join(tmpdir(),"fleet-auth-")),tenant=randomBytes(16);tenant[6]=128;tenant[8]=128;tenant[9]=1;
+const device=Buffer.from(tenant), person=Buffer.from(tenant);device[9]=person[9]=2;person[15]^=1;
+const revocation=join(tmp,"badge-revoked");
 let kid="one",pair=generateKeyPairSync("rsa",{modulusLength:2048}),down=false,child;
 const listen=s=>new Promise(resolve=>s.listen(0,"127.0.0.1",resolve));
 const stop=s=>new Promise(resolve=>s.close(resolve));
@@ -32,14 +35,15 @@ const enc=v=>Buffer.from(JSON.stringify(v)).toString("base64url");
 function jwt(extra={}){const now=Math.floor(Date.now()/1000);const input=enc({alg:"RS256",kid,typ:"at+jwt"})+"."+enc({iss:issuer,sub:"user",aud:"fleet",client_id:"browser",jti:"local",iat:now,exp:now+120,auth_time:now,...extra});return input+"."+sign("sha256",Buffer.from(input),pair.privateKey).toString("base64url")}
 const call=(rpc,token,extra={},body={})=>fetch("http://"+address+"/app.RobotService/"+rpc,{method:"POST",headers:{"content-type":"application/json","connect-protocol-version":"1",...(token?{authorization:"Bearer "+token}:{}),...extra},body:JSON.stringify(body)});
 try{
- const config={listen:address,service_name:"auth",watch:{broker:"memory"},authentication:{oidc:{issuer,audience:"fleet"},introspection:{url:issuer,bearer_env:"FLEET_BILLING"},bindings:{"oidc:user":tenant.toString("hex"),"remote:fleet/read":tenant.toString("hex")},sessions:true}};
- await writeFile(join(tmp,"app.json"),JSON.stringify(config));const env={...process.env,PAYDIRT_LISTEN:address,DATABASE_URL:join(tmp,"db"),FLEET_BILLING:"service-secret",PAYDIRT_PRINCIPALS:"{}"};
+ const config={listen:address,service_name:"auth",watch:{broker:"memory"},authentication:{oidc:{issuer,audience:"fleet"},introspection:{url:issuer,bearer_env:"FLEET_BILLING"},bindings:{"oidc:user":{tenant:tenant.toString("hex"),actor:device.toString("hex")},"remote:fleet/read":tenant.toString("hex")},sessions:true}};
+ await writeFile(join(tmp,"app.json"),JSON.stringify(config));const env={...process.env,PAYDIRT_LISTEN:address,DATABASE_URL:join(tmp,"db"),FLEET_BILLING:"service-secret",FLEET_DEVICE:device.toString("hex"),FLEET_BADGE:person.toString("hex"),FLEET_REVOCATION:revocation,PAYDIRT_PRINCIPALS:"{}"};
  execFileSync(process.env.GENERATED_APP,["app.Tenant","Add",JSON.stringify({id:tenant.toString("base64"),alias:"tenant"})],{env,cwd:tmp});
  child=spawn(process.env.GENERATED_APP,[],{env,cwd:tmp,stdio:"inherit"});
  for(let i=0;i<120;i++){try{await fetch("http://"+address);break}catch{await delay(50)}}
  const ok=async(r,n)=>{assert.equal(r.status,200,await r.clone().text());assert.equal((await r.json()).value,n)};
  const denied=async(r,code)=>assert.equal((await r.json()).code,code);
  await ok(await call("Who",jwt()),2);
+ await presenceCases({address,call,jwt,tenant,person,device,revocation,url:env.DATABASE_URL});
  await denied(await call("Who",jwt({aud:"wrong"})),"unauthenticated");
  await denied(await call("Who",jwt({exp:5})),"unauthenticated");
  await denied(await call("Who",jwt({sub:"unbound"})),"unauthenticated");

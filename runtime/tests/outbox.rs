@@ -61,6 +61,7 @@ async fn publication_is_confirmed_before_deletion() {
             sets: None,
             caller: None,
             caller_tenant: None,
+            presence: None,
             trace: vec![0; 16],
             action: "/app.CellService/Add".into(),
         };

@@ -832,6 +832,10 @@ mod sink_app_cell {
             >,
         > + Send {
             async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
                 let ctx = self
                     .db
                     .authorize(
@@ -857,6 +861,10 @@ mod sink_app_cell {
             >,
         > + Send {
             async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
                 let ctx = self
                     .db
                     .authorize(
@@ -885,6 +893,10 @@ mod sink_app_cell {
             >,
         > + Send {
             async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
                 let ctx = self
                     .db
                     .authorize(
@@ -913,6 +925,10 @@ mod sink_app_cell {
             >,
         > + Send {
             async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
                 let ctx = self
                     .db
                     .authorize(
@@ -940,6 +956,10 @@ mod sink_app_cell {
             >,
         > + Send {
             async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
                 let ctx = self
                     .db
                     .authorize(
@@ -1180,6 +1200,10 @@ mod sink_app_holder {
             >,
         > + Send {
             async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
                 let ctx = self
                     .db
                     .authorize(
@@ -1273,6 +1297,10 @@ mod sink_app_holder {
             >,
         > + Send {
             async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
                 let ctx = self
                     .db
                     .authorize(
@@ -1499,6 +1527,10 @@ mod sink_app_robot {
             >,
         > + Send {
             async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
                 let ctx = self
                     .db
                     .authorize(
@@ -1529,6 +1561,10 @@ mod sink_app_robot {
             >,
         > + Send {
             async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
                 let ctx = self
                     .db
                     .authorize_cost(
@@ -1557,6 +1593,10 @@ mod sink_app_robot {
             >,
         > + Send {
             async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
                 let ctx = self
                     .db
                     .authorize(
@@ -1587,6 +1627,10 @@ mod sink_app_robot {
             >,
         > + Send {
             async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
                 let ctx = self
                     .db
                     .authorize(
@@ -1617,6 +1661,10 @@ mod sink_app_robot {
             >,
         > + Send {
             async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
                 let ctx = self
                     .db
                     .authorize(
@@ -1644,6 +1692,10 @@ mod sink_app_robot {
             >,
         > + Send {
             async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
                 let ctx = self
                     .db
                     .authorize(
@@ -1674,6 +1726,10 @@ mod sink_app_robot {
             >,
         > + Send {
             async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
                 let ctx = self
                     .db
                     .authorize(
@@ -1706,6 +1762,10 @@ mod sink_app_robot {
             >,
         > + Send {
             async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
                 let ctx = self
                     .db
                     .authorize(
@@ -1717,7 +1777,8 @@ mod sink_app_robot {
                         false,
                     )
                     .await?;
-                next.watch(ctx, request).await
+                let response = next.watch(ctx.clone(), request).await?;
+                Ok(response.map_body(|body| Database::enforce_presence(&ctx, body)))
             }
         }
         fn r#move<'a>(
@@ -1736,6 +1797,10 @@ mod sink_app_robot {
             >,
         > + Send {
             async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
                 let ctx = self
                     .db
                     .authorize(
@@ -2083,6 +2148,10 @@ mod sink_app_tenant {
             >,
         > + Send {
             async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
                 let ctx = self
                     .db
                     .authorize(
@@ -2176,6 +2245,10 @@ mod sink_app_tenant {
             >,
         > + Send {
             async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
                 let ctx = self
                     .db
                     .authorize(

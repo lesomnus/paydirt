@@ -1,3 +1,5 @@
+#[path = "presence.rs"]
+pub mod presence;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "providers.rs"]
 mod providers;
@@ -174,6 +176,7 @@ fn tokens(config: &str) -> Result<HashMap<String, Principal>, String> {
                         actor: actor.as_deref().map(|v| id(v, 2)).transpose()?,
                         caller: caller.as_deref().map(|v| id(v, 2)).transpose()?,
                         caller_tenant: caller_tenant.as_deref().map(|v| id(v, 1)).transpose()?,
+                        presence: None,
                         trace: Vec::new(),
                         action: String::new(),
                     },
@@ -231,6 +234,7 @@ pub fn error(mut f: Fault) -> ConnectError {
 
 #[derive(Clone)]
 pub struct Database {
+    presence: Option<Arc<presence::Verify>>,
     #[cfg(not(target_arch = "wasm32"))]
     providers: Option<Arc<providers::Providers>>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -292,6 +296,7 @@ impl Database {
             general_writes: false,
             policy: None,
             account_header: "paydirt-tenant".into(),
+            presence: None,
             resolve: None,
         })
     }
@@ -305,6 +310,7 @@ impl Database {
             general_writes: false,
             policy: None,
             account_header: "paydirt-tenant".into(),
+            presence: None,
             resolve: None,
         })
     }
@@ -457,7 +463,11 @@ impl Database {
             .map(|r| r(&ctx))
             .transpose()?
             .flatten();
-        if ctx.headers().get_all("authorization").iter().count()>1{return Err(ConnectError::unauthenticated("multiple authorization headers"))}
+        if ctx.headers().get_all("authorization").iter().count() > 1 {
+            return Err(ConnectError::unauthenticated(
+                "multiple authorization headers",
+            ));
+        }
         let header = ctx.headers().get("authorization");
 
         let token = resolved.as_deref().or_else(|| {
@@ -478,7 +488,13 @@ impl Database {
             ctx.extensions_mut().insert(providers::Verified(e));
         }
         let Some(principal) = principal else {
-            if public && !direct && ctx.header("authorization").is_none() {
+            if public
+                && !direct
+                && ctx.header("authorization").is_none()
+                && ["payday-presence", "payday-subject", "payday-recorded"]
+                    .iter()
+                    .all(|k| ctx.header(*k).is_none())
+            {
                 return Ok(ctx);
             }
             return Err(ConnectError::unauthenticated(
@@ -497,6 +513,7 @@ impl Database {
                 "method outside credential grant",
             ));
         }
+        let principal = self.represented(&mut ctx, principal, &action, direct)?;
         if direct && principal.frame.caller.is_some() {
             return Err(ConnectError::permission_denied(
                 "direct credential required",
