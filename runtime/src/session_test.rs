@@ -30,6 +30,7 @@ fn exercise(url: &str) {
     )
     .unwrap();
     let frame = Frame {
+        address: None,
         account: None,
         topics: Default::default(),
         tenant: tenant.to_vec(),

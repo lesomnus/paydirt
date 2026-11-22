@@ -84,6 +84,7 @@ fn exercise(url: &str, project: &Path) {
         db.handle(Packet::Begin {
             id: "op".into(),
             frame: Frame {
+                address: None,
                 tenant: t.to_vec(),
                 actor: Some(actor.clone()),
                 action: "/app.Example/Send".into(),

@@ -49,7 +49,10 @@ struct Meter {
     retry_ms: Option<u64>,
 }
 #[derive(Deserialize)]
+struct Operator {actor:String,tenant:String,address:String}
+#[derive(Deserialize)]
 struct Config {
+    operator:Option<Operator>,
     watch: Watch,
     authentication: Option<paydirt_server::authentication::Config>,
     #[serde(default)]
@@ -203,7 +206,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
             method: method.clone(),
             request: serde_json::from_str(argument)?,
         };
-        let result = store.operator(call)?;
+        let result=if let Some(op)=config.operator{
+            store.operator_as(call,paydirt::parse_id(&op.actor).ok_or("invalid operator ID")?,paydirt::parse_id(&op.tenant).ok_or("invalid operator tenant")?,op.address)?
+        }else{store.operator(call)?};
         if let (Some(event), Some(broker)) = (store.take_committed(), broker) {
             if let Err(e) = broker.publish(event).await {
                 eprintln!("watch publication failed: {e}");
@@ -330,7 +335,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         },
         Some(v) => return Err(format!("unknown worker lease {v}").into()),
     };
-    let routes = router(db, config.service_name.clone());
+    let routes = router(db.clone(), config.service_name.clone());
     let listener = paydirt_server::Host::bind(addr, config.serving, &config.service_name, routes)
         .await
         .map_err(|e| e as Box<dyn Error>)?;
@@ -347,7 +352,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
     workers
         .run(lease, stop, move |stop| async move {
-            listener.serve(stop).await.map_err(|e| e.to_string())
+            let served=listener.serve(stop).await.map_err(|e| e.to_string());
+            db.flush_access().await.map_err(|e|e.to_string())?;
+            served
         })
         .await
         .map_err(Into::into)

@@ -795,7 +795,7 @@ fn original_manifest_and_access_rows_use_the_app_declared_domains() {
         db.handle(Packet::Observe(Observation{
             frame:serde_json::from_value(json!({"actor":holder,"tenant":tenant,"action":"/app.HolderService/List"})).unwrap(),
             request:json!({}),input:"app.HolderListRequest".into(),output:"app.HolderListResponse".into(),
-            answer:Some(json!({"items":[{"id":STANDARD.encode(holder),"tenant":{"id":STANDARD.encode(tenant)}}]})),result:"ok".into(),reason:None,written:Default::default(),
+            answer:Some(json!({"items":[{"id":STANDARD.encode(holder),"alias":"person","tenant":{"id":STANDARD.encode(tenant)}}]})),result:"ok".into(),reason:None,written:Default::default(),
         })).unwrap();
         let sel = paydirt_store::trail_page::Selection {
             only: [106].into(),
@@ -1254,5 +1254,720 @@ fn transactional_subject_erasure_and_tenant_departure() {
         assert_eq!(real.blanked, [uuid(id(&shared.1["id"]))]);
         assert_eq!(inspect(&mut db, &shared.1)["value"], "");
         assert_eq!(inspect(&mut db, &theirs.1)["value"], theirs.1["value"]);
+    });
+}
+
+fn count_sql(url: &str, sql: &str) -> i64 {
+    use diesel::{QueryableByName, RunQueryDsl};
+    #[derive(QueryableByName)]
+    struct Count {
+        #[diesel(sql_type=diesel::sql_types::BigInt)]
+        n: i64,
+    }
+    #[cfg(feature = "postgres")]
+    if url.starts_with("postgres") {
+        return diesel::sql_query(sql)
+            .get_result::<Count>(&mut diesel::PgConnection::establish(url).unwrap())
+            .unwrap()
+            .n;
+    }
+    diesel::sql_query(sql)
+        .get_result::<Count>(&mut diesel::SqliteConnection::establish(url).unwrap())
+        .unwrap()
+        .n
+}
+fn table_rows(db: &mut Store, kind: &str) -> Vec<Value> {
+    db.call(
+        &Scope::Internal,
+        Call {
+            entity: kind.into(),
+            method: "List".into(),
+            request: json!({"size":200}),
+        },
+    )
+    .unwrap()["items"]
+        .as_array()
+        .unwrap()
+        .clone()
+}
+fn message_json(f: &Fixture, name: &str, encoded: &Value) -> Value {
+    if encoded.as_str().is_none_or(str::is_empty) {
+        return json!({});
+    }
+    let pool = buffa_reflect::DescriptorPool::decode(&*f.descriptors).unwrap();
+    let bytes = STANDARD.decode(encoded.as_str().unwrap()).unwrap();
+    serde_json::to_value(
+        buffa_reflect::DynamicMessage::decode(pool.get_message_by_name(name).unwrap(), &*bytes)
+            .unwrap(),
+    )
+    .unwrap()
+}
+fn access_store(f: &Fixture, url: &str) -> Store {
+    f.open(url, &f.policies, false)
+        .with_trail(
+            serde_json::from_value(
+                json!({"default":" VALUE ","access":true,"by":{"robot":"value"}}),
+            )
+            .unwrap(),
+            &f.descriptors,
+            &f.schema,
+        )
+        .unwrap()
+}
+
+#[test]
+fn personal_results_queue_tenant_groups_and_unpack_only_payday_envelopes() {
+    use paydirt_store::{access::Observation, archive_files::Archive};
+    backends(|f, url, raw| {
+        let mut db = access_store(f, url);
+        let a = provision(&mut db);
+        let b = paydirt::mint(1);
+        let actor = paydirt::mint(2);
+        let alice = paydirt::mint(2);
+        let bob = paydirt::mint(2);
+        let frame:Frame=serde_json::from_value(json!({"tenant":a,"actor":actor,"trace":vec![5;16],"action":"/app.HolderService/List","address":"127.0.0.1"})).unwrap();
+        let person = |id: [u8; 16], t: [u8; 16]| json!({"id":STANDARD.encode(id),"tenant":{"id":STANDARD.encode(t)},"alias":"alice"});
+        let make = |ty: &str, answer: Value| Observation {
+            frame: frame.clone(),
+            input: "app.HolderListRequest".into(),
+            output: ty.into(),
+            answer: Some(answer),
+            request: json!({"size":10,"undeclared":"omit this"}),
+            result: "ok".into(),
+            reason: None,
+            written: Default::default(),
+        };
+        let answer = json!({"items":[person(alice,a),person(alice,a),person(bob,b)]});
+        assert_eq!(
+            db.handle(Packet::BufferObservation(make(
+                "app.HolderListResponse",
+                answer
+            )))
+            .unwrap(),
+            2
+        );
+        assert!(table_rows(&mut db, "app.Access").is_empty());
+        raw(r#"ALTER TABLE "pd_app__Access" RENAME TO invisible_access"#);
+        assert!(db.flush_access().is_err());
+        raw(r#"ALTER TABLE invisible_access RENAME TO "pd_app__Access""#);
+        assert_eq!(db.flush_access().unwrap(), 2);
+        assert_eq!(db.flush_access().unwrap(), 0);
+        let rows = table_rows(&mut db, "app.Access");
+        assert_eq!(rows.len(), 2);
+        for row in &rows {
+            let expected = if id(&row["tenantId"]) == a {
+                alice
+            } else {
+                bob
+            };
+            assert_eq!(row["subjects"], json!([STANDARD.encode(expected)]));
+            assert_eq!(row["subjectCount"], 1);
+            assert_eq!(row["actorTenantId"], STANDARD.encode(a));
+            assert_eq!(row["actorId"], STANDARD.encode(actor));
+            assert_eq!(row["traceId"], STANDARD.encode([5; 16]));
+            assert_eq!(row["action"], frame.action);
+            assert_eq!(row["domain"], 6);
+            let detail = message_json(f, "payday.AccessDetail", &row["value"]);
+            assert_eq!(detail["address"], "127.0.0.1");
+            assert_eq!(
+                message_json(f, "app.HolderListRequest", &detail["request"]),
+                json!({"size":10})
+            );
+        }
+        let robot = paydirt::mint(7);
+        let mut machine = json!({"id":STANDARD.encode(robot),"tenant":{"id":STANDARD.encode(a)},"alias":"public"});
+        assert_eq!(
+            db.handle(Packet::BufferObservation(make(
+                "app.Robot",
+                machine.clone()
+            )))
+            .unwrap(),
+            0
+        );
+        machine["keeper"] = json!("someone");
+        assert_eq!(
+            db.handle(Packet::BufferObservation(make("app.Robot", machine)))
+                .unwrap(),
+            1
+        );
+        db.flush_access().unwrap();
+        let mut held = person(alice, a);
+        held["@type"] = json!("type.googleapis.com/app.Holder");
+        for field in ["value", "previous"] {
+            assert_eq!(
+                db.handle(Packet::BufferObservation(make(
+                    "payday.WatchEvent",
+                    json!({field:held})
+                )))
+                .unwrap(),
+                1
+            );
+            db.flush_access().unwrap();
+        }
+        for (ty, answer) in [
+            ("google.protobuf.Any", held.clone()),
+            (
+                "payday.WatchEvent",
+                json!({"value":{"@type":"type.googleapis.com/google.protobuf.Any","value":held}}),
+            ),
+            (
+                "payday.WatchEvent",
+                json!({"value":{"@type":"type.googleapis.com/payday.WatchEvent","previous":held}}),
+            ),
+        ] {
+            assert_eq!(
+                db.handle(Packet::BufferObservation(make(ty, answer)))
+                    .unwrap(),
+                0
+            );
+        }
+        let mut large = make("app.Holder", person(alice, a));
+        large.input = "app.HolderAddRequest".into();
+        large.request = json!({"alias":"x".repeat(10000)});
+        large.reason = Some("case 5".into());
+        db.handle(Packet::BufferObservation(large)).unwrap();
+        let rs = table_rows(&mut db, "app.Access");
+        let details = message_json(
+            f,
+            "payday.AccessDetail",
+            &rs.iter().find(|r| r["kind"] == "download").unwrap()["value"],
+        );
+        assert_eq!(details["reason"], "case 5");
+        assert!(details["request"].is_null());
+        let vault_dir = tempfile::tempdir().unwrap();
+        let vault = Archive::open(vault_dir.path(), &[9; 32]).unwrap();
+        let manage = |db: &mut Store, mut req: Value| {
+            req["tenant"] = json!(paydirt::format_id(&a).unwrap());
+            db.manage_trail(&vault, None, serde_json::from_value(req).unwrap())
+                .unwrap()
+        };
+        // A regular write supplies both an audit record and a personal Access record.
+        write(
+            &mut db,
+            &a,
+            "app.Robot",
+            "Add",
+            json!({"tenant":{"id":STANDARD.encode(a)},"alias":"row","keeper":"owner"}),
+        );
+        let audit = table_rows(&mut db, "app.Audit");
+        assert!(!audit.is_empty());
+        let owned = table_rows(&mut db, "app.Access")
+            .into_iter()
+            .filter(|r| id(&r["tenantId"]) == a)
+            .count();
+        manage(
+            &mut db,
+            json!({"action":"policy","policy":{"by":{"access":{"retain_ms":0}}}}),
+        );
+        assert_eq!(
+            manage(&mut db, json!({"action":"collect"})).archived.len(),
+            owned
+        );
+        assert_eq!(table_rows(&mut db, "app.Audit").len(), audit.len());
+        assert!(
+            table_rows(&mut db, "app.Access")
+                .iter()
+                .all(|r| id(&r["tenantId"]) == b)
+        );
+        assert_eq!(
+            db.read_tenant_trail(&vault, a)
+                .unwrap()
+                .iter()
+                .filter(|r| r.get("kind").is_some() && id(&r["tenantId"]) == a)
+                .count(),
+            owned
+        );
+    });
+}
+
+#[test]
+fn personal_writes_settle_once_with_the_commit_and_local_operator() {
+    use paydirt_store::access::Observation;
+    backends(|f, url, raw| {
+        let mut db = access_store(f, url);
+        let t = provision(&mut db);
+        let actor = paydirt::mint(2);
+        let other = paydirt::mint(2);
+        let frame:Frame=serde_json::from_value(json!({"tenant":t,"actor":actor,"action":"/custom.Writes/Rename","address":"127.0.0.1"})).unwrap();
+        let add = |alias: &str| Call {
+            entity: "app.Holder".into(),
+            method: "Add".into(),
+            request: json!({"tenant":{"id":STANDARD.encode(t)},"alias":alias}),
+        };
+        let start = |db: &mut Store| {
+            db.handle(Packet::Begin {
+                id: "call".into(),
+                frame: frame.clone(),
+            })
+            .unwrap();
+        };
+        let call = |db: &mut Store, call| {
+            db.handle(Packet::Call {
+                id: "call".into(),
+                call,
+            })
+            .unwrap()
+        };
+        let finish = |db: &mut Store, commit| {
+            db.handle(Packet::Finish {
+                id: "call".into(),
+                commit,
+            })
+        };
+        start(&mut db);
+        call(&mut db, add("undone"));
+        finish(&mut db, false).unwrap();
+        assert!(table_rows(&mut db, "app.Access").is_empty());
+        start(&mut db);
+        let alice = call(&mut db, add("alice"));
+        call(
+            &mut db,
+            Call {
+                entity: "app.Holder".into(),
+                method: "Patch".into(),
+                request: json!({"ref":{"id":alice["id"]},"dateUpdatedForce":true,"name":"Alice"}),
+            },
+        );
+        assert_eq!(
+            count_sql(url, r#"SELECT count(*) AS n FROM "pd_app__Access""#),
+            0
+        );
+        let receipt = finish(&mut db, true).unwrap();
+        assert_eq!(receipt["writtenSubjects"], json!([alice["id"]]));
+        let rs = table_rows(&mut db, "app.Access");
+        assert_eq!(rs.len(), 1);
+        assert_eq!(rs[0]["kind"], "write");
+        assert_eq!(rs[0]["subjects"], json!([alice["id"]]));
+        let detail = message_json(f, "payday.AccessDetail", &rs[0]["value"]);
+        assert_eq!(detail["address"], "127.0.0.1");
+        assert!(detail["request"].is_null());
+        let showed = json!({"items":[alice,{"id":STANDARD.encode(other),"alias":"other","tenant":{"id":STANDARD.encode(t)}}]});
+        db.handle(Packet::Observe(Observation {
+            frame: frame.clone(),
+            request: json!({"size":7}),
+            input: "app.HolderListRequest".into(),
+            output: "app.HolderListResponse".into(),
+            answer: Some(showed),
+            result: "ok".into(),
+            reason: None,
+            written: [alice["id"].as_str().unwrap().to_owned()].into(),
+        }))
+        .unwrap();
+        let rs = table_rows(&mut db, "app.Access");
+        let read = rs.iter().find(|r| r["kind"] == "read").unwrap();
+        assert_eq!(read["subjects"], json!([STANDARD.encode(other)]));
+        assert!(message_json(f, "payday.AccessDetail", &read["value"])["request"].is_null());
+        let lookup = || Call {
+            entity: "app.Holder".into(),
+            method: "Get".into(),
+            request: json!({"ref":{"id":alice["id"]}}),
+        };
+        let operator = paydirt::mint(2);
+        let ops_tenant = paydirt::mint(1);
+        let addr = "shell:person@the-box";
+        assert_eq!(
+            db.operator_as(lookup(), operator, ops_tenant, addr.into())
+                .unwrap()["id"],
+            alice["id"]
+        );
+        let bob = db
+            .operator_as(add("bob"), operator, ops_tenant, addr.into())
+            .unwrap();
+        let named: Vec<_> = table_rows(&mut db, "app.Access")
+            .into_iter()
+            .filter(|r| r["actorId"] == STANDARD.encode(operator))
+            .collect();
+        assert_eq!(named.len(), 2);
+        for r in named {
+            assert_eq!(r["actorTenantId"], STANDARD.encode(ops_tenant));
+            assert_eq!(r["tenantId"], STANDARD.encode(t));
+            assert_eq!(
+                message_json(f, "payday.AccessDetail", &r["value"])["address"],
+                addr
+            );
+            let who = if r["kind"] == "write" { &bob } else { &alice };
+            assert_eq!(r["subjects"], json!([who["id"]]));
+        }
+        start(&mut db);
+        call(
+            &mut db,
+            Call {
+                entity: "app.Holder".into(),
+                method: "Patch".into(),
+                request: json!({"ref":{"id":alice["id"]},"dateUpdatedForce":true,"name":"rolled-back"}),
+            },
+        );
+        let settlement = db
+            .handle(Packet::Settle {
+                id: "call".into(),
+                commit: false,
+            })
+            .unwrap();
+        let fail = Observation {
+            frame: frame.clone(),
+            request: json!({"ref":{"id":alice["id"]}}),
+            input: "app.HolderPatchRequest".into(),
+            output: "app.Holder".into(),
+            answer: None,
+            result: "aborted".into(),
+            reason: None,
+            written: Default::default(),
+        };
+        db.handle(Packet::RefusedWrites {
+            observation: fail,
+            subjects: serde_json::from_value(settlement["refused"].clone()).unwrap(),
+            buffered: false,
+        })
+        .unwrap();
+        let aborted: Vec<_> = table_rows(&mut db, "app.Access")
+            .into_iter()
+            .filter(|r| r["result"] == "aborted")
+            .collect();
+        assert_eq!(aborted.len(), 1);
+        assert_eq!(aborted[0]["kind"], "write");
+        assert_eq!(aborted[0]["subjects"], json!([alice["id"]]));
+        assert_eq!(
+            db.call(&Scope::Internal, lookup()).unwrap()["name"],
+            "Alice"
+        );
+        write(&mut db, &t, "app.Holder", "Erase", json!({"id":bob["id"]}));
+        assert!(
+            table_rows(&mut db, "app.Access")
+                .iter()
+                .any(|r| r["action"] == "/app.HolderService/Erase"
+                    && r["subjects"] == json!([bob["id"]]))
+        );
+        raw(r#"ALTER TABLE "pd_app__Access" RENAME TO unavailable_access"#);
+        assert_eq!(
+            db.operator_as(lookup(), operator, ops_tenant, addr.into())
+                .unwrap_err()
+                .code,
+            "unavailable"
+        );
+        start(&mut db);
+        call(&mut db, add("must-rollback"));
+        assert!(finish(&mut db, true).is_err());
+        raw(r#"ALTER TABLE unavailable_access RENAME TO "pd_app__Access""#);
+        assert!(
+            table_rows(&mut db, "app.Holder")
+                .iter()
+                .all(|r| r["alias"] != "must-rollback")
+        );
+    });
+}
+
+#[test]
+fn declared_content_and_secrets_are_preserved_for_their_intended_readers() {
+    use paydirt_store::audit_content::Options;
+    backends(|f, url, _| {
+        for invalid in [
+            json!({"default":"values"}),
+            json!({"by":{"robot":"values"}}),
+        ] {
+            assert!(serde_json::from_value::<Options>(invalid).is_err());
+        }
+        let bad = serde_json::from_value::<Options>(json!({"by":{"robot":"values"}}))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(bad.contains("by.robot") && bad.contains("values"));
+        let invalid = f.open(url, &f.policies, false).with_trail(
+            serde_json::from_value(json!({"by":{"spaceship":"value"}})).unwrap(),
+            &f.descriptors,
+            &f.schema,
+        );
+        assert!(invalid.err().unwrap().message.contains("spaceship"));
+        let printed = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let copy = printed.clone();
+        let mut db = access_store(f, url)
+            .with_write_observer(move |change| {
+                if change.entity == "app.Robot" {
+                    copy.lock().unwrap().push(change.value.cloned());
+                }
+                Ok(())
+            })
+            .unwrap();
+        let t = provision(&mut db);
+        let get_audit = |db: &mut Store, who: &Value, act: &str| {
+            table_rows(db, "app.Audit")
+                .into_iter()
+                .find(|r| r["objectId"] == *who && r["action"].as_str().unwrap().ends_with(act))
+                .unwrap()
+        };
+        let add = |db: &mut Store, kind: &str, req: Value| write(db, &t, kind, "Add", req);
+        let holder = add(
+            &mut db,
+            "app.Holder",
+            json!({"tenant":{"id":STANDARD.encode(t)},"alias":"admin"}),
+        );
+        write(
+            &mut db,
+            &t,
+            "app.Holder",
+            "Patch",
+            json!({"ref":{"id":holder["id"]},"dateUpdatedForce":true,"name":"Kim Somebody"}),
+        );
+        let patch = get_audit(&mut db, &holder["id"], "/Patch");
+        assert_eq!(patch["fields"], json!([5]));
+        for part in ["value", "patch"] {
+            let bytes = STANDARD.decode(patch[part].as_str().unwrap()).unwrap();
+            assert!(!String::from_utf8_lossy(&bytes).contains("Kim Somebody"));
+        }
+        let first = get_audit(&mut db, &holder["id"], "/Add");
+        assert!(
+            !String::from_utf8_lossy(&STANDARD.decode(first["patch"].as_str().unwrap()).unwrap())
+                .contains("admin")
+        );
+        for name in ["alias", "desc", "labels", "name"] {
+            assert_eq!(f.policies["app.Tenant"]["fields"][name]["personal"], false);
+        }
+        write(
+            &mut db,
+            &t,
+            "app.Tenant",
+            "Patch",
+            json!({"ref":{"id":STANDARD.encode(t)},"dateUpdatedForce":true,"name":"Acme Labs"}),
+        );
+        let patch = get_audit(&mut db, &json!(STANDARD.encode(t)), "/Patch");
+        assert_eq!(patch["fields"], json!([5]));
+        for part in ["value", "patch"] {
+            assert!(
+                String::from_utf8_lossy(&STANDARD.decode(patch[part].as_str().unwrap()).unwrap())
+                    .contains("Acme Labs")
+            );
+        }
+        let secret = STANDARD.encode(b"secret-that-must-survive-the-insert");
+        let robot = add(
+            &mut db,
+            "app.Robot",
+            json!({"tenant":{"id":STANDARD.encode(t)},"alias":"arm-01","secret":secret}),
+        );
+        assert!(robot.get("secret").is_none());
+        assert_eq!(
+            printed.lock().unwrap()[0].as_ref().unwrap()["secret"],
+            secret
+        );
+        let assign = |field: Value, value: Value| json!({"targets":{"selectors":[{"key":{"field":field}}]},"assign":{"value":value}});
+        write(
+            &mut db,
+            &t,
+            "app.Robot",
+            "Apply",
+            json!({"ref":{"id":robot["id"]},"patch":{"messageType":"app.Robot","delta":{"entries":[assign(json!({"name":"keeper"}),json!({"s":"personal-keeper"})),assign(json!({"jsonName":"secret"}),json!({"x":secret})),assign(json!({"name":"alias"}),json!({"s":"arm-02"}))]}}}),
+        );
+        let patch = get_audit(&mut db, &robot["id"], "/Apply");
+        assert_eq!(patch["fields"], json!([4, 8, 32]));
+        for part in ["value", "patch"] {
+            let bytes = STANDARD.decode(patch[part].as_str().unwrap()).unwrap();
+            let s = String::from_utf8_lossy(&bytes);
+            assert!(s.contains("arm-02"));
+            assert!(!s.contains("personal-keeper"));
+            assert!(!s.contains("secret-that-must-survive"));
+        }
+        let snapshot = message_json(f, "app.Robot", &patch["value"]);
+        assert_eq!(snapshot["alias"], "arm-02");
+        let seal = add(
+            &mut db,
+            "app.Seal",
+            json!({"alias":"seal-01","secret":secret,"code":"884-113"}),
+        );
+        assert!(seal.get("secret").is_none() && seal.get("code").is_none());
+        let public = write(
+            &mut db,
+            &t,
+            "app.Seal",
+            "Get",
+            json!({"ref":{"id":seal["id"]},"select":{"all":true,"code":true,"secret":true}}),
+        );
+        assert!(public.get("secret").is_none() && public.get("code").is_none());
+        assert_eq!(public["alias"], "seal-01");
+        let literal = if url.starts_with("postgres") {
+            format!(
+                "decode('{}','hex')",
+                hex::encode(b"secret-that-must-survive-the-insert")
+            )
+        } else {
+            format!("X'{}'", hex::encode(b"secret-that-must-survive-the-insert"))
+        };
+        let robot_secret =
+            format!(r#"SELECT count(*) AS n FROM "pd_app__Robot" WHERE f8={literal}"#);
+        assert_eq!(count_sql(url, &robot_secret), 1);
+        assert_eq!(
+            count_sql(
+                url,
+                &format!(
+                    r#"SELECT count(*) AS n FROM "pd_app__Seal" WHERE f8={literal} AND f9='884-113'"#
+                )
+            ),
+            1
+        );
+    });
+}
+
+#[test]
+fn represented_and_direct_frames_preserve_sql_null_and_guard_reentry() {
+    backends(|f, url, _| {
+        let mut db = access_store(f, url);
+        let t = provision(&mut db);
+        let actor = paydirt::mint(2);
+        let caller = paydirt::mint(2);
+        for represented in [true, false] {
+            let mut frame: Frame = serde_json::from_value(
+                json!({"actor":actor,"tenant":t,"action":"/app.RobotService/Add"}),
+            )
+            .unwrap();
+            if represented {
+                frame.caller = Some(caller.to_vec());
+                frame.caller_tenant = Some(t.to_vec());
+                frame.presence = Some("session-a".into());
+            }
+            db.handle(Packet::Begin {
+                id: "r".into(),
+                frame: frame.clone(),
+            })
+            .unwrap();
+            let row=db.handle(Packet::Call{id:"r".into(),call:Call{entity:"app.Robot".into(),method:"Add".into(),request:json!({"tenant":{"id":STANDARD.encode(t)},"alias":if represented{"represented"}else{"direct"}})}}).unwrap();
+            db.handle(Packet::Finish {
+                id: "r".into(),
+                commit: true,
+            })
+            .unwrap();
+            let items: Vec<_> = table_rows(&mut db, "app.Audit")
+                .into_iter()
+                .filter(|v| v["objectId"] == row["id"])
+                .collect();
+            assert_eq!(items.len(), 1);
+            let r = &items[0];
+            assert_eq!(r["actorId"], STANDARD.encode(actor));
+            if represented {
+                assert_eq!(r["callerId"], STANDARD.encode(caller));
+                assert_eq!(r["callerTenantId"], STANDARD.encode(t));
+                assert_eq!(r["presence"], "session-a");
+            } else {
+                for k in ["callerId", "callerTenantId", "presence"] {
+                    assert!(r[k].is_null());
+                }
+                let model: paydirt_model::Model = serde_json::from_str(&f.model).unwrap();
+                let entity = model.entity("app.Audit").unwrap();
+                let nulls = ["caller_id", "caller_tenant_id", "presence"]
+                    .map(|name| format!("{} IS NULL", entity.field(name).unwrap().column()))
+                    .join(" AND ");
+                let tag = hex::encode(id(&r["id"]));
+                let value = if url.starts_with("postgres") {
+                    format!("decode('{tag}','hex')")
+                } else {
+                    format!("X'{tag}'")
+                };
+                assert_eq!(
+                    count_sql(
+                        url,
+                        &format!(
+                            r#"SELECT count(*) AS n FROM "pd_app__Audit" WHERE f1={value} AND {nulls}"#
+                        )
+                    ),
+                    1
+                );
+            }
+            frame.action = "/outer.Service/Permitted".into();
+            db.handle(Packet::Begin {
+                id: "inside".into(),
+                frame,
+            })
+            .unwrap();
+            let err = db
+                .handle(Packet::Call {
+                    id: "inside".into(),
+                    call: Call {
+                        entity: "app.Robot".into(),
+                        method: "Move".into(),
+                        request: json!({}),
+                    },
+                })
+                .unwrap_err();
+            assert_eq!(err.code == "permission_denied", represented);
+            db.handle(Packet::Finish {
+                id: "inside".into(),
+                commit: false,
+            })
+            .unwrap();
+        }
+    });
+}
+
+#[test]
+fn audit_snapshots_use_the_rows_returned_by_insert_and_update() {
+    use diesel::connection::{Instrumentation, InstrumentationEvent};
+    thread_local! {static STATEMENTS:std::cell::RefCell<Option<Vec<String>>>=const { std::cell::RefCell::new(None) };}
+    fn log() -> Option<Box<dyn Instrumentation>> {
+        Some(Box::new(|event: InstrumentationEvent<'_>| {
+            if let InstrumentationEvent::StartQuery { query, .. } = event {
+                STATEMENTS.with_borrow_mut(|slot| {
+                    if let Some(lines) = slot {
+                        lines.push(query.to_string());
+                    }
+                });
+            }
+        }))
+    }
+    diesel::connection::set_default_instrumentation(log).unwrap();
+    backends(|f, url, _| {
+        let mut db = access_store(f, url);
+        let t = provision(&mut db);
+        let robot = write(
+            &mut db,
+            &t,
+            "app.Robot",
+            "Add",
+            json!({"tenant":{"id":STANDARD.encode(t)},"alias":"robot"}),
+        );
+        STATEMENTS.with_borrow_mut(|v| *v = Some(vec![]));
+        let reading = write(
+            &mut db,
+            &t,
+            "app.Reading",
+            "Add",
+            json!({"robot":{"id":robot["id"]},"celsius":14.5}),
+        );
+        let sql = STATEMENTS.with_borrow_mut(|v| v.take().unwrap());
+        let selects = |lines: &[String], table: &str| {
+            lines
+                .iter()
+                .filter(|q| {
+                    q.starts_with("SELECT ")
+                        && q.contains(&format!("FROM \"pd_app__{table}\" AS r"))
+                })
+                .count()
+        };
+        assert_eq!(selects(&sql, "Reading"), 0);
+        assert!(
+            sql.iter()
+                .any(|q| q.starts_with("INSERT INTO \"pd_app__Reading\"")
+                    && q.contains(" RETURNING "))
+        );
+        let line = table_rows(&mut db, "app.Audit")
+            .into_iter()
+            .find(|r| r["objectId"] == reading["id"])
+            .unwrap();
+        let image = message_json(f, "app.Reading", &line["value"]);
+        assert_eq!(image["id"], reading["id"]);
+        assert_eq!(image["celsius"], reading["celsius"]);
+        assert_eq!(image["robot"], reading["robot"]);
+        STATEMENTS.with_borrow_mut(|v| *v = Some(vec![]));
+        let changed = write(
+            &mut db,
+            &t,
+            "app.Robot",
+            "Patch",
+            json!({"ref":{"id":robot["id"]},"dateUpdatedForce":true,"alias":"changed"}),
+        );
+        let sql = STATEMENTS.with_borrow_mut(|v| v.take().unwrap());
+        assert_eq!(selects(&sql, "Robot"), 1);
+        let line = table_rows(&mut db, "app.Audit")
+            .into_iter()
+            .find(|r| r["objectId"] == robot["id"] && r["action"] == "/app.RobotService/Patch")
+            .unwrap();
+        let image = message_json(f, "app.Robot", &line["value"]);
+        assert_eq!(image["alias"], changed["alias"]);
+        assert_eq!(image["id"], changed["id"]);
     });
 }

@@ -204,6 +204,7 @@ impl Default for Inputs {
     }
 }
 pub struct Store {
+    pending_reads: Vec<Value>,
     trail: Option<audit_content::Recorder>,
     resources: Option<resource::Recorder>,
     topic_policy: Option<Box<dyn notify::Policy>>,
@@ -241,6 +242,7 @@ impl Store {
             committed: None,
             db,
             session: None,
+            pending_reads: vec![],
             model,
             policies,
         })
@@ -345,15 +347,25 @@ impl Store {
         scope: &Scope,
         f: impl FnOnce(&mut Transaction<'_>) -> Result<T>,
     ) -> Result<T> {
+        self.transaction_as(scope, None, f)
+    }
+    fn transaction_as<T>(
+        &mut self,
+        scope: &Scope,
+        frame: Option<&Frame>,
+        f: impl FnOnce(&mut Transaction<'_>) -> Result<T>,
+    ) -> Result<T> {
         if self.session.is_some() {
             return Err(Fault::aborted("another request owns this connection"));
         }
         let (model, policies) = (&self.model, &self.policies);
         let mut changes = Vec::new();
         self.committed = None;
+        let mut written = access::Subjects::new();
         let result = self.db.transaction(|db| {
             let mut seen = seen::Seen::default();
             let mut tx = Transaction {
+                pending_access: frame.map(|_| &mut written),
                 admission: self.admission.as_ref(),
                 origin: None,
                 seen: Some(&mut seen),
@@ -368,14 +380,24 @@ impl Store {
                 model,
                 policies,
                 scope,
-                frame: None,
+                frame,
                 failed: None,
             };
             let result = f(&mut tx);
-            match tx.failed {
-                Some(err) => Err(err),
-                None => result,
+            if let Some(err) = tx.failed {
+                return Err(err);
             }
+            let result = result?;
+            if let Some(frame) = frame {
+                let groups = tx
+                    .pending_access
+                    .take()
+                    .map(std::mem::take)
+                    .unwrap_or_default();
+                tx.frame = None;
+                tx.flush_written(frame, groups)?;
+            }
+            Ok(result)
         })?;
         if !changes.is_empty() {
             self.committed = Some(paydirt::watch::Event {
@@ -387,6 +409,7 @@ impl Store {
     }
 }
 pub struct Transaction<'a> {
+    pending_access: Option<&'a mut access::Subjects>,
     trail: Option<&'a audit_content::Recorder>,
     resources: Option<&'a resource::Recorder>,
     topic_policy: Option<&'a dyn notify::Policy>,
@@ -406,6 +429,16 @@ pub struct Transaction<'a> {
 }
 impl Transaction<'_> {
     pub fn call(&mut self, call: Call) -> Result<Value> {
+        if self.frame.is_some_and(|frame| frame.caller.is_some())
+            && self
+                .policies
+                .get(&call.entity)
+                .and_then(|p| p.methods.get(&call.method))
+                .is_some_and(|m| m["policy"].get("direct").is_some())
+        {
+            self.failed = Some(Fault::denied("direct credential required"));
+            return Err(Fault::denied("direct credential required"));
+        }
         if matches!(self.scope, Scope::Account { .. })
             && !matches!(call.method.as_str(), "Get" | "List")
         {

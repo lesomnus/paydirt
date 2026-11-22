@@ -53,6 +53,7 @@ async fn publication_is_confirmed_before_deletion() {
     let idtx = "request";
     let add = |store: &mut Store, commit: bool, alias: &str| {
         let frame = Frame {
+            address: None,
             tenant: tenant.to_vec(),
             actor: Some(paydirt::mint(2).to_vec()),
             account: None,

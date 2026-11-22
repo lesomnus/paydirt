@@ -18,10 +18,13 @@ impl Transaction<'_> {
             .map_err(Fault::invalid)
     }
     pub(crate) fn project_sql(&self, e: &Entity) -> Result<String> {
+        self.project_at(e, "r")
+    }
+    fn project_at(&self, e: &Entity, alias: &str) -> Result<String> {
         let d = self.db.dialect();
         let mut cols = Vec::new();
         for f in e.fields.iter().filter(|f| f.is_column()) {
-            let c = format!("r.{}", quote(&f.column()));
+            let c = format!("{alias}.{}", quote(&f.column()));
             cols.push(
                 if self.model.scalar(f).map_err(Fault::invalid)? == Scalar::Binary {
                     if d == Dialect::Postgres {
@@ -78,9 +81,12 @@ impl Transaction<'_> {
         ))
     }
     pub(crate) fn wall(&self, e: &Entity, q: &mut Query) -> Result<Vec<String>> {
+        self.wall_at(e, q, "r")
+    }
+    fn wall_at(&self, e: &Entity, q: &mut Query, alias: &str) -> Result<Vec<String>> {
         let mut parts = Vec::new();
         if let Some(f) = e.erased() {
-            parts.push(format!("r.{} IS NULL", quote(&f.column())))
+            parts.push(format!("{alias}.{} IS NULL", quote(&f.column())))
         }
         if let Scope::Account { id, reads } = self.scope {
             parts.extend(reads.clauses(e, id, q, self.db.dialect())?);
@@ -108,7 +114,11 @@ impl Transaction<'_> {
                 if ids.is_empty() {
                     parts.push("1=0".into());
                 } else {
-                    parts.push(format!("r.{} IN ({})", quote(&f.column()), ids.join(",")));
+                    parts.push(format!(
+                        "{alias}.{} IN ({})",
+                        quote(&f.column()),
+                        ids.join(",")
+                    ));
                 }
             }
         }
@@ -151,7 +161,7 @@ impl Transaction<'_> {
             return Ok(parts);
         }
         for path in paths {
-            let name = self.path(e, path, "r", 0)?;
+            let name = self.path(e, path, alias, 0)?;
             let vs: Vec<_> = ids
                 .iter()
                 .map(|id| q.param(Bind::Bytes(id.clone()), self.db.dialect()))
@@ -326,7 +336,6 @@ impl Transaction<'_> {
         let mut q = Query::new("");
         let mut cols = Vec::new();
         let mut params = Vec::new();
-        let key = e.key().map_err(Fault::invalid)?;
         let mut id = Value::Null;
         for f in e.fields.iter().filter(|f| f.is_column()) {
             let supplied = req.get(&f.json).filter(|v| !v.is_null());
@@ -366,18 +375,30 @@ impl Transaction<'_> {
             cols.push(quote(&f.column()));
             params.push(q.param(b, self.db.dialect()));
         }
+        let table = quote(&e.table());
+        let projection = self.project_at(e, &table)?;
+        let predicates = self.wall_at(e, &mut q, &table)?;
+        let visible = if predicates.is_empty() {
+            projection
+        } else {
+            format!(
+                "CASE WHEN {} THEN {projection} ELSE 'null' END",
+                predicates.join(" AND ")
+            )
+        };
         q.sql = format!(
-            "INSERT INTO {} ({}) VALUES ({}){conflict}",
-            quote(&e.table()),
+            "INSERT INTO {table} ({}) VALUES ({}){conflict} RETURNING {visible} AS value",
             cols.join(","),
             params.join(",")
         );
-        if self.db.exec(q)? == 0 {
+        let Some(raw) = self.db.rows(q)?.into_iter().next() else {
             return Ok(None);
+        };
+        if raw == "null" {
+            return Err(Fault::missing());
         }
+        let row = self.decode_row(e, &raw)?;
         self.write_edges(e, &id, req, true)?;
-        // The postimage must belong to the caller as well. Failure rolls back the insert.
-        let row = self.lookup(e, &json!({&key.json:id}), false)?;
         self.record(e, "Add", req, None, Some(&row))?;
         self.image(e, row, &Value::Null).map(Some)
     }
@@ -436,29 +457,45 @@ impl Transaction<'_> {
             }
         }
         let key = e.key().map_err(Fault::invalid)?;
-        let reference = json!({&key.json:&row[&key.json]});
+        let table = quote(&e.table());
+        let mut updated = row.clone();
         if !sets.is_empty() {
-            let mut conditions = self.wall(e, &mut q)?;
+            let mut conditions = self.wall_at(e, &mut q, &table)?;
             conditions.push(format!(
-                "r.{}={}",
+                "{table}.{}={}",
                 quote(&key.column()),
                 q.param(value::bind(key, &row[&key.json])?, self.db.dialect())
             ));
+            let projection = self.project_at(e, &table)?;
+            let predicates = self.wall_at(e, &mut q, &table)?;
+            let visible = if predicates.is_empty() {
+                projection
+            } else {
+                format!(
+                    "CASE WHEN {} THEN {projection} ELSE 'null' END",
+                    predicates.join(" AND ")
+                )
+            };
             q.sql = format!(
-                "UPDATE {} AS r SET {} WHERE {}",
-                quote(&e.table()),
+                "UPDATE {table} SET {} WHERE {} RETURNING {visible} AS value",
                 sets.join(","),
                 conditions.join(" AND ")
             );
-            if self.db.exec(q)? != 1 {
+            let raw = self
+                .db
+                .rows(q)?
+                .into_iter()
+                .next()
+                .ok_or_else(Fault::missing)?;
+            if raw == "null" {
                 return Err(Fault::missing());
             }
+            updated = self.decode_row(e, &raw)?;
         }
         if !sets.is_empty() {
             self.forget_references();
         }
         let edges_changed = self.write_edges(e, &row[&key.json], req, false)?;
-        let updated = self.lookup(e, &reference, false)?;
         if !sets.is_empty() || edges_changed {
             self.record(e, method, &req, Some(&row), Some(&updated))?;
         }
