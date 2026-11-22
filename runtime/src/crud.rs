@@ -276,6 +276,7 @@ impl Transaction<'_> {
     pub(crate) fn insert(&mut self, e: &Entity, req: &Value) -> Result<Value> {
         let mut q = Query::new("");
         let req = self.admit(e, req)?;
+        let req = self.alias(e, req)?;
         let mut cols = Vec::new();
         let mut params = Vec::new();
         let key = e.key().map_err(Fault::invalid)?;
@@ -330,7 +331,25 @@ impl Transaction<'_> {
         self.record(e, "Add", None, Some(&row))?;
         self.image(e, row, &Value::Null)
     }
+    fn alias(&self, e: &Entity, mut req: Value) -> Result<Value> {
+        if self.frame.is_some()
+            && e.field("alias").is_ok()
+            && let Some(v) = req["alias"].as_str().filter(|v| !v.is_empty())
+        {
+            let folded = v.trim().to_ascii_lowercase();
+            if !paydirt::rbac::alias(&folded) {
+                return Err(Fault::field(
+                    "alias",
+                    "alias must begin with a letter and contain lowercase words separated by single hyphens",
+                ));
+            }
+            req["alias"] = json!(folded);
+        }
+        Ok(req)
+    }
     pub(crate) fn patch(&mut self, e: &Entity, req: &Value, method: &str) -> Result<Value> {
+        let req = self.alias(e, req.clone())?;
+        let req = &req;
         let row = self.lookup(e, &req["ref"], true)?;
         let mut q = Query::new("");
         let mut sets = Vec::new();

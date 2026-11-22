@@ -2,7 +2,7 @@ import init, { AppDatabase } from "./pkg/storage.js";
 
 self.onmessage = async ({ data, ports: [service] }) => {
   try {
-    await init();
+    await init({module_or_path:data.module});
     const db = await AppDatabase.open(JSON.stringify(data.tenants), JSON.stringify(data.seeds ?? []));
     service.onmessage = ({ data: { payload }, ports: [reply] }) => {
       try {

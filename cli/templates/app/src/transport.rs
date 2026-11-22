@@ -158,7 +158,26 @@ fn tokens(config: &str) -> Result<HashMap<String, Principal>, String> {
         .collect()
 }
 
-fn error(f: Fault) -> ConnectError {
+pub fn error(f: Fault) -> ConnectError {
+    if let Some(field) = &f.field {
+        // google.rpc.BadRequest.field_violations with FieldViolation.field and description.
+        fn entry(tag: u8, data: &[u8], out: &mut Vec<u8>) {
+            out.push(tag);
+            buffa::encoding::encode_varint(data.len() as u64, out);
+            out.extend_from_slice(data);
+        }
+        let mut violation = Vec::new();
+        entry(10, field.as_bytes(), &mut violation);
+        entry(18, f.message.as_bytes(), &mut violation);
+        let mut bytes = Vec::new();
+        entry(10, &violation, &mut bytes);
+        use base64::Engine;
+        return ConnectError::invalid_argument(f.message).with_detail(connectrpc::ErrorDetail {
+            type_url: "google.rpc.BadRequest".into(),
+            value: Some(base64::engine::general_purpose::STANDARD_NO_PAD.encode(bytes)),
+            debug: None,
+        });
+    }
     match f.code.as_str() {
         "invalid_argument" => ConnectError::invalid_argument(f.message),
         "already_exists" => ConnectError::already_exists(f.message),
@@ -179,6 +198,7 @@ pub struct Database {
     general_writes: bool,
     policy: Option<paydirt::rbac::Policy>,
     account_header: String,
+    resolve: Option<Arc<Resolver>>,
     #[cfg(not(target_arch = "wasm32"))]
     queue: std::sync::mpsc::Sender<(
         Packet,
@@ -186,11 +206,14 @@ pub struct Database {
     )>,
 }
 
+type Resolver = dyn Fn(&RequestContext) -> Result<Option<String>, ConnectError> + Send + Sync;
 type Reply = Pin<Box<dyn Future<Output = Result<Value, ConnectError>> + Send>>;
 #[derive(Clone)]
 struct Session(String);
 #[derive(Clone)]
 struct PolicyRevision(u64);
+#[derive(Clone)]
+struct ResolvedKey(String);
 
 impl Database {
     #[cfg(not(target_arch = "wasm32"))]
@@ -217,6 +240,7 @@ impl Database {
             general_writes: false,
             policy: None,
             account_header: "paydirt-tenant".into(),
+            resolve: None,
         })
     }
     #[cfg(target_arch = "wasm32")]
@@ -227,7 +251,19 @@ impl Database {
             general_writes: false,
             policy: None,
             account_header: "paydirt-tenant".into(),
+            resolve: None,
         })
+    }
+    /// Resolve an application credential to a host-registered principal.
+    pub fn with_resolver(
+        mut self,
+        resolve: impl Fn(&RequestContext) -> Result<Option<String>, ConnectError>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
+        self.resolve = Some(Arc::new(resolve));
+        self
     }
     pub fn allow_general_writes(mut self, allow: bool) -> Self {
         self.general_writes = allow;
@@ -260,22 +296,47 @@ impl Database {
         account_method: bool,
     ) -> Result<RequestContext, ConnectError> {
         let action = format!("/{entity}Service/{method}");
+        #[cfg(target_arch = "wasm32")]
+        {
+            use wasm_bindgen::prelude::*;
+            #[wasm_bindgen]
+            extern "C" {
+                #[wasm_bindgen(js_namespace=console,js_name=debug)]
+                fn debug(format: &str, service: &str, method: &str);
+            }
+            debug(
+                &format!("%c{entity}Service/%c{method}"),
+                "color:#5985a8",
+                "color:#688155",
+            );
+        }
         if !self.general_writes && matches!(method, "Patch" | "Apply") {
             return Err(ConnectError::unimplemented(format!("{action} is closed")));
         }
-        let Some(header) = ctx.headers().get("authorization") else {
-            if public && !direct {
-                return Ok(ctx);
-            }
-            return Err(ConnectError::unauthenticated("bearer token required"));
-        };
-        let principal = header
-            .to_str()
-            .ok()
-            .and_then(|s| s.split_once(' '))
-            .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("Bearer"))
-            .and_then(|(_, token)| self.principals.get(token))
-            .ok_or_else(|| ConnectError::unauthenticated("unknown bearer token"))?;
+        let resolved = self
+            .resolve
+            .as_ref()
+            .map(|r| r(&ctx))
+            .transpose()?
+            .flatten();
+        let header = ctx.headers().get("authorization");
+        if resolved.is_none() && header.is_none() && public && !direct {
+            return Ok(ctx);
+        }
+        let token = resolved.as_deref().or_else(|| {
+            header?
+                .to_str()
+                .ok()?
+                .split_once(' ')
+                .filter(|(s, _)| s.eq_ignore_ascii_case("Bearer"))
+                .map(|(_, v)| v)
+        });
+        let principal = token
+            .and_then(|t| self.principals.get(t))
+            .ok_or_else(|| ConnectError::unauthenticated("recognized credential required"))?;
+        if let Some(key) = resolved {
+            ctx.extensions_mut().insert(ResolvedKey(key));
+        }
         if principal.methods.as_ref().is_some_and(|allowed| {
             !allowed
                 .iter()
@@ -465,6 +526,14 @@ impl Database {
         op: &str,
         request: &Value,
     ) -> Result<Value, ConnectError> {
+        if let (Some(resolve), Some(original)) =
+            (&self.resolve, ctx.extensions().get::<ResolvedKey>())
+            && resolve(ctx)?.as_deref() != Some(&original.0)
+        {
+            return Err(ConnectError::unauthenticated(
+                "credential changed; reconnect",
+            ));
+        }
         if let (Some(policy), Some(revision)) =
             (&self.policy, ctx.extensions().get::<PolicyRevision>())
         {

@@ -7,7 +7,7 @@ export async function exerciseTenancy(services,transport,primary,other,allowedSe
   const opts=token=>({headers:{authorization:"Bearer "+token}});
   const own=opts(primary.token), foreign=opts(other.token), operator=opts("both"), grouped=opts("grouped");
   const cell=await cells.add({id:allowedSet,tenant:ref(primary.id),alias:"allowed"},own);
-  const hidden=await cells.add({tenant:ref(primary.id),alias:"outside group"},own);
+  const hidden=await cells.add({tenant:ref(primary.id),alias:"outside-group"},own);
   const add=(tenant,cell,alias,ctx)=>robots.add({tenant:ref(tenant),cell:cell && ref(cell),alias},ctx);
   const left=await add(primary.id,cell.id,"arm-a",own);
   const right=await add(primary.id,hidden.id,"arm-b",own);
@@ -24,5 +24,5 @@ export async function exerciseTenancy(services,transport,primary,other,allowedSe
   assert.deepEqual([...row.tenantId],[...primary.id]);
   await assert.rejects(readings.get({ref:ref(row.id)},foreign),e=>e.code===Code.NotFound);
   await assert.rejects(readings.add({celsius:10},own),e=>e.code===Code.InvalidArgument);
-  await assert.rejects(robots.add({tenant:ref(primary.id),alias:"fake stamp",dateAttested:{seconds:1n,nanos:0}},own),e=>e.code===Code.InvalidArgument);
+  await assert.rejects(robots.add({tenant:ref(primary.id),alias:"fake-stamp",dateAttested:{seconds:1n,nanos:0}},own),e=>e.code===Code.InvalidArgument);
 }

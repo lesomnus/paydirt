@@ -38,3 +38,11 @@ overlay.write_text(overlay.read_text().replace("service RobotService {", "servic
 source = "mod pair;\n" + source.replace("services::app::RobotServiceOverlay { next, layer: robot::Fleet(self.1.clone()) }", """let core=services::app::RobotServiceOverlay { next, layer: robot::Fleet(self.1.clone()) };
             services::app::RobotServiceOverlay { next:core, layer:pair::Pair(self.1.clone()) }""")
 lib.write_text(source)
+
+# The upstream test page authenticates with Plain @acme/admin. Only this reference fixture trusts it.
+worker=app / "src/worker.rs"
+source=worker.read_text()
+needle=".allow_general_writes(general_writes);"
+if needle in source:
+    worker.write_text(source.replace(needle, """.allow_general_writes(general_writes)
+        .with_resolver(|ctx| Ok((ctx.headers().get("authorization").and_then(|v|v.to_str().ok())==Some("Plain @acme/admin")).then(||"sdk-admin".to_owned())));"""))
