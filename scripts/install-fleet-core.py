@@ -50,3 +50,25 @@ needle=".allow_general_writes(general_writes);"
 if needle in source:
     worker.write_text(source.replace(needle, """.allow_general_writes(general_writes)
         .with_resolver(|ctx| Ok((ctx.headers().get("authorization").and_then(|v|v.to_str().ok())==Some("Plain @acme/admin")).then(||"sdk-admin".to_owned())));"""))
+
+# Install a policy on the transaction-owning store used by the external native server.
+main = app / "src/main.rs"
+source = main.read_text()
+point = "let mut db = Database::from_store(store, &principals)?"
+assert point in source
+main.write_text(source.replace(point, """let store=store.with_admission(ADMISSION_SCHEMA, paydirt_store::admission::Options{
+    entities:vec!["app.Robot".into()],
+    secrets:[("app.RobotRenamePairRequest".into(),vec![5])].into(),
+    ..Default::default()
+}, |decision|{
+    if decision.value.as_ref().is_some_and(|v|v["alias"]=="policy-denied"){
+        if decision.method!="/app.RobotService/RenamePair" || decision.by!="/app.RobotService/Patch"
+            || decision.request["firstAlias"]!="policy-first" || decision.request.get("proof").is_some()
+            || decision.previous.as_ref().is_none_or(|v|v["alias"]!="pair-second") || decision.frame.is_none(){
+            return Err(paydirt_store::Fault::internal("incorrect admission context"));
+        }
+        return Err(paydirt_store::Fault::denied("immutable station"));
+    }
+    Ok(())
+})?;
+    """ + point).replace("transport::{Database, MODEL, POLICIES}","transport::{ADMISSION_SCHEMA, Database, MODEL, POLICIES}"))

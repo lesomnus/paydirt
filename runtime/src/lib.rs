@@ -1,5 +1,6 @@
 //! Transactional entity storage for generated Payday applications.
 mod account;
+pub mod admission;
 mod apply;
 pub mod auth;
 mod crud;
@@ -16,6 +17,7 @@ mod notify;
 pub mod outbox;
 mod past;
 mod relations;
+mod seen;
 mod session;
 mod tenancy;
 mod trail;
@@ -62,7 +64,7 @@ impl std::fmt::Display for Fault {
 impl std::error::Error for Fault {}
 macro_rules! faults {($($f:ident=>$code:literal),*)=>{$(pub fn $f(msg:impl Into<String>)->Self{Self{code:$code.into(),message:msg.into(),field:None,violations:Vec::new()}})*};}
 impl Fault {
-    faults!(invalid=>"invalid_argument", conflict=>"already_exists",precondition=>"failed_precondition",aborted=>"aborted",internal=>"internal",unsupported=>"unimplemented",denied=>"permission_denied",unauthenticated=>"unauthenticated");
+    faults!(unavailable=>"unavailable",deadline=>"deadline_exceeded",exhausted=>"resource_exhausted",invalid=>"invalid_argument", conflict=>"already_exists",precondition=>"failed_precondition",aborted=>"aborted",internal=>"internal",unsupported=>"unimplemented",denied=>"permission_denied",unauthenticated=>"unauthenticated");
     pub fn field(name: &str, message: &str) -> Self {
         Self {
             code: "invalid_argument".into(),
@@ -154,6 +156,7 @@ pub struct Policy {
 }
 pub type Policies = BTreeMap<String, Policy>;
 pub struct Store {
+    admission: Option<admission::Rules>,
     outbox: bool,
     committed: Option<paydirt::watch::Event>,
     namer: Box<dyn naming::Namer>,
@@ -176,6 +179,7 @@ impl Store {
             watch::install(tx)
         })?;
         Ok(Self {
+            admission: None,
             namer: Box::new(naming::names),
             outbox: true,
             committed: None,
@@ -191,6 +195,23 @@ impl Store {
     }
     pub fn take_committed(&mut self) -> Option<paydirt::watch::Event> {
         self.committed.take()
+    }
+    pub fn has_admission(&self) -> bool {
+        self.admission.is_some()
+    }
+    pub fn with_admission(
+        mut self,
+        schema: &str,
+        options: admission::Options,
+        policy: impl Fn(admission::Decision) -> Result<()> + Send + Sync + 'static,
+    ) -> Result<Self> {
+        self.admission = Some(admission::Rules::new(
+            schema,
+            &self.policies,
+            options,
+            std::sync::Arc::new(policy),
+        )?);
+        Ok(self)
     }
     pub fn with_namer(mut self, namer: impl naming::Namer + 'static) -> Self {
         self.namer = Box::new(namer);
@@ -271,7 +292,11 @@ impl Store {
         let mut changes = Vec::new();
         self.committed = None;
         let result = self.db.transaction(|db| {
+            let mut seen = seen::Seen::default();
             let mut tx = Transaction {
+                admission: self.admission.as_ref(),
+                origin: None,
+                seen: Some(&mut seen),
                 changes: &mut changes,
                 outbox: self.outbox,
                 namer: &*self.namer,
@@ -298,6 +323,9 @@ impl Store {
     }
 }
 pub struct Transaction<'a> {
+    admission: Option<&'a admission::Rules>,
+    origin: Option<Call>,
+    seen: Option<&'a mut seen::Seen>,
     changes: &'a mut Vec<paydirt::watch::Change>,
     outbox: bool,
     namer: &'a dyn naming::Namer,
@@ -313,6 +341,10 @@ impl Transaction<'_> {
         if let Some(failure) = &self.failed {
             return Err(failure.clone());
         }
+        let implicit = self.admission.is_some() && self.origin.is_none();
+        if implicit {
+            self.origin = Some(call.clone());
+        }
         let result = if self
             .policies
             .get(&call.entity)
@@ -325,6 +357,9 @@ impl Transaction<'_> {
                 .map_err(Fault::invalid)
                 .and_then(|entity| self.dispatch(entity, &call.method, &call.request))
         };
+        if implicit {
+            self.origin = None;
+        }
         if let Err(err) = &result {
             self.failed = Some(err.clone());
         }

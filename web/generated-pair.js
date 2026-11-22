@@ -1,8 +1,14 @@
-export async function runPair(client,opts,tenant) {
+export async function runPair(client,opts,tenant,admission=false) {
   const ref=id=>({key:{case:"id",value:id}});
   const first=await client.add({tenant:ref(tenant),alias:"pair-first"},opts);
   const second=await client.add({tenant:ref(tenant),alias:"pair-second"},opts);
   const req={first:ref(first.id),second:ref(second.id),firstAlias:"pair-changed",secondAlias:"pair-changed"};
+  if(admission){
+    let refused;
+    try {await client.renamePair({...req,firstAlias:"policy-first",secondAlias:"policy-denied",proof:new Uint8Array([1,2,3])},opts)}catch(err){refused=err}
+    if(refused?.code!==7 || !refused.message.includes("immutable station"))throw Error("expected application admission refusal: "+refused);
+    if((await client.get({ref:ref(first.id)},opts)).alias!=="pair-first")throw Error("failed policy committed the first change");
+  }
   let code=0;
   try{await client.renamePair(req,opts)}catch(e){code=e.code}
   if(code!==6)throw Error("expected unique constraint failure on second write, got "+code);

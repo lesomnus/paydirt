@@ -14,7 +14,7 @@ impl Transaction<'_> {
             return Ok(v.clone());
         }
         let target = self.model.entity(&field.target).map_err(Fault::invalid)?;
-        let next = self.lookup(target, v, false)?;
+        let next = self.reference_row(target, v)?;
         if rest.is_empty() {
             return Ok(next[&target.key().map_err(Fault::internal)?.json].clone());
         }

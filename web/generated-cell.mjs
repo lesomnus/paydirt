@@ -95,7 +95,7 @@ try {
         });
         const readings = createFileRegistry(descriptors).getService("app.ComputedReadingService");
         await checkReadings(createClient(readings, createConnectTransport({baseUrl,useBinaryFormat:true})));
-        await runPair(typed,own,primary.id);
+        await runPair(typed,own,primary.id,true);
         for(const [table,column] of [["Audit","f10"],["Outbox","f9"]]){
           const sql='SELECT count(*) FROM "pd_app__'+table+'" WHERE '+column+"='/app.RobotService/RenamePair'";
           const count= engine==="postgres" ? execFileSync("psql",[url,"-Atq","-c",sql],{encoding:"utf8"}).trim()
