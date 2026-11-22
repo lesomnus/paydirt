@@ -8,6 +8,27 @@ use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 
 pub const MODEL: &str = include_str!("../generated/storage/model.json");
 pub const POLICIES: &str = include_str!("../generated/storage/policies.json");
+/// The current and former names from this application's schema.
+pub fn domains() -> &'static paydirt_store::domain::Domains {
+    static DOMAINS: std::sync::LazyLock<paydirt_store::domain::Domains> =
+        std::sync::LazyLock::new(|| {
+            let policies = serde_json::from_str(POLICIES).expect("generated policies");
+            paydirt_store::domain::Domains::from_policies(&policies).expect("generated domains")
+        });
+    &DOMAINS
+}
+
+pub fn header<M: buffa::MessageName + serde::Serialize>(
+    row: &M,
+) -> Result<paydirt_store::header::Header, Fault> {
+    static SCHEMA: std::sync::LazyLock<paydirt_store::paydirt_model::Model> =
+        std::sync::LazyLock::new(|| {
+            paydirt_store::paydirt_model::Model::parse(MODEL.as_bytes())
+                .expect("generated storage model")
+        });
+    let entity = SCHEMA.entity(M::FULL_NAME).map_err(Fault::invalid)?;
+    paydirt_store::header::Header::read(&SCHEMA, entity, row)
+}
 
 #[derive(Deserialize)]
 #[serde(untagged, deny_unknown_fields)]

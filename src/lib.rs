@@ -1,4 +1,5 @@
 //! Core types shared by native and WebAssembly Payday applications.
+pub mod page;
 pub mod rbac;
 pub mod tenant;
 

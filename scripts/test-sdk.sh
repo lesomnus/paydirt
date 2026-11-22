@@ -29,6 +29,11 @@ cp -R "$ref/internal/apptest/proto/ext" "$schema/proto/"
 "$paydirt" gen --ts "$schema"
 cp -a "$schema/generated/ts" "$work/gen"
 "$paydirt" gen --ts --check "$schema"
+echo 'message PageProbe { string label = 1; }' >> "$schema/proto/app/robot.proto"
+if "$paydirt" gen --ts --check "$schema"; then echo 'stale schema passed --check' >&2; exit 1; fi
+"$paydirt" gen "$schema"
+rg -q 'PageProbeSchema' "$schema/generated/ts/app/robot_pb.ts"
+"$paydirt" gen --check "$schema"
 cp -a "$suite"/{src,package.json,tsconfig.json,vite.config.ts,index.html,sandbox.html} "$work/"
 ln -s "$suite/node_modules" "$work/node_modules"
 (cd "$work" && "$suite/node_modules/.bin/tsc" --noEmit)
