@@ -202,6 +202,7 @@ impl Database {
         }
         frame.presence = presence.map(str::to_owned);
         frame.caller = device.frame.actor;
+        frame.caller_row = device.frame.row;
         frame.caller_tenant = Some(device.frame.tenant);
         ctx.extensions_mut().insert(who.lease);
         ctx.extensions_mut().insert(Parties {

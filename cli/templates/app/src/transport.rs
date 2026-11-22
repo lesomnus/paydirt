@@ -146,7 +146,10 @@ fn tokens(config: &str) -> Result<HashMap<String, Principal>, String> {
                 token,
                 Principal {
                     frame: Frame {
-            address:None,
+                        address: None,
+                        row: None,
+                        caller_row: None,
+                        counterpart: None,
                         topics,
                         tenant: tenant
                             .as_deref()
@@ -672,6 +675,11 @@ impl Database {
         .await?;
         ctx.extensions_mut().insert(Session(id));
         Ok(Some(guard))
+    }
+    /// Sets a second filing tenant for subsequent writes in the handler's current transaction.
+    pub async fn concerning(&self,ctx:&RequestContext,tenant:Option<[u8;16]>)->Result<(),ConnectError>{
+        let session=ctx.extensions().get::<Session>().ok_or_else(||ConnectError::failed_precondition("an active application transaction is required"))?;
+        self.send(Packet::Concerning{id:session.0.clone(),tenant:tenant.map(|id|id.to_vec())}).await.map(|_|())
     }
     /// Set the entities and predicates an app-owned account method reads on this context.
     pub fn account_reads(

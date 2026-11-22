@@ -25,6 +25,7 @@ impl Transaction<'_> {
 
     /// The stamp and agreement checks run on the internal stack as well as the public stack.
     pub(crate) fn admit(&mut self, e: &Entity, req: &Value) -> Result<Value> {
+        self.check_membership_input(e, req)?;
         let Some(policy) = self.policies.get(&e.name) else {
             return Ok(req.clone());
         };
@@ -66,7 +67,8 @@ impl Transaction<'_> {
                 }
             }
         }
-        if self.frame.is_some()
+        if !matches!(self.scope, Scope::Internal)
+            && self.frame.is_some()
             && !self.origin.as_ref().is_some_and(|c| {
                 c.entity == e.name && matches!(c.method.as_str(), "Add" | "AddMany")
             })
@@ -90,6 +92,10 @@ impl Transaction<'_> {
         request: &Value,
         many: bool,
     ) -> Result<Value> {
+        if !matches!(self.scope, Scope::Internal) && self.policies[&e.name].deployment_method("Add")
+        {
+            return Err(Fault::unsupported("the deployment owns this operation"));
+        }
         let single = std::slice::from_ref(request);
         let items = if many {
             request["items"]
@@ -130,7 +136,28 @@ impl Transaction<'_> {
             return Ok(row[&e.field(name).map_err(Fault::internal)?.json].clone());
         }
         if let Some(path) = t["via"].as_str() {
-            return self.at(e, row, path);
+            let mut entity = e;
+            let mut image = row.clone();
+            let mut steps = path.split('.').peekable();
+            while let Some(step) = steps.next() {
+                let field = entity.field(step).map_err(Fault::internal)?;
+                let v = &image[&field.json];
+                if v.is_null() {
+                    return Ok(value::encoded(&[0; 16]));
+                }
+                if field.target.is_empty() {
+                    return Ok(v.clone());
+                }
+                entity = self.model.entity(&field.target).map_err(Fault::internal)?;
+                let id = &v[&entity.key().map_err(Fault::internal)?.json];
+                if steps.peek().is_none() {
+                    return Ok(id.clone());
+                }
+                image = self
+                    .stored_row(entity, id, false)?
+                    .ok_or_else(Fault::missing)?;
+            }
+            return Err(Fault::invalid("empty tenant path"));
         }
         if p.get("global").is_some() {
             return Ok(value::encoded(&[0; 16]));

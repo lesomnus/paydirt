@@ -60,7 +60,7 @@ impl Transaction<'_> {
         }
         Ok(Value::Object(out))
     }
-    pub(crate) fn path(&self, e: &Entity, path: &str, alias: &str, depth: u32) -> Result<String> {
+    fn tenant_path(&self, e: &Entity, path: &str, alias: &str, depth: u32) -> Result<String> {
         let (name, rest) = path.split_once('.').unwrap_or((path, ""));
         let f = e.field(name).map_err(Fault::invalid)?;
         let col = format!("{alias}.{}", quote(&f.column()));
@@ -69,13 +69,12 @@ impl Transaction<'_> {
         }
         let target = self.model.entity(&f.target).map_err(Fault::invalid)?;
         let next = format!("s{depth}");
-        let nested = self.path(target, rest, &next, depth + 1)?;
-        let visible = target
-            .erased()
-            .map(|f| format!(" AND {next}.{} IS NULL", quote(&f.column())))
-            .unwrap_or_default();
+        if rest == target.key {
+            return Ok(col);
+        }
+        let nested = self.tenant_path(target, rest, &next, depth + 1)?;
         Ok(format!(
-            "(SELECT {nested} FROM {} AS {next} WHERE {next}.{}={col}{visible})",
+            "(SELECT {nested} FROM {} AS {next} WHERE {next}.{}={col})",
             quote(&target.table()),
             quote(&target.key().map_err(Fault::invalid)?.column())
         ))
@@ -87,6 +86,24 @@ impl Transaction<'_> {
         let mut parts = Vec::new();
         if let Some(f) = e.erased() {
             parts.push(format!("{alias}.{} IS NULL", quote(&f.column())))
+        }
+        if !matches!(self.scope, Scope::Internal) {
+            for rule in self.scope_rules {
+                for (name, v) in rule(&e.name, self.frame)? {
+                    let field = e.field(&name).map_err(Fault::invalid)?;
+                    if !field.is_column() {
+                        return Err(Fault::invalid("scope rules require scalar columns"));
+                    }
+                    let c = format!("{alias}.{}", quote(&field.column()));
+                    parts.push(if v.is_null() {
+                        format!("{c} IS NULL")
+                    } else {
+                        let p =
+                            q.param(value::bind(self.field_type(field)?, &v)?, self.db.dialect());
+                        format!("{c}={p}")
+                    });
+                }
+            }
         }
         if let Scope::Account { id, reads } = self.scope {
             parts.extend(reads.clauses(e, id, q, self.db.dialect())?);
@@ -161,7 +178,7 @@ impl Transaction<'_> {
             return Ok(parts);
         }
         for path in paths {
-            let name = self.path(e, path, alias, 0)?;
+            let name = self.tenant_path(e, path, alias, 0)?;
             let vs: Vec<_> = ids
                 .iter()
                 .map(|id| q.param(Bind::Bytes(id.clone()), self.db.dialect()))
@@ -528,6 +545,7 @@ impl Transaction<'_> {
         Ok((id, params))
     }
     pub(crate) fn patch(&mut self, e: &Entity, req: &Value, method: &str) -> Result<Value> {
+        self.check_membership_input(e, req)?;
         let mut req = req.clone();
         if e.field("alias")
             .is_ok_and(|f| f.number == 4 && f.kind == "STRING")
@@ -644,11 +662,16 @@ impl Transaction<'_> {
         if e.erased().is_none() {
             self.detach_links(e, &row[&key.json])?;
         }
+        let mut post = None;
         q.sql = if let Some(stamp) = e.erased() {
+            let at = self.inputs.stamp();
+            let p = q.param(value::bind(stamp, &at)?, self.db.dialect());
+            let mut image = row.clone();
+            image[&stamp.json] = at;
+            post = Some(image);
             format!(
-                "UPDATE {table} AS r SET {}={} WHERE {}",
+                "UPDATE {table} AS r SET {}={p} WHERE {}",
                 quote(&stamp.column()),
-                q.param(value::bind(stamp, &self.inputs.stamp())?, self.db.dialect()),
                 conditions.join(" AND ")
             )
         } else {
@@ -660,7 +683,7 @@ impl Transaction<'_> {
         let erased = self.db.exec(q)? == 1;
         if erased {
             self.forget_references();
-            self.record(e, "Erase", &Value::Null, Some(&row), None)?;
+            self.record(e, "Erase", &Value::Null, Some(&row), post.as_ref())?;
         }
         Ok(json!({"erased":erased}))
     }

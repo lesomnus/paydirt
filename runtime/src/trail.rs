@@ -24,7 +24,7 @@ impl Transaction<'_> {
                 self.frame,
                 self.origin.as_ref(),
                 before,
-                after,
+                after.filter(|_| method != "Erase"),
             )?;
         }
         self.changed(e, row, method)?;
@@ -48,7 +48,7 @@ impl Transaction<'_> {
                 &by,
                 outer,
                 before,
-                after,
+                after.filter(|_| method != "Erase"),
                 value::encoded(&(self.inputs.mint)(domain)),
                 self.inputs.stamp(),
             )?;
@@ -69,18 +69,8 @@ impl Transaction<'_> {
                 ..Default::default()
             });
         }
-        if let Some(rec) = self.trail {
-            for observer in &rec.observers {
-                observer(&crate::audit_content::Write {
-                    entity: &e.name,
-                    method,
-                    previous: before,
-                    value: after,
-                })?;
-            }
-        }
         let Some(frame) = self.frame else {
-            return Ok(());
+            return self.observe_write(e, method, before, after);
         };
         let p = &self.policies[&e.name].entity;
         let key = e.key().map_err(Fault::internal)?;
@@ -92,6 +82,16 @@ impl Transaction<'_> {
             &frame.tenant
         });
         let object_tenant = self.object_tenant(e, row)?;
+        let filed = if method == "Erase" && after.is_none() {
+            &tenant
+        } else {
+            &object_tenant
+        };
+        let audit_on = p["trail"].get("off").is_none()
+            && self
+                .trail
+                .and_then(|r| r.filter.as_deref())
+                .is_none_or(|filter| filter(&e.name, method));
         let by = format!("/{}Service/{}", e.name, method);
         let changed: Vec<_> = e
             .fields
@@ -99,9 +99,18 @@ impl Transaction<'_> {
             .filter(|f| before.and_then(|r| r.get(&f.json)) != after.and_then(|r| r.get(&f.json)))
             .map(|f| f.number)
             .collect();
-        let mut audit = json!({"actorId":actor,"tenantId":object_tenant,"actorTenantId":tenant,"objectId":object,"traceId":value::encoded(&frame.trace),"fields":changed,"domain":p["domain"],"action":frame.action});
+        let mut audit = json!({"actorId":actor,"tenantId":filed,"actorTenantId":tenant,"objectId":object,"traceId":value::encoded(&frame.trace),"fields":changed,"domain":p["domain"],"action":frame.action});
         if let Some(recorder) = self.trail {
             recorder.content(e, request, before, after, &mut audit)?;
+        }
+        if let Some(other) = &frame.counterpart {
+            if !paydirt::has_domain(other, 1) {
+                return Err(Fault::invalid("counterpart must identify a tenant"));
+            }
+            let other = value::encoded(other);
+            if &other != filed {
+                audit["counterpartTenantId"] = other;
+            }
         }
         if let Some(id) = &frame.caller {
             audit["callerId"] = value::encoded(id)
@@ -116,7 +125,7 @@ impl Transaction<'_> {
         if !resource.is_empty() {
             outbox["event"] = json!(resource)
         }
-        if p["trail"].get("off").is_none() {
+        if audit_on {
             self.sign_write(e, after, &mut audit)?;
         }
         if let Some(rec) = self.trail.filter(|r| r.options.access)
@@ -159,6 +168,7 @@ impl Transaction<'_> {
             }
         }
         let mut recorder = Transaction {
+            scope_rules: self.scope_rules,
             pending_access: None,
             admission: None,
             origin: None,
@@ -178,9 +188,7 @@ impl Transaction<'_> {
             failed: None,
         };
         for (own, data) in [("OWN_AUDIT", audit), ("OWN_OUTBOX", outbox)] {
-            if (own == "OWN_AUDIT" && p["trail"].get("off").is_some())
-                || (own == "OWN_OUTBOX" && !recorder.outbox)
-            {
+            if (own == "OWN_AUDIT" && !audit_on) || (own == "OWN_OUTBOX" && !recorder.outbox) {
                 continue;
             }
             let name = self
@@ -191,6 +199,25 @@ impl Transaction<'_> {
                 .0;
             let entity = self.model.entity(name).map_err(Fault::internal)?;
             recorder.insert(entity, &data)?;
+        }
+        self.observe_write(e, method, before, after)
+    }
+    fn observe_write(
+        &self,
+        e: &Entity,
+        method: &str,
+        before: Option<&Value>,
+        after: Option<&Value>,
+    ) -> Result<()> {
+        if let Some(rec) = self.trail {
+            for observer in &rec.observers {
+                observer(&crate::audit_content::Write {
+                    entity: &e.name,
+                    method,
+                    previous: before,
+                    value: after,
+                })?;
+            }
         }
         Ok(())
     }

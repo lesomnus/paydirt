@@ -57,7 +57,9 @@ pub struct Write<'a> {
     pub value: Option<&'a Value>,
 }
 type WriteObserver = dyn Fn(&Write<'_>) -> Result<()> + Send + Sync;
+type Filter = dyn Fn(&str, &str) -> bool + Send + Sync;
 pub struct Recorder {
+    pub(crate) filter: Option<Box<Filter>>,
     pub(crate) observers: Vec<std::sync::Arc<WriteObserver>>,
     pub(crate) keys: Option<crate::integrity::Keys>,
     pub(crate) options: Options,
@@ -66,6 +68,22 @@ pub struct Recorder {
 }
 
 impl Store {
+    /// Selects the writes that the audit recorder handles. Other recorders
+    /// receive the original change independently.
+    pub fn with_audit_filter(
+        mut self,
+        filter: impl Fn(&str, &str) -> bool + Send + Sync + 'static,
+    ) -> Result<Self> {
+        let rec = self
+            .trail
+            .as_mut()
+            .ok_or_else(|| Fault::precondition("configure the trail before filtering writes"))?;
+        if rec.filter.is_some() {
+            return Err(Fault::invalid("an audit filter is already configured"));
+        }
+        rec.filter = Some(Box::new(filter));
+        Ok(self)
+    }
     /// Installs a host-side observer. It sees immutable database postimages and
     /// preimages inside the writing transaction. Returning an error aborts the write.
     pub fn with_write_observer(
@@ -125,6 +143,7 @@ impl Store {
             .collect();
         self.trail = Some(Recorder {
             observers: vec![],
+            filter: None,
             keys: None,
             options,
             pool,
@@ -248,6 +267,9 @@ impl Recorder {
                 .get(&e.name)
                 .is_some_and(|set| set.contains(&f.number))
             {
+                continue;
+            }
+            if f.name == e.key {
                 continue;
             }
             let fd = msg

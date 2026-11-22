@@ -185,6 +185,11 @@ impl Rules {
         if !self.entities.contains(e) {
             return Ok(());
         }
+        if origin.is_none() {
+            return Err(Fault::precondition(
+                "admitted mutations require the originating application call",
+            ));
+        }
         let by = format!("/{e}Service/{op}");
         let request = origin
             .and_then(|c| {
@@ -206,7 +211,12 @@ impl Rules {
                 .or_else(|| origin.map(|c| format!("/{}Service/{}", c.entity, c.method)))
                 .unwrap_or_else(|| by.clone()),
             by,
-            frame: frame.cloned(),
+            frame: frame.cloned().map(|mut f| {
+                for row in [&mut f.row, &mut f.caller_row].into_iter().flatten() {
+                    row.value = self.clean(&row.entity, &row.value);
+                }
+                f
+            }),
             request,
             previous: before.map(|v| self.clean(e, v)),
             value: after.map(|v| self.clean(e, v)),

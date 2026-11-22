@@ -31,6 +31,9 @@ fn exercise(url: &str) {
     .unwrap();
     let frame = Frame {
         address: None,
+        row: None,
+        caller_row: None,
+        counterpart: None,
         account: None,
         topics: Default::default(),
         tenant: tenant.to_vec(),

@@ -6,7 +6,73 @@ use crate::{
 use paydirt_model::{Entity, quote};
 use serde_json::{Value, json};
 
+impl crate::Store {
+    pub fn memberships_for(
+        &mut self,
+        account: [u8; 16],
+        bound: Option<[u8; 16]>,
+        selector: &str,
+    ) -> Result<Vec<Value>> {
+        if account == [0; 16] {
+            return Ok(vec![]);
+        }
+        self.transaction(&crate::Scope::Internal, |tx| {
+            tx.memberships(
+                &account,
+                bound.as_ref().map(|t| t.as_slice()),
+                selector,
+                false,
+            )
+        })
+    }
+    pub fn holder_account(&mut self, holder: [u8; 16]) -> Result<Option<[u8; 16]>> {
+        self.transaction(&crate::Scope::Internal, |tx| {
+            let (h, _, name) = tx.account_entities()?;
+            let (h, field) = (
+                h.clone(),
+                h.field(name).map_err(Fault::internal)?.json.clone(),
+            );
+            let row = match tx.lookup(
+                &h,
+                &serde_json::json!({"id":value::encoded(&holder)}),
+                false,
+            ) {
+                Ok(v) => v,
+                Err(e) if e.code == "not_found" => return Ok(None),
+                Err(e) => return Err(e),
+            };
+            if row[&field].is_null() {
+                return Ok(None);
+            }
+            let id: [u8; 16] = value::bytes(&row[&field])?
+                .try_into()
+                .map_err(|_| Fault::internal("invalid stored account identifier"))?;
+            Ok((id != [0; 16]).then_some(id))
+        })
+    }
+}
 impl Transaction<'_> {
+    pub(crate) fn membership_field(&self, e: &Entity) -> Option<&str> {
+        let p = self.policies.get(&e.name)?;
+        if p.entity["own"] != "OWN_HOLDER" || matches!(self.scope, crate::Scope::Internal) {
+            return None;
+        }
+        p.application["accounts"]["field"]["name"].as_str()
+    }
+    pub(crate) fn check_membership_input(&self, e: &Entity, input: &Value) -> Result<()> {
+        if let Some(name) = self.membership_field(e) {
+            let f = e.field(name).map_err(Fault::internal)?;
+            if input.get(&f.json).is_some_and(|v| !v.is_null())
+                || input[format!("{}Null", f.json)] == true
+            {
+                return Err(Fault::field(
+                    name,
+                    "membership accounts are established by the deployment",
+                ));
+            }
+        }
+        Ok(())
+    }
     fn account_entities(&self) -> Result<(&Entity, &Entity, &str)> {
         let (holder, p) = self
             .policies

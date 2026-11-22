@@ -85,6 +85,9 @@ fn exercise(url: &str, project: &Path) {
             id: "op".into(),
             frame: Frame {
                 address: None,
+                row: None,
+                caller_row: None,
+                counterpart: None,
                 tenant: t.to_vec(),
                 actor: Some(actor.clone()),
                 action: "/app.Example/Send".into(),
