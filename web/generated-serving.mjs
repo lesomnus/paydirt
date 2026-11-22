@@ -4,6 +4,8 @@ import {spawn,execFileSync} from "node:child_process";
 import {randomBytes,X509Certificate} from "node:crypto";
 import http from "node:http";
 import https from "node:https";
+import {connect as h2connect} from "node:http2";
+import {once} from "node:events";
 import net from "node:net";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
@@ -60,6 +62,16 @@ try{
  await delay(120);
  await assert.rejects(rpc(main,settings,setting));
  assert.equal(JSON.parse((await rpc(web,settings,setting)).body).value,"fleet-observed");
+ const h2=h2connect("https://127.0.0.1:"+web,{ca});
+ try{
+   const bytes=Buffer.from([10,9,34,7,...Buffer.from("service")]);
+   const frame=Buffer.alloc(5);frame.writeUInt32BE(bytes.length,1);
+   const call=h2.request({":method":"POST",":path":settings,"content-type":"application/grpc","te":"trailers","authorization":"Bearer member"});
+   const parts=[];let status;
+   call.on("data",v=>parts.push(v));call.on("trailers",v=>status=v["grpc-status"]);call.end(Buffer.concat([frame,bytes]));await once(call,"end");
+   assert.equal(status,"0");assert(Buffer.concat(parts).includes(Buffer.from("fleet-observed")));
+ }finally{h2.close();}
+ await delay(150);
  for(const [origin,want] of [["https://portal.test","https://portal.test"],["https://other.test",undefined]]){
    const res=await rpc(web,settings,null,{method:"OPTIONS",headers:{origin,"access-control-request-method":"POST","access-control-request-headers":"authorization,content-type"}});
    assert.equal(res.headers["access-control-allow-origin"],want);

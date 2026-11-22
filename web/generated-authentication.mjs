@@ -38,6 +38,7 @@ try{
  const config={listen:address,service_name:"auth",watch:{broker:"memory"},authentication:{oidc:{issuer,audience:"fleet"},introspection:{url:issuer,bearer_env:"FLEET_BILLING"},bindings:{"oidc:user":{tenant:tenant.toString("hex"),actor:device.toString("hex")},"remote:fleet/read":tenant.toString("hex")},sessions:true}};
  await writeFile(join(tmp,"app.json"),JSON.stringify(config));const env={...process.env,PAYDIRT_LISTEN:address,DATABASE_URL:join(tmp,"db"),FLEET_BILLING:"service-secret",FLEET_DEVICE:device.toString("hex"),FLEET_BADGE:person.toString("hex"),FLEET_REVOCATION:revocation,PAYDIRT_PRINCIPALS:"{}"};
  execFileSync(process.env.GENERATED_APP,["app.Tenant","Add",JSON.stringify({id:tenant.toString("base64"),alias:"tenant"})],{env,cwd:tmp});
+ execFileSync(process.env.GENERATED_APP,["app.Holder","Add",JSON.stringify({id:device.toString("base64"),tenant:{id:tenant.toString("base64")},alias:"device"})],{env,cwd:tmp});
  child=spawn(process.env.GENERATED_APP,[],{env,cwd:tmp,stdio:"inherit"});
  for(let i=0;i<120;i++){try{await fetch("http://"+address);break}catch{await delay(50)}}
  const ok=async(r,n)=>{assert.equal(r.status,200,await r.clone().text());assert.equal((await r.json()).value,n)};
@@ -85,5 +86,9 @@ try{
    },{token:jwt(),bytes});
    assert.deepEqual(results,[2,16,"",16]);
  }finally{await browser?.close();await sdk.close()}
+ const stale=await call("Login",jwt());const proof=stale.headers.get("set-cookie").split(";")[0];
+ execFileSync(process.env.GENERATED_APP,["app.Holder","Erase",JSON.stringify({id:device.toString("base64")})],{env,cwd:tmp});
+ const missingHolder=await call("Who",null,{cookie:proof});
+ assert.equal(missingHolder.status,401);await denied(missingHolder,"unauthenticated");
  console.log("Verified OIDC audience, expiry, rotated keys, remote grants and browser cookie sessions end to end.");
 }finally{if(child){const ended=new Promise(r=>child.once("exit",r));child.kill();await ended}await stop(provider);await rm(tmp,{recursive:true,force:true})}

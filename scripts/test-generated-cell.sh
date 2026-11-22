@@ -33,8 +33,9 @@ cmp "$work/original.rs" "$CELL_PROJECT/src/robot.rs"
 cargo build --quiet --features resource-cel --manifest-path "$CELL_PROJECT/Cargo.toml"
 export PAYDIRT_TEST_MOVE=1 CELL_SQLITE_PATH="$work/fleet.sqlite3"
 node generated-cell.mjs
-cargo test --quiet --manifest-path "$CELL_PROJECT/Cargo.toml" --bin fleet operator_tests
+cargo test --quiet --manifest-path "$CELL_PROJECT/Cargo.toml" --bin fleet operator
 cargo test --quiet --manifest-path "$CELL_PROJECT/Cargo.toml" --lib catalog_sentences
+cargo test --quiet --manifest-path "$CELL_PROJECT/Cargo.toml" --features client,resource-cel --test pages
 node generated-replicas.mjs
 cargo test --manifest-path "$repo/Cargo.toml" -p paydirt-store --features sqlite,postgres --test notify_policy --test past_expiry
 
@@ -42,6 +43,7 @@ node generated-trail-scan.mjs
 node generated-config.mjs
 node generated-slow.mjs
 node generated-serving.mjs
+node generated-web-contracts.mjs
 node generated-authentication.mjs
 node generated-grant-follower.mjs
 if [[ "${PAYDIRT_TEST_WASM:-0}" == 1 ]]; then

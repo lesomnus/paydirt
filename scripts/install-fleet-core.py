@@ -26,6 +26,8 @@ for rel in ["ext/app/payday/holder_svc.ext.proto", "ext/payday/holder.ext.proto"
     copyfile(proto / rel,dest)
 copyfile(repo / "tests/fleet/readings.rs", app / "src/readings.rs")
 copyfile(repo / "tests/fleet/commands.rs", app / "src/commands.rs")
+copyfile(repo / "tests/fleet/routes.rs", app / "src/routes.rs")
+copyfile(repo / "tests/fleet/pages.rs", app / "tests/pages.rs")
 copyfile(repo / "tests/fleet/robot.rs", app / "src/robot.rs")
 lib = app / "src/lib.rs"
 source = lib.read_text()
@@ -102,3 +104,5 @@ main.write_text("mod notification_policy_fixture;\n" + main.read_text().replace(
         store.with_notification_policy(notification_policy_fixture::File(path.into()))
     } else { store };
     """ + point))
+
+main.write_text(main.read_text().replace("    if let Some(rate) = config.rate {","    db=routes::policy(db)?;\n    if let Some(rate) = config.rate {"))

@@ -34,11 +34,11 @@ broker_test.go	79	TestNoBrokerIsARefusalAndNotASilence	verified	connect/sqlite	w
 brokerpg_test.go	27	TestAWatchHearsAWriteOnTheOtherReplica	verified	connect/postgres-notify	web/generated-replicas.mjs#L72	-
 cmd_test.go	20	TestConfigEnvIsReadFromTheStruct	verified	cli/native	web/generated-config.mjs#L20	-
 cmd_test.go	50	TestConfigEnvSaysWhetherAndNeverWhat	verified	cli/native	web/generated-config.mjs#L22	-
-columns_test.go	14	TestGeneratedColumnsReachThePrinter	verified	connect/sqlite+postgres	web/generated-operator.mjs#L44	-
+columns_test.go	14	TestGeneratedColumnsReachThePrinter	verified	connect/sqlite+postgres	web/generated-operator.mjs#L60	-
 composite_test.go	168	TestCompletingAVerbWritesWhatTheRowIsUselessWithout	verified	store/sqlite+postgres	runtime/tests/reference_cases/walls.rs#L570	-
 composite_test.go	188	TestAVerbRefusedHalfwayWritesNothing	verified	connect/sqlite+postgres;drpc/opfs	web/generated-pair.js#L16	-
 composite_test.go	217	TestCompletingAVerbInsideATransactionIsOneTransaction	verified	store/sqlite+postgres	runtime/tests/reference_cases/walls.rs#L570	-
-concurrent_test.go	35	TestCallsAtOnceAllSayWhoIsCalling	verified	connect/sqlite	web/generated-authentication.mjs#L47	-
+concurrent_test.go	35	TestCallsAtOnceAllSayWhoIsCalling	verified	connect/sqlite	web/generated-authentication.mjs#L48	-
 content_test.go	108	TestTheTrailKeepsWhatAWriteSaid	verified	connect/sqlite+postgres	web/generated-access.mjs#L25	-
 content_test.go	140	TestTheTrailKeepsTheRowWhereItIsAskedTo	verified	connect/sqlite+postgres	web/generated-access.mjs#L23	-
 content_test.go	161	TestTheTrailKeepsWhichFieldsAndNothingElseWhereItIsToldTo	verified	connect/sqlite+postgres	web/generated-access.mjs#L30	-
@@ -47,7 +47,7 @@ content_test.go	207	TestAHolderIsSomebody	verified	store/sqlite+postgres	runtime
 content_test.go	231	TestATenantIsNobody	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1660	-
 content_test.go	261	TestADocumentThatNamesAFieldByNameIsWithheldAllTheSame	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1660	-
 content_test.go	305	TestAContentLevelIsAWordTheTrailKnows	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1660	-
-cost_test.go	57	TestAnAddManyCostsItsItems	verified	connect/tls-sqlite	web/generated-serving.mjs#L69	-
+cost_test.go	57	TestAnAddManyCostsItsItems	verified	connect/tls-sqlite	web/generated-serving.mjs#L81	-
 cursor_test.go	325	TestACheckOfTheRowsReadsTheTrailFromWhereItLeftOff	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L448	-
 cursor_test.go	361	TestAPassReadsTheTrailFromWhereItLeftOff	verified	store/postgres	runtime/src/trail_page.rs#L400	-
 cursor_test.go	395	TestAPassReadsTheAccessRecordFromWhereItLeftOff	verified	store/postgres	runtime/src/trail_page.rs#L400	-
@@ -91,10 +91,10 @@ header_test.go	89	TestAnEntityThatHasNoneOfItSaysSo	verified	store/sqlite+postgr
 header_test.go	127	TestAbsentIsNotEmpty	verified	unit	runtime/tests/metadata.rs#L52	-
 header_test.go	151	TestNothingIsAZeroHeader	verified	unit	runtime/tests/metadata.rs#L60	-
 holderpage_test.go	18	TestHolderListPagesToo	verified	store/sqlite+postgres	runtime/tests/reference_cases/queries.rs#L62	-
-http_listener_test.go	33	TestHTTPListenerUsesConfiguredTLS	verified	connect/tls-sqlite	web/generated-serving.mjs#L57	-
-http_listener_test.go	142	TestHTTPListenerRejectsBrokenTLSBeforeListening	verified	connect/tls-sqlite	web/generated-serving.mjs#L78	-
-intercept_test.go	46	TestAnInterceptorRunsBetweenLayers	tracked			106
-intercept_test.go	188	TestAStreamInterceptorMayPutItselfInTheWay	tracked			106
+http_listener_test.go	33	TestHTTPListenerUsesConfiguredTLS	verified	connect/tls-sqlite	web/generated-serving.mjs#L59	-
+http_listener_test.go	142	TestHTTPListenerRejectsBrokenTLSBeforeListening	verified	connect/tls-sqlite	web/generated-serving.mjs#L90	-
+intercept_test.go	46	TestAnInterceptorRunsBetweenLayers	verified	connect/sqlite+postgres	web/generated-cell.mjs#L96	-
+intercept_test.go	188	TestAStreamInterceptorMayPutItselfInTheWay	verified	connect/sqlite+postgres	web/generated-cell.mjs#L100	-
 kept_trail_test.go	89	TestATransactionWritesItsTrailTogether	verified	store/sqlite+postgres	runtime/src/session_test.rs#L109	-
 labels_test.go	47	TestListByLabels	verified	store/sqlite+postgres	runtime/src/session_test.rs#L188	-
 layers_test.go	183	TestTenantIsNotPutUpFromInsideOne	verified	store/sqlite+postgres	runtime/tests/reference_cases/walls.rs#L242	-
@@ -134,7 +134,7 @@ listorder_test.go	62	TestAListIsReadInAnOrderTheSchemaNamed	verified	connect/sql
 listorder_test.go	93	TestACursorIsOfOneOrder	verified	connect/sqlite+postgres;drpc/opfs	web/generated-query.js#L23	-
 listorder_test.go	137	TestAnOrderNoSchemaNamedIsRefused	verified	store/sqlite+postgres	runtime/tests/reference_cases/queries.rs#L62	-
 meter_test.go	136	TestEveryDeclaredMeterCountsWhatItSays	verified	connect/sqlite+postgres	web/generated-billing.mjs#L13	-
-meter_test.go	261	TestMeterTenantsIsEveryTenant	tracked	unit	runtime/tests/meter.rs#L121	106
+meter_test.go	261	TestMeterTenantsIsEveryTenant	verified	store/sqlite	runtime/tests/meter.rs#L145	-
 meter_test.go	306	TestTheAppReadsItsMetersOnASchedule	verified	unit	runtime/tests/meter.rs#L34	-
 move_test.go	22	TestMove	verified	connect/sqlite+postgres;drpc/opfs	web/generated-move.js#L21	-
 move_test.go	104	TestMoveIsOnTheTrail	verified	store/sqlite+postgres	runtime/tests/reference_cases/walls.rs#L895	-
@@ -181,9 +181,9 @@ outbox_test.go	242	TestTheLoopIsFoundAndNotDeclared	verified	connect/sqlite	web/
 outbox_test.go	308	TestAWriteWhoseEventCouldNotBeQueuedDoesNotHappen	verified	store/sqlite+postgres	runtime/tests/reference_cases/events.rs#L68	-
 outboxsecret_test.go	29	TestTheQueueHoldsNoVerifierEither	verified	store/sqlite+postgres	runtime/tests/reference_cases/events.rs#L68	-
 page_test.go	15	TestAllPagesPreserveTheRequestAndStopWhenTheConsumerStops	verified	unit	tests/page.rs#L6	-
-page_test.go	54	TestAllPagesYieldAPartialFailureWithoutRetrying	tracked	unit	tests/page.rs#L33	106
+page_test.go	54	TestAllPagesYieldAPartialFailureWithoutRetrying	verified	unit	tests/page.rs#L33	-
 page_test.go	85	TestAllPagesStopOnFailureAndCancellation	verified	unit	tests/page.rs#L33	-
-page_test.go	133	TestAllPagesWalkTheRealServerAndClient	tracked			106
+page_test.go	133	TestAllPagesWalkTheRealServerAndClient	verified	connect/sqlite	tests/fleet/pages.rs#L16	-
 past_test.go	54	TestThePastIsWrittenAndReadBack	verified	connect/sqlite+postgres;drpc/opfs	web/generated-past.js#L17	-
 past_test.go	234	TestAnEventIsReadBackByItsKind	verified	store/sqlite+postgres	runtime/tests/reference_cases/history.rs#L376	-
 pastexpire_test.go	499	TestAnExpiryIsWhatItsDryRunSays	verified	store/sqlite+postgres	runtime/tests/past_expiry.rs#L127	-
@@ -226,31 +226,31 @@ pastsay_test.go	367	TestAnEventFromBeforeThePastIsSaidAsItWasWritten	verified	co
 pastwriter_test.go	168	TestThePastIsWrittenByThePackageAlone	verified	connect/sqlite+postgres	web/generated-past-ops.js#L25	-
 pastwriter_test.go	259	TestThePastIsWrittenWhereverItsWriterIs	verified	connect/sqlite+postgres	web/generated-past-ops.js#L14	-
 pastwriter_test.go	347	TestNothingThePastIsWrittenWithWritesItByHand	verified	store/sqlite+postgres	runtime/tests/reference_cases/history.rs#L194	-
-pdcmd_test.go	65	TestTheTreeIsWhatTheSchemaDeclared	tracked	connect/sqlite+postgres	web/generated-operator.mjs#L13	106
-pdcmd_test.go	114	TestACommandTravelsTheWholeStack	verified	connect/sqlite+postgres	web/generated-operator.mjs#L39	-
-pdcmd_test.go	139	TestTheDefaultFormatIsReadable	tracked			106
-pdcmd_test.go	171	TestAppCanRenderOneMessageItsOwnWay	tracked	connect/sqlite+postgres	web/generated-operator.mjs#L42	106
-pdcmd_test.go	206	TestTheWallIsStillTheWall	tracked			106
-pdcmd_test.go	222	TestTheRawRequestIsMergedOverTheArguments	verified	connect/sqlite+postgres	web/generated-operator.mjs#L61	-
-pdcmd_test.go	245	TestTheRawRequestCanBeStdin	tracked			106
-pdcmd_test.go	260	TestTheFormats	tracked	connect/sqlite+postgres	web/generated-operator.mjs#L56	106
-pdcmd_test.go	338	TestListPagesWithNext	tracked			106
-pdcmd_test.go	391	TestAnAppCanAddAFormat	verified	connect/sqlite+postgres	web/generated-operator.mjs#L42	-
-pdcmd_test.go	419	TestOneCommandCanBeReplaced	verified	connect/sqlite+postgres	web/generated-operator.mjs#L43	-
-pdcmd_test.go	447	TestReplacingWhatIsNotThereIsRefused	tracked			106
-pdcmd_test.go	459	TestATreeCanBeNarrowed	tracked	connect/sqlite+postgres	web/generated-operator.mjs#L14	106
-pdcmd_test.go	486	TestAnIdentifierIsWhatTheSchemaSaysItIs	tracked			106
-pdcmd_test.go	514	TestThereAreTwoJsons	tracked			106
-pdcmd_test.go	573	TestAnIdentifierCanBeWrittenAsAUuid	verified	connect/sqlite+postgres	web/generated-operator.mjs#L38	-
-pdcmd_test.go	639	TestAnRpcThisAppWroteGetsACommandToo	verified	connect/sqlite+postgres	web/generated-operator.mjs#L58	-
-pdcmd_test.go	743	TestWhichAppThisConnectionSpeaksTo	tracked			106
-pdcmd_test.go	780	TestSharedThingIsServedLikeAnyOtherEntity	verified	connect/sqlite+postgres	web/generated-operator.mjs#L46	-
-pdcmd_test.go	824	TestTheConnectionIsOpenedWhenACommandRuns	tracked			106
+pdcmd_test.go	65	TestTheTreeIsWhatTheSchemaDeclared	verified	cli/native	tests/fleet/operator-types.rs#L46	-
+pdcmd_test.go	114	TestACommandTravelsTheWholeStack	verified	connect/sqlite+postgres	web/generated-operator.mjs#L55	-
+pdcmd_test.go	139	TestTheDefaultFormatIsReadable	verified	connect/sqlite+postgres	web/generated-operator.mjs#L35	-
+pdcmd_test.go	171	TestAppCanRenderOneMessageItsOwnWay	verified	connect/sqlite+postgres	web/generated-operator.mjs#L48	-
+pdcmd_test.go	206	TestTheWallIsStillTheWall	verified	connect/sqlite+postgres	web/generated-operator.mjs#L44	-
+pdcmd_test.go	222	TestTheRawRequestIsMergedOverTheArguments	verified	connect/sqlite+postgres	web/generated-operator.mjs#L77	-
+pdcmd_test.go	245	TestTheRawRequestCanBeStdin	verified	connect/sqlite+postgres	web/generated-operator.mjs#L45	-
+pdcmd_test.go	260	TestTheFormats	verified	connect/sqlite+postgres	web/generated-operator.mjs#L41	-
+pdcmd_test.go	338	TestListPagesWithNext	verified	connect/sqlite+postgres	web/generated-operator.mjs#L82	-
+pdcmd_test.go	391	TestAnAppCanAddAFormat	verified	connect/sqlite+postgres	web/generated-operator.mjs#L58	-
+pdcmd_test.go	419	TestOneCommandCanBeReplaced	verified	connect/sqlite+postgres	web/generated-operator.mjs#L59	-
+pdcmd_test.go	447	TestReplacingWhatIsNotThereIsRefused	verified	cli/native	tests/fleet/operator-types.rs#L82	-
+pdcmd_test.go	459	TestATreeCanBeNarrowed	verified	cli/native	tests/fleet/operator-types.rs#L87	-
+pdcmd_test.go	486	TestAnIdentifierIsWhatTheSchemaSaysItIs	verified	cli/native	tests/fleet/operator-types.rs#L17	-
+pdcmd_test.go	514	TestThereAreTwoJsons	verified	connect/sqlite+postgres	web/generated-operator.mjs#L38	-
+pdcmd_test.go	573	TestAnIdentifierCanBeWrittenAsAUuid	verified	connect/sqlite+postgres	web/generated-operator.mjs#L54	-
+pdcmd_test.go	639	TestAnRpcThisAppWroteGetsACommandToo	verified	connect/sqlite+postgres	web/generated-operator.mjs#L74	-
+pdcmd_test.go	743	TestWhichAppThisConnectionSpeaksTo	verified	cli/native	tests/fleet/operator-types.rs#L37	-
+pdcmd_test.go	780	TestSharedThingIsServedLikeAnyOtherEntity	verified	connect/sqlite+postgres	web/generated-operator.mjs#L62	-
+pdcmd_test.go	824	TestTheConnectionIsOpenedWhenACommandRuns	verified	cli/native	tests/fleet/operator-types.rs#L122	-
 pdcmd_test.go	853	TestPrintingHelpOpensNothing	verified	connect/sqlite+postgres	web/generated-operator.mjs#L12	-
-pdcmd_test.go	878	TestAConnectorThatCannotConnectIsTheCommandsAnswer	tracked			106
-pdcmd_test.go	900	TestACommandOfTheAppsOwnGetsTheSameConnection	verified	connect/sqlite+postgres	web/generated-operator.mjs#L47	-
-pdcmd_test.go	956	TestListReadsTheOtherWayAndInANamedOrder	verified	connect/sqlite+postgres	web/generated-operator.mjs#L64	-
-policy_test.go	61	TestAPolicyIsWhatASecondBinaryIsBuiltFrom	tracked	connect/sqlite+postgres	web/generated-file-policy.mjs#L25	106
+pdcmd_test.go	878	TestAConnectorThatCannotConnectIsTheCommandsAnswer	verified	cli/native	tests/fleet/operator-types.rs#L132	-
+pdcmd_test.go	900	TestACommandOfTheAppsOwnGetsTheSameConnection	verified	connect/sqlite+postgres	web/generated-operator.mjs#L63	-
+pdcmd_test.go	956	TestListReadsTheOtherWayAndInANamedOrder	verified	connect/sqlite+postgres	web/generated-operator.mjs#L80	-
+policy_test.go	61	TestAPolicyIsWhatASecondBinaryIsBuiltFrom	verified	connect/sqlite	web/generated-web-contracts.mjs#L68	-
 profile_test.go	30	TestAMessageFieldComesBack	verified	store/sqlite+postgres	runtime/tests/reference_cases/queries.rs#L258	-
 profile_test.go	69	TestAPatchReplacesAMessageWhole	verified	store/sqlite+postgres	runtime/tests/reference_cases/queries.rs#L258	-
 profile_test.go	113	TestAMessageFieldIsReachableFromSql	verified	store/sqlite+postgres	runtime/tests/reference_cases/queries.rs#L258	-
@@ -279,20 +279,20 @@ rowseal_test.go	93	TestASealGoesWithItsRow	verified	store/sqlite+postgres	runtim
 rowseal_test.go	125	TestARowWrittenBeforeItsKindWasSealedIsListedAndARecordSealsIt	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L284	-
 rowseal_test.go	164	TestForgettingLeavesASealThatSaysSo	verified	store/sqlite+postgres	runtime/tests/trail_integrity.rs#L512	-
 sealrace_test.go	45	TestASealBlankedStaysBlankedBesideACarry	verified	store/postgres	runtime/tests/trail_integrity.rs#L497	-
-secret_test.go	22	TestASecretIsNotAnsweredWith	verified	connect/sqlite+postgres	web/generated-cell.mjs#L98	-
+secret_test.go	22	TestASecretIsNotAnsweredWith	verified	connect/sqlite+postgres	web/generated-cell.mjs#L103	-
 secret_test.go	63	TestASecretThatIsNotBytesIsNotAnsweredWith	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1660	-
 secret_test.go	102	TestTheWriteHalfStillWorks	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1660	-
 secret_test.go	129	TestASecretIsNotInTheTrail	verified	connect/sqlite+postgres	web/generated-access.mjs#L26	-
-secret_test.go	219	TestASecretIsNotStreamed	verified	connect/sqlite+postgres	web/generated-cell.mjs#L101	-
+secret_test.go	219	TestASecretIsNotStreamed	verified	connect/sqlite+postgres	web/generated-cell.mjs#L106	-
 seen_test.go	74	TestATransactionAsksAboutARowOnce	verified	store/sqlite+postgres	runtime/src/seen.rs#L109	-
 seen_test.go	118	TestWhatOneFrameSawIsNotAnotherFramesAnswer	verified	store/sqlite+postgres	runtime/src/seen.rs#L137	-
 seen_test.go	146	TestTheSinkComparesWhatItRemembers	verified	store/sqlite+postgres	runtime/tests/reference_cases/walls.rs#L895	-
 seen_test.go	189	TestARowWrittenInTheTransactionIsAskedAboutAgain	verified	store/sqlite+postgres	runtime/src/seen.rs#L113	-
-serve_test.go	25	TestTheAppIsWhatTheAppWrote	verified	connect/sqlite+postgres	web/generated-cell.mjs#L114	-
+serve_test.go	25	TestTheAppIsWhatTheAppWrote	verified	connect/sqlite+postgres	web/generated-cell.mjs#L119	-
 serve_test.go	56	TestServes	verified	connect/sqlite+postgres	web/generated-cell.mjs#L77	-
-session_test.go	112	TestAPageSignsInAndIsServedAsSomebody	verified	connect/cookies-sqlite	web/generated-authentication.mjs#L63	-
-session_test.go	138	TestSigningOutStopsTheNextCall	verified	connect/cookies-sqlite	web/generated-authentication.mjs#L66	-
-session_test.go	165	TestACookieForSomebodyWhoIsNotThereIsRefused	tracked			106
+session_test.go	112	TestAPageSignsInAndIsServedAsSomebody	verified	connect/cookies-sqlite	web/generated-authentication.mjs#L64	-
+session_test.go	138	TestSigningOutStopsTheNextCall	verified	connect/cookies-sqlite	web/generated-authentication.mjs#L67	-
+session_test.go	165	TestACookieForSomebodyWhoIsNotThereIsRefused	verified	connect/cookies-sqlite	web/generated-authentication.mjs#L92	-
 slow_test.go	29	TestTheSlowLogNamesTheCallThatWasSlow	verified	connect/sqlite	web/generated-slow.mjs#L51	-
 slow_test.go	68	TestASlowLogSaysNothingAboutACallThatWasNot	verified	connect/sqlite	web/generated-slow.mjs#L54	-
 slow_test.go	91	TestASlowLogChangesNothingAboutTheAnswer	verified	connect/sqlite	web/generated-slow.mjs#L44	-
@@ -306,7 +306,7 @@ stamp_test.go	144	TestPathsThatMustAgree	verified	connect/sqlite+postgres	web/ge
 stamped_layer_test.go	54	TestAppLayerFillsStampedAddFieldsBehindTheGate	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1980	-
 tenantlist_test.go	23	TestATenantListIsNarrowedLikeAnyOtherRead	verified	store/sqlite+postgres	runtime/tests/reference_cases/walls.rs#L242	-
 tenantlist_test.go	49	TestHoldersCanBeListedByTenant	verified	store/sqlite+postgres	runtime/tests/reference_cases/walls.rs#L242	-
-time_zone_test.go	13	TestCommandsUseTheRequestedDisplayZoneBeforeCallingTheServer	verified	connect/sqlite+postgres	web/generated-operator.mjs#L53	-
+time_zone_test.go	13	TestCommandsUseTheRequestedDisplayZoneBeforeCallingTheServer	verified	connect/sqlite+postgres	web/generated-operator.mjs#L69	-
 trail_test.go	45	TestTheTrailIsKeptPerKindOfThing	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1010	-
 trail_test.go	116	TestAKindTheAppDoesNotHaveIsRefused	verified	store/sqlite+postgres	runtime/tests/trail_retention.rs#L270	-
 trail_test.go	185	TestARenamedKindIsConfiguredByEitherWordAndNotBoth	verified	store/sqlite+postgres	runtime/tests/trail_retention.rs#L281	-
@@ -326,8 +326,8 @@ trail_test.go	1069	TestADatabaseRestoredFromBeforeTheLatestCheckpointIsAcceptedI
 trail_test.go	1193	TestTheGeneratedManifestWritesARowWholeWithItsSignature	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L725	-
 trail_test.go	1269	TestWhatTheTrailSaysIsSealedThroughTheAppsOwnStore	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L913	-
 trail_test.go	1338	TestAnErasureIsOwedInItsTransaction	verified	store/sqlite+postgres	runtime/tests/trail_retention.rs#L352	-
-uuid_contract_test.go	23	TestUUIDTypesReachGeneratedRequestsAndCLI	verified	connect/sqlite+postgres	web/generated-operator.mjs#L76	-
-uuid_contract_test.go	72	TestUUIDFilterMetadataTravelsTheStack	verified	connect/sqlite+postgres	web/generated-operator.mjs#L76	-
+uuid_contract_test.go	23	TestUUIDTypesReachGeneratedRequestsAndCLI	verified	connect/sqlite+postgres	web/generated-operator.mjs#L100	-
+uuid_contract_test.go	72	TestUUIDFilterMetadataTravelsTheStack	verified	connect/sqlite+postgres	web/generated-operator.mjs#L100	-
 valid_test.go	34	TestAnIndexWhoseBuildDidNotFinishIsRefused	verified	store/postgres	runtime/tests/upgrade.rs#L203	-
 valid_test.go	144	TestAColumnAnEarlierBuildDeclaredThatTakesNoRowWithoutOneIsRefused	verified	store/sqlite+postgres	runtime/tests/reference_cases/queries.rs#L313	-
 via_test.go	41	TestARowThatNamesNoNextHopCanStillBeWritten	verified	store/sqlite+postgres	runtime/tests/reference_cases/walls.rs#L56	-
@@ -338,26 +338,26 @@ watch_test.go	136	TestARemovalIsSaidByAbsence	verified	connect/sqlite+postgres;d
 watch_test.go	171	TestAnErasedHolderIsGoneOnTheStream	verified	connect/postgres+nats	web/generated-replicas.mjs#L77	-
 watch_test.go	228	TestAWatchSaysWhichRowsItIsAbout	verified	connect/sqlite+postgres;drpc/opfs	web/generated-query.js#L41	-
 watch_test.go	246	TestWatchIsNotToldAboutSomebodyElse	verified	connect/postgres+nats	web/generated-replicas.mjs#L77	-
-watchcmd_test.go	142	TestWatchIsTheSnapshotAndThenWhatHappens	tracked	connect/sqlite+postgres	web/generated-operator.mjs#L70	106
-watchcmd_test.go	187	TestWatchNamesARowThatIsGone	tracked			106
-watchcmd_test.go	228	TestWatchFailsWhenTheStreamEnds	tracked			106
-watchcmd_test.go	255	TestRetryReconnectsInsteadOfFailing	tracked			106
-watchcmd_test.go	289	TestRetryAsksForTheSnapshotItSaidItDidNotNeed	tracked			106
-watchcmd_test.go	408	TestRetryDoesNotLoopOnARequestTheServerRefused	tracked			106
-web_test.go	92	TestAPageReachesTheSameServer	tracked			106
-web_test.go	128	TestAPageIsBehindTheSameWall	tracked			106
-web_test.go	174	TestBothWiresABrowserCanSpeak	tracked			106
-web_test.go	239	TestAPageIsToldWhatIsWrongInItsOwnTerms	tracked			106
-web_test.go	257	TestAnOriginNobodyNamedIsNotAnsweredFor	verified	connect/tls-sqlite	web/generated-serving.mjs#L65	-
-web_test.go	292	TestTheAppsOwnRoutesGetTheSameAnswer	tracked			106
-web_test.go	329	TestAnAddressWithNothingConfiguredIsStillAMux	tracked			106
-web_test.go	359	TestTheBrowserPortCarriesGrpcToo	tracked			106
+watchcmd_test.go	142	TestWatchIsTheSnapshotAndThenWhatHappens	verified	connect/sqlite+postgres	web/generated-operator.mjs#L145	-
+watchcmd_test.go	187	TestWatchNamesARowThatIsGone	verified	connect/sqlite+postgres	web/generated-operator.mjs#L146	-
+watchcmd_test.go	228	TestWatchFailsWhenTheStreamEnds	verified	cli/native	web/generated-operator.mjs#L169	-
+watchcmd_test.go	255	TestRetryReconnectsInsteadOfFailing	verified	cli/native	web/generated-operator.mjs#L177	-
+watchcmd_test.go	289	TestRetryAsksForTheSnapshotItSaidItDidNotNeed	verified	cli/native	web/generated-operator.mjs#L178	-
+watchcmd_test.go	408	TestRetryDoesNotLoopOnARequestTheServerRefused	verified	cli/native	web/generated-operator.mjs#L171	-
+web_test.go	92	TestAPageReachesTheSameServer	verified	connect/sqlite	web/generated-web-contracts.mjs#L47	-
+web_test.go	128	TestAPageIsBehindTheSameWall	verified	connect/sqlite	web/generated-web-contracts.mjs#L48	-
+web_test.go	174	TestBothWiresABrowserCanSpeak	verified	connect/sqlite	web/generated-web-contracts.mjs#L58	-
+web_test.go	239	TestAPageIsToldWhatIsWrongInItsOwnTerms	verified	connect/sqlite	web/generated-web-contracts.mjs#L51	-
+web_test.go	257	TestAnOriginNobodyNamedIsNotAnsweredFor	verified	connect/tls-sqlite	web/generated-serving.mjs#L77	-
+web_test.go	292	TestTheAppsOwnRoutesGetTheSameAnswer	verified	connect/sqlite	web/generated-web-contracts.mjs#L56	-
+web_test.go	329	TestAnAddressWithNothingConfiguredIsStillAMux	verified	connect/sqlite	web/generated-web-contracts.mjs#L44	-
+web_test.go	359	TestTheBrowserPortCarriesGrpcToo	verified	connect/tls-sqlite	web/generated-serving.mjs#L71	-
 witness_test.go	29	TestTheHeadOfTheChainIsHeardOutsideTheDatabase	verified	native/witness-store+log	runtime/tests/rekor.rs#L103	-
-wordscmd_test.go	52	TestLsStillRunsTheList	verified	connect/sqlite+postgres	web/generated-operator.mjs#L64	-
-wordscmd_test.go	89	TestAnAppGivesACommandWordsOfItsOwn	verified	connect/sqlite+postgres	web/generated-operator.mjs#L42	-
-wordscmd_test.go	141	TestAWordThatWouldRunTwoCommandsIsRefused	tracked			106
-wordscmd_test.go	221	TestAReplacementKeepsThePlacesWords	verified	connect/sqlite+postgres	web/generated-operator.mjs#L43	-
-wordscmd_test.go	245	TestAHiddenCommandRunsAndIsNotShown	verified	connect/sqlite+postgres	web/generated-operator.mjs#L41	-
-wordscmd_test.go	311	TestCompletionOffersNamesAndReadsAliases	tracked			106
-wordscmd_test.go	335	TestTheTreeMountsWhereverItIsPut	verified	connect/sqlite+postgres	web/generated-operator.mjs#L40	-
-wordscmd_test.go	406	TestAVerbOfAnRpcIsTheRpcsName	verified	connect/sqlite+postgres	web/generated-operator.mjs#L58	-
+wordscmd_test.go	52	TestLsStillRunsTheList	verified	connect/sqlite+postgres	web/generated-operator.mjs#L80	-
+wordscmd_test.go	89	TestAnAppGivesACommandWordsOfItsOwn	verified	connect/sqlite+postgres	web/generated-operator.mjs#L58	-
+wordscmd_test.go	141	TestAWordThatWouldRunTwoCommandsIsRefused	verified	cli/native	tests/fleet/operator-types.rs#L71	-
+wordscmd_test.go	221	TestAReplacementKeepsThePlacesWords	verified	connect/sqlite+postgres	web/generated-operator.mjs#L59	-
+wordscmd_test.go	245	TestAHiddenCommandRunsAndIsNotShown	verified	connect/sqlite+postgres	web/generated-operator.mjs#L57	-
+wordscmd_test.go	311	TestCompletionOffersNamesAndReadsAliases	verified	connect/sqlite+postgres	web/generated-operator.mjs#L49	-
+wordscmd_test.go	335	TestTheTreeMountsWhereverItIsPut	verified	connect/sqlite+postgres	web/generated-operator.mjs#L56	-
+wordscmd_test.go	406	TestAVerbOfAnRpcIsTheRpcsName	verified	connect/sqlite+postgres	web/generated-operator.mjs#L74	-

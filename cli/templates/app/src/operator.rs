@@ -1,3 +1,5 @@
+#[path="display.rs"]
+mod display;
 use __APP_CRATE__::{proto, transport::POLICIES};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use buffa_reflect::{DescriptorPool, DynamicMessage, FormatOptions, MessageDescriptor};
@@ -166,6 +168,9 @@ fn print(
     schema: &Value,
     zone: chrono_tz::Tz,
     tree: &crate::tree::Tree,
+    columns:&Value,
+    watch:bool,
+    header:&mut bool,
 ) -> Result<()> {
     if let Some(desc) = message {
         let msg = DynamicMessage::deserialize(desc.clone(), v)?;
@@ -189,34 +194,9 @@ fn print(
         println!("{}", render(&v)?);
         return Ok(());
     }
-    if matches!(format, "table" | "wide")
-        && let Some(cols) = tree.columns.get(entity)
-    {
-        let rows = v["items"]
-            .as_array()
-            .map(Vec::as_slice)
-            .unwrap_or(std::slice::from_ref(&v));
-        println!(
-            "{}",
-            cols.iter()
-                .map(|(title, _)| *title)
-                .collect::<Vec<_>>()
-                .join("\t")
-        );
-        for row in rows {
-            println!(
-                "{}",
-                cols.iter()
-                    .map(|(_, path)| match row.pointer(path) {
-                        Some(Value::String(s)) => s.clone(),
-                        Some(Value::Null) | None => String::new(),
-                        Some(v) => v.to_string(),
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\t")
-            );
-        }
-        return Ok(());
+    if format=="pretty" && let Some(render)=tree.renderers.get(output_ty){println!("{}",render(&v)?);return Ok(())}
+    if matches!(format,"table"|"wide"){
+        return display::table(&v,entity,schema,columns,tree,format=="wide",watch,header);
     }
     if let Some(template) = format.strip_prefix("template=") {
         println!("{}", gtmpl::template(template, template_value(v))?);
@@ -236,40 +216,9 @@ fn print(
                 }
             }
         }
-        "json" | "protojson" => writeln!(out, "{}", serde_json::to_string(&v)?)?,
-        "pretty" => writeln!(out, "{}", serde_json::to_string_pretty(&v)?)?,
-        "table" | "wide" => {
-            let columns: std::collections::BTreeSet<_> = rows
-                .iter()
-                .filter_map(Value::as_object)
-                .flatten()
-                .map(|(k, _)| k.as_str())
-                .filter(|k| format == "wide" || *k != "id")
-                .collect();
-            writeln!(
-                out,
-                "{}",
-                columns.iter().copied().collect::<Vec<_>>().join("\t")
-            )?;
-            for row in &rows {
-                writeln!(
-                    out,
-                    "{}",
-                    columns
-                        .iter()
-                        .map(|k| match &row[*k] {
-                            Value::Null => String::new(),
-                            Value::String(s) => s.clone(),
-                            v => v.to_string(),
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\t")
-                )?;
-            }
-            if let Some(next) = v["next"].as_str().filter(|s| !s.is_empty()) {
-                writeln!(out, "next\t{next}")?;
-            }
-        }
+        "json" => writeln!(out,"{}",serde_json::to_string(&display::Ordered{value:&v,ty:output_ty,schema})?)?,
+        "protojson" => writeln!(out,"{}",serde_json::to_string(&v)?)?,
+        "pretty" => {display::pretty(&mut v,output_ty,schema);writeln!(out,"{}",serde_json::to_string_pretty(&display::Ordered{value:&v,ty:output_ty,schema})?)?;}
         _ => return Err(format!("unknown output format {format}").into()),
     }
     out.flush()?;
@@ -279,13 +228,21 @@ pub async fn run(args: &[String]) -> Result<()> {
     let policies: paydirt_store::Policies = serde_json::from_str(POLICIES)?;
     let mut tree = crate::tree::Tree::new(&policies)?;
     crate::commands::configure(&mut tree)?;
+    run_tree(args,&policies,&tree,||connection().map(|(client,config)|(client,config,()))).await
+}
+/// The connector is opened only after command selection. Its guard lives until the command finishes.
+pub async fn run_tree<G>(args:&[String],policies:&paydirt_store::Policies,tree:&crate::tree::Tree,connect:impl FnOnce()->Result<(HttpClient,ClientConfig,G)>)->Result<()>{
+    if args.first().is_some_and(|v|v=="completion"){
+        for word in tree.complete_words(&args[1..]){println!("{word}");}
+        return Ok(());
+    }
     let Some((target, tail)) = tree.select(args)? else {
         return Ok(());
     };
     let (entity, rpc) = match target {
         crate::tree::Command::Rpc { entity, rpc } => (entity.as_str(), rpc.as_str()),
         crate::tree::Command::Custom(handler) => {
-            let (client, config) = connection()?;
+            let (client, config, _guard) = connect()?;
             return handler(&client, &config, tail).await;
         }
     };
@@ -352,15 +309,15 @@ pub async fn run(args: &[String]) -> Result<()> {
     let zone = zone
         .parse::<chrono_tz::Tz>()
         .map_err(|_| format!("unknown --tz display zone: {zone}"))?;
-    if !matches!(input, "json" | "protojson" | "prototext")
-        || (!output.starts_with("template=")
+    if !matches!(input, "json" | "protojson" | "prototext"){return Err(format!("unknown input format {input}").into());}
+    if !output.starts_with("template=")
             && !tree.formats.contains_key(output)
             && !matches!(
                 output,
                 "pretty" | "json" | "protojson" | "name" | "table" | "wide" | "prototext"
-            ))
+            )
     {
-        return Err("unsupported input or output format".into());
+        return Err(format!("unknown output format {output}").into());
     }
     if let Some(ref key) = name {
         match rpc {
@@ -423,7 +380,8 @@ pub async fn run(args: &[String]) -> Result<()> {
             None,
         )?;
     }
-    let (client, config) = connection()?;
+    let (client, config, _guard) = connect()?;
+    let mut header=false;
     loop {
         match dispatch(&client, &config, entity, rpc, body.clone(), |v| {
             print(
@@ -434,7 +392,7 @@ pub async fn run(args: &[String]) -> Result<()> {
                 meta["output"].as_str().unwrap().trim_start_matches('.'),
                 &schema,
                 zone,
-                &tree,
+                tree, &policy.entity["columns"], rpc=="Watch", &mut header,
             )
         })
         .await
@@ -456,6 +414,8 @@ pub async fn run(args: &[String]) -> Result<()> {
                 return Err(e);
             }
             _ => {
+                body.as_object_mut().unwrap().remove("skipSnapshot");
+                body.as_object_mut().unwrap().remove("skip_snapshot");
                 eprintln!("Watch disconnected. Reconnecting with a fresh snapshot.");
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }

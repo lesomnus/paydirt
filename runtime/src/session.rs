@@ -53,6 +53,11 @@ pub enum Packet {
         frame: Frame,
         origin: Call,
     },
+    SessionHolder {
+        session: Option<String>,
+        tenant: Vec<u8>,
+        actor: Vec<u8>,
+    },
     ResolveAccount {
         account: Vec<u8>,
         bound: Option<Vec<u8>>,
@@ -156,6 +161,27 @@ impl Store {
             Packet::Observe(o) => self.observe(o, false),
             Packet::BufferObservation(o) => self.observe(o, true),
             Packet::FlushAccess => self.flush_access().map(|n| serde_json::json!(n)),
+            Packet::SessionHolder {
+                session,
+                tenant,
+                actor,
+            } => {
+                let entity = self
+                    .policies
+                    .iter()
+                    .find(|(_, policy)| policy.entity["own"] == "OWN_HOLDER")
+                    .map(|(name, _)| name.clone())
+                    .ok_or_else(|| Fault::unsupported("application has no OWN_HOLDER schema"))?;
+                let call = Call {
+                    entity,
+                    method: "$session_holder".into(),
+                    request: serde_json::json!({"tenant":crate::value::encoded(&tenant),"actor":crate::value::encoded(&actor)}),
+                };
+                match session {
+                    Some(id) => self.session_call(id, call, None),
+                    None => self.call(&Scope::Tenant(tenant), call),
+                }
+            }
             Packet::ResolveAccount {
                 account,
                 bound,

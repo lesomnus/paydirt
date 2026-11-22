@@ -31,6 +31,7 @@ fn cookie(ctx: &RequestContext) -> Result<Option<&str>, ConnectError> {
     Ok(found)
 }
 impl Providers {
+    pub(super) fn uses_session(&self,ctx:&RequestContext)->Result<bool,ConnectError>{Ok(self.sessions.is_some() && ctx.header("authorization").is_none() && cookie(ctx)?.is_some())}
     pub(super) async fn verify(
         &self,
         ctx: &RequestContext,

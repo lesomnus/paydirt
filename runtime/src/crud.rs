@@ -713,6 +713,23 @@ impl Transaction<'_> {
                 (self.inputs.clock)(),
             )?)
             .map_err(|e| Fault::internal(e.to_string())),
+            "$session_holder" => {
+                let holder = self
+                    .lookup(e, &json!({"id":req["actor"]}), false)
+                    .map_err(|err| {
+                        if err.code == "not_found" {
+                            Fault::unauthenticated("session holder no longer exists")
+                        } else {
+                            err
+                        }
+                    })?;
+                if self.object_tenant(e, &holder)? != req["tenant"] {
+                    return Err(Fault::unauthenticated(
+                        "session holder no longer belongs to the tenant",
+                    ));
+                }
+                Ok(Value::Null)
+            }
             "$resource_visible" => self.visible_resource(e, req),
             "$expire_past" => self.expire_history(req),
             "$begin_event" => self.begin_event(e, req),

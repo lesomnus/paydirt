@@ -40,6 +40,39 @@ impl Hook for Mark {
         }
         Ok(())
     }
+    fn receive(
+        &self,
+        method: &'static str,
+        _: &RequestContext,
+        bytes: &[u8],
+    ) -> Result<(), ConnectError> {
+        if method == "/app.RobotService/Add"
+            && crate::proto::app::RobotAddRequest::decode_from_slice(bytes)
+                .is_ok_and(|r| r.alias == "intercept-denied")
+        {
+            return Err(ConnectError::permission_denied(
+                "application interceptor denied this robot",
+            ));
+        }
+        Ok(())
+    }
+    fn forward_stream(
+        &self,
+        method: &str,
+        ctx: &RequestContext,
+        _: &[u8],
+    ) -> Result<bool, ConnectError> {
+        if method == "/app.RobotService/RevealStream" && ctx.header("x-consume-stream").is_some() {
+            return if self.0 == "inner" {
+                Ok(false)
+            } else {
+                Err(ConnectError::internal(
+                    "consumed frame reached the outer stream",
+                ))
+            };
+        }
+        Ok(true)
+    }
     fn send(
         &self,
         method: &'static str,
