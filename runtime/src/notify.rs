@@ -134,6 +134,20 @@ impl Transaction<'_> {
                 &f.topics,
             )
         };
+        // Get names a notification, not a tenant. Resolve the row under the caller's
+        // full tenant scope before applying its topic grant.
+        if !global && method == "Get" {
+            let key = &req["ref"]["id"];
+            id(key)?;
+            let records = self.owned_entity("OWN_NOTIFICATION")?.clone();
+            let row = self.lookup(&records, &json!({"id":key}), false)?;
+            if !paydirt::has_domain(&id(&row["tenantId"])?, 1)
+                || !visible(&grants.read, row["topicKey"].as_str().unwrap_or(""), &actor)
+            {
+                return Err(Fault::missing());
+            }
+            return notice(&row);
+        }
         let requested = req
             .get("tenantId")
             .filter(|v| v.as_str().is_some_and(|s| !s.is_empty()));
@@ -142,11 +156,6 @@ impl Transaction<'_> {
                 return Err(Fault::invalid("this namespace names no tenant"));
             }
             vec![0; 16]
-        } else if method == "Get" {
-            frame
-                .ok_or_else(|| Fault::unauthenticated("missing tenant"))?
-                .tenant
-                .clone()
         } else {
             let t = id(requested.ok_or_else(|| Fault::invalid("tenant ID required"))?)?;
             if !paydirt::has_domain(&t, 1) {

@@ -9,6 +9,9 @@ export async function notificationCases(service,account,tenant,actor,opts){
   const oldest=await add("first");const again=await add("first");eq(String(again.id),String(oldest.id),"publication retry");
   await rejected(add("first",hidden),6);
   const next=await add("second"),other=await add("hidden",hidden);
+  eq(String((await svc.get({ref:{id:oldest.id}},opts("manyNotices"))).id),String(oldest.id),"Get must use the full tenant grant");
+  await rejected(svc.get({ref:{id:oldest.id}},opts("foreignNotices")),5);
+  await rejected(svc.get({ref:{id:other.id}},opts("manyNotices")),5);
   await rejected(svc.get({ref:{id:other.id}},reader),5);
   await rejected(svc.read({...req,topics:[group,hidden]},reader),7);
   const mark=(rows,opt=reader)=>svc.mark({tenantId:tenant,refs:rows.map(v=>({id:v.id}))},opt);
