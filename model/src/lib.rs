@@ -128,6 +128,9 @@ impl Entity {
     pub fn table(&self) -> String {
         sql_name(&format!("pd_{}", self.name.replace('.', "__")))
     }
+    pub fn index_name(&self, index: &Index) -> String {
+        sql_name(&format!("{}__{}", self.table(), index.name))
+    }
     pub fn edge_table(&self, field: &Field) -> String {
         sql_name(&format!("{}__edge_{}", self.table(), field.number))
     }
@@ -353,12 +356,7 @@ impl Model {
                         false
                     };
                     if !keep {
-                        writeln!(
-                            sql,
-                            "DROP INDEX {};",
-                            quote(&sql_name(&format!("{table}__{}", idx.name)))
-                        )
-                        .unwrap();
+                        writeln!(sql, "DROP INDEX {};", quote(&e.index_name(&idx))).unwrap();
                     }
                 }
             }
@@ -370,7 +368,7 @@ impl Model {
                     continue;
                 }
 
-                let name = sql_name(&format!("{table}__{}", i.name));
+                let name = e.index_name(&i);
                 if !names.insert(name.to_ascii_lowercase()) {
                     return Err(format!("duplicate index {name}"));
                 }

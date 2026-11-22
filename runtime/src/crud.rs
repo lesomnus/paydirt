@@ -82,6 +82,10 @@ impl Transaction<'_> {
         if let Some(f) = e.erased() {
             parts.push(format!("r.{} IS NULL", quote(&f.column())))
         }
+        if let Scope::Account { id, reads } = self.scope {
+            parts.extend(reads.clauses(e, id, q, self.db.dialect())?);
+            return Ok(parts);
+        }
         if let Scope::Granted {
             sets: Some(sets), ..
         } = self.scope
@@ -329,13 +333,13 @@ impl Transaction<'_> {
             let v = if f.erased {
                 continue;
             } else if f.version {
-                value::stamp()
+                self.inputs.stamp()
             } else if let Some(v) = supplied {
                 v.clone()
             } else if f.name == e.key
                 && let Some(domain) = self.domain(e)
             {
-                value::encoded(&paydirt::mint(domain))
+                value::encoded(&(self.inputs.mint)(domain))
             } else if f.nullable {
                 continue;
             } else if !f.target.is_empty() {
@@ -347,7 +351,7 @@ impl Transaction<'_> {
             {
                 serde_json::from_str(def).unwrap_or_else(|_| json!(def))
             } else {
-                value::default_value(f)
+                value::default_value(f, self.inputs)
             };
             if f.name == e.key {
                 if let Some(domain) = self.domain(e)
@@ -416,7 +420,7 @@ impl Transaction<'_> {
                     return Err(Fault::aborted("row version changed"));
                 }
                 Some(q.param(
-                    value::bind(f, &value::next_stamp(&row[&f.json])?)?,
+                    value::bind(f, &value::next_stamp(&row[&f.json], (self.inputs.clock)())?)?,
                     self.db.dialect(),
                 ))
             } else if f.nullable && req[format!("{}Null", f.json)] == true {
@@ -482,7 +486,7 @@ impl Transaction<'_> {
             format!(
                 "UPDATE {table} AS r SET {}={} WHERE {}",
                 quote(&stamp.column()),
-                q.param(value::bind(stamp, &value::stamp())?, self.db.dialect()),
+                q.param(value::bind(stamp, &self.inputs.stamp())?, self.db.dialect()),
                 conditions.join(" AND ")
             )
         } else {
@@ -503,7 +507,7 @@ impl Transaction<'_> {
             "$entitlement" => serde_json::to_value(self.entitlement(
                 req["key"].as_str().unwrap_or(""),
                 req["lock"] == true,
-                chrono::Utc::now(),
+                (self.inputs.clock)(),
             )?)
             .map_err(|e| Fault::internal(e.to_string())),
             "$event" => self.say(e, req),

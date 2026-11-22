@@ -1,5 +1,5 @@
 [workspace]
-members = ["cli", "model", "runtime", "robot", "robot/protocol", "storage", "server"]
+members = ["cli", "model", "runtime", "robot", "robot/protocol", "storage", "server", "pdtest"]
 resolver = "3"
 
 [package]
