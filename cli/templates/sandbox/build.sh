@@ -14,4 +14,14 @@ module=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,s
 build Cargo.toml "$module" app
 build sandbox/database/Cargo.toml paydirt_app_database storage
 cp generated/storage/descriptors.binpb "$out/descriptors.binpb"
+python3 - "$out" <<'PYTHON'
+import hashlib,json,sys
+from pathlib import Path
+directory=Path(sys.argv[1])
+manifest={}
+for name in ("app","storage"):
+    data=(directory/(name+"_bg.wasm")).read_bytes()
+    manifest[name]={"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()}
+(directory/"modules.json").write_text(json.dumps(manifest))
+PYTHON
 wc -c "$out"/{app,storage}_bg.wasm

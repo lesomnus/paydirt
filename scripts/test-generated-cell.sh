@@ -39,3 +39,7 @@ if [[ "${PAYDIRT_TEST_WASM:-0}" == 1 ]]; then
   (cd "$CELL_PROJECT/sandbox" && bash build.sh && npm ci --no-audit --no-fund)
   node generated-browser.mjs
 fi
+
+if [[ -n "${PAYDIRT_GO_CHECKOUT:-}" ]]; then
+  "$repo/scripts/test-sdk.sh"
+fi

@@ -1,6 +1,6 @@
 import init, { AppPort } from "./pkg/app.js";
 
-const loaded = init();
+let loaded;
 let endpoint;
 let principals;
 let name;
@@ -12,8 +12,9 @@ do { crypto.getRandomValues(nonce); } while (!nonce[0]);
 
 self.onmessage = async ({ data, ports: [port] }) => {
   try {
-    await loaded;
     if (data.principals) {
+      loaded ??= init({module_or_path:data.module});
+      await loaded;
       principals = JSON.stringify(data.principals);
       name = data.name;
       generalWrites = data.generalWrites;
@@ -35,6 +36,7 @@ self.onmessage = async ({ data, ports: [port] }) => {
       });
       self.postMessage({ ready: true });
     } else if (data.drpc === "serve") {
+      await loaded;
       endpoint = new AppPort(port, nonce[0], principals, name, generalWrites, policy, accountHeader);
     }
   } catch (err) {
