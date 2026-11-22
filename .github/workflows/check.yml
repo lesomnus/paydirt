@@ -26,6 +26,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: rustup target add wasm32-unknown-unknown
       - run: python3 scripts/test-storage-schema.py
+      - run: cargo test --locked -p paydirt-store --features sqlite,postgres
       - run: cargo fmt --all --check && cargo test --locked --workspace
       - run: cargo build --locked -p paydirt-robot --features native-server --bin robot-server
       - name: Build service and storage workers
