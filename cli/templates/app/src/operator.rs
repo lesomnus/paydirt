@@ -9,7 +9,7 @@ use std::{
     io::{self, Read, Write},
     sync::Arc,
 };
-type Result<T> = std::result::Result<T, Box<dyn Error>>;
+pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 include!("../generated/storage/commands.rs");
 
@@ -34,29 +34,94 @@ fn reference(v: &str, entity: &str) -> Result<Value> {
         Ok(json!({"alias":name}))
     }
 }
-fn translate(v: &mut Value, from_uuid: bool) {
-    match v {
-        Value::Array(a) => a.iter_mut().for_each(|v| translate(v, from_uuid)),
-        Value::Object(o) => {
-            for (k, v) in o {
-                if (k == "id" || k.ends_with("Id") || k.ends_with("_id")) && v.is_string() {
-                    let s = v.as_str().unwrap();
-                    if from_uuid {
-                        if let Ok(id) = uuid::Uuid::parse_str(s) {
+// Interpret only descriptor-declared types, including map values and repeated refs.
+fn translate(
+    value: &mut Value,
+    ty: &str,
+    schema: &Value,
+    input: bool,
+    zone: Option<chrono_tz::Tz>,
+) -> Result<()> {
+    if let Value::Array(values) = value {
+        for v in values {
+            translate(v, ty, schema, input, zone)?;
+        }
+        return Ok(());
+    }
+    if ty == "google.protobuf.Timestamp" {
+        if let (Some(zone), Some(stamp)) = (zone, value.as_str()) {
+            let date = chrono::DateTime::parse_from_rfc3339(stamp)?;
+            *value = json!(
+                date.with_timezone(&zone)
+                    .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)
+            );
+        }
+        return Ok(());
+    }
+    if let Some(text) = value.as_str() {
+        if input
+            && let Some(entity) = ty.strip_suffix("Ref")
+            && !schema[ty].is_null()
+            && !schema[entity].is_null()
+        {
+            *value = reference(text, entity.rsplit('.').next().unwrap())?;
+        }
+        return Ok(());
+    }
+    let Some(fields) = schema[ty]["fields"].as_array() else {
+        return Ok(());
+    };
+    let Some(obj) = value.as_object_mut() else {
+        return Ok(());
+    };
+    for (k, v) in obj {
+        let field = if schema[ty]["map"] == true {
+            fields.iter().find(|f| f["number"] == 2)
+        } else {
+            fields
+                .iter()
+                .find(|f| f["name"] == k.as_str() || f["proto"] == k.as_str())
+        };
+        let Some(f) = field else { continue };
+        if f["uuid"] == true {
+            let convert = |v: &mut Value| {
+                if let Some(text) = v.as_str() {
+                    if input {
+                        if let Ok(id) = uuid::Uuid::parse_str(text) {
                             *v = json!(STANDARD.encode(id.as_bytes()));
                         }
-                    } else if let Ok(b) = STANDARD.decode(s)
-                        && let Ok(id) = uuid::Uuid::from_slice(&b)
+                    } else if let Ok(bytes) = STANDARD.decode(text)
+                        && let Ok(id) = uuid::Uuid::from_slice(&bytes)
                     {
                         *v = json!(id.to_string());
                     }
-                } else {
-                    translate(v, from_uuid);
                 }
+            };
+            if let Some(list) = v.as_array_mut() {
+                list.iter_mut().for_each(convert)
+            } else {
+                convert(v)
             }
+        } else if let Some(target) = f["target"].as_str().filter(|s| !s.is_empty()) {
+            translate(v, target, schema, input, zone)?;
         }
-        _ => {}
     }
+    Ok(())
+}
+pub async fn invoke(
+    client: &HttpClient,
+    config: &ClientConfig,
+    entity: &str,
+    rpc: &str,
+    req: Value,
+) -> Result<Vec<Value>> {
+    let mut rows = Vec::new();
+    dispatch(client, config, entity, rpc, req, |v| {
+        rows.push(v);
+        Ok(())
+    })
+    .await?;
+    Ok(rows)
 }
 fn template_value(value: Value) -> gtmpl::Value {
     match value {
@@ -78,7 +143,16 @@ fn template_value(value: Value) -> gtmpl::Value {
         }
     }
 }
-fn print(mut v: Value, format: &str, message: Option<&MessageDescriptor>) -> Result<()> {
+fn print(
+    mut v: Value,
+    format: &str,
+    message: Option<&MessageDescriptor>,
+    entity: &str,
+    output_ty: &str,
+    schema: &Value,
+    zone: chrono_tz::Tz,
+    tree: &crate::tree::Tree,
+) -> Result<()> {
     if let Some(desc) = message {
         let msg = DynamicMessage::deserialize(desc.clone(), v)?;
         println!(
@@ -89,7 +163,46 @@ fn print(mut v: Value, format: &str, message: Option<&MessageDescriptor>) -> Res
         return Ok(());
     }
     if format != "protojson" {
-        translate(&mut v, false);
+        translate(
+            &mut v,
+            output_ty,
+            schema,
+            false,
+            (!matches!(format, "json" | "name")).then_some(zone),
+        )?;
+    }
+    if let Some(render) = tree.formats.get(format) {
+        println!("{}", render(&v)?);
+        return Ok(());
+    }
+    if matches!(format, "table" | "wide")
+        && let Some(cols) = tree.columns.get(entity)
+    {
+        let rows = v["items"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or(std::slice::from_ref(&v));
+        println!(
+            "{}",
+            cols.iter()
+                .map(|(title, _)| *title)
+                .collect::<Vec<_>>()
+                .join("\t")
+        );
+        for row in rows {
+            println!(
+                "{}",
+                cols.iter()
+                    .map(|(_, path)| match row.pointer(path) {
+                        Some(Value::String(s)) => s.clone(),
+                        Some(Value::Null) | None => String::new(),
+                        Some(v) => v.to_string(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\t")
+            );
+        }
+        return Ok(());
     }
     if let Some(template) = format.strip_prefix("template=") {
         println!("{}", gtmpl::template(template, template_value(v))?);
@@ -150,54 +263,20 @@ fn print(mut v: Value, format: &str, message: Option<&MessageDescriptor>) -> Res
 }
 pub async fn run(args: &[String]) -> Result<()> {
     let policies: paydirt_store::Policies = serde_json::from_str(POLICIES)?;
-    if args.is_empty() || args[0] == "--help" || args[0] == "-h" {
-        println!(
-            "Usage: APP ENTITY VERB [REF] [JSON|-]\nEntities: {}",
-            policies
-                .iter()
-                .filter(|(_, p)| !p.methods.is_empty())
-                .map(|(n, _)| n.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
+    let mut tree = crate::tree::Tree::new(&policies)?;
+    crate::commands::configure(&mut tree)?;
+    let Some((target, tail)) = tree.select(args)? else {
         return Ok(());
-    }
-    let mut names = policies.iter().filter(|(name, _)| {
-        name.eq_ignore_ascii_case(&args[0])
-            || name
-                .rsplit('.')
-                .next()
-                .unwrap()
-                .eq_ignore_ascii_case(&args[0])
-    });
-    let (entity, policy) = names.next().ok_or("unknown entity")?;
-    if names.next().is_some() {
-        return Err("use the qualified entity name".into());
-    }
-    let verbs = || {
-        policy
-            .methods
-            .iter()
-            .filter(|(_, m)| m["client_stream"] != true)
     };
-    if args.len() == 1 || args.iter().any(|a| matches!(a.as_str(), "--help" | "-h")) {
-        let names = verbs()
-            .map(|(v, _)| {
-                if v == "List" {
-                    "list,ls".into()
-                } else {
-                    v.to_lowercase()
-                }
-            })
-            .collect::<Vec<_>>();
-        println!("{entity}: {}", names.join(" "));
-        return Ok(());
-    }
-    let verb = if args[1] == "ls" { "list" } else { &args[1] };
-    let (rpc, meta) = verbs()
-        .find(|(name, _)| name.eq_ignore_ascii_case(verb))
-        .ok_or("verb is not declared for this entity")?;
-    let rpc = rpc.as_str();
+    let (entity, rpc) = match target {
+        crate::tree::Command::Rpc { entity, rpc } => (entity.as_str(), rpc.as_str()),
+        crate::tree::Command::Custom(handler) => {
+            let (client, config) = connection()?;
+            return handler(&client, &config, tail).await;
+        }
+    };
+    let policy = &policies[entity];
+    let meta = &policy.methods[rpc];
     let short = entity.rsplit('.').next().unwrap();
     let mut body = json!({});
     let mut name = None;
@@ -205,10 +284,13 @@ pub async fn run(args: &[String]) -> Result<()> {
     let mut output = "pretty";
     let mut input = "json";
     let mut retry = false;
-    let mut args = args[2..].iter();
+    let default_zone = env::var("APP_TZ").unwrap_or_else(|_| "UTC".into());
+    let mut zone = default_zone.as_str();
+    let mut args = tail.iter();
     while let Some(a) = args.next() {
         match a.as_str() {
             "-o" | "--out" => output = args.next().ok_or("missing output format")?,
+            "--tz" => zone = args.next().ok_or("missing --tz display zone")?,
             "--in" => input = args.next().ok_or("missing input format")?,
             "--retry" if rpc == "Watch" => retry = true,
             "--size" if rpc == "List" => {
@@ -240,8 +322,13 @@ pub async fn run(args: &[String]) -> Result<()> {
             _ => return Err(format!("unexpected argument {a}").into()),
         }
     }
+    let zone = zone
+        .parse::<chrono_tz::Tz>()
+        .map_err(|_| format!("unknown --tz display zone: {zone}"))?;
+    let schema: Value = serde_json::from_str(__APP_CRATE__::transport::ADMISSION_SCHEMA)?;
     if !matches!(input, "json" | "protojson" | "prototext")
         || (!output.starts_with("template=")
+            && !tree.formats.contains_key(output)
             && !matches!(
                 output,
                 "pretty" | "json" | "protojson" | "name" | "table" | "wide" | "prototext"
@@ -298,13 +385,27 @@ pub async fn run(args: &[String]) -> Result<()> {
         }
     }
     if input == "json" {
-        translate(&mut body, true);
+        translate(
+            &mut body,
+            meta["input"].as_str().unwrap().trim_start_matches('.'),
+            &schema,
+            true,
+            None,
+        )?;
     }
-    let endpoint = env::var("PAYDIRT_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".into());
-    let (client, config) = rpc_client(&endpoint, env::var("PAYDIRT_TOKEN").ok().as_deref())?;
+    let (client, config) = connection()?;
     loop {
         match dispatch(&client, &config, entity, rpc, body.clone(), |v| {
-            print(v, output, response.as_ref())
+            print(
+                v,
+                output,
+                response.as_ref(),
+                entity,
+                meta["output"].as_str().unwrap().trim_start_matches('.'),
+                &schema,
+                zone,
+                &tree,
+            )
         })
         .await
         {
@@ -359,3 +460,10 @@ pub(crate) fn rpc_client(
     }
     Ok((client, config))
 }
+
+fn connection() -> Result<(HttpClient, ClientConfig)> {
+    let endpoint = env::var("PAYDIRT_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".into());
+    let (client, config) = rpc_client(&endpoint, env::var("PAYDIRT_TOKEN").ok().as_deref())?;
+    Ok((client, config))
+}
+

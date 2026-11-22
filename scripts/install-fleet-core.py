@@ -25,6 +25,7 @@ for rel in ["ext/app/payday/holder_svc.ext.proto", "ext/payday/holder.ext.proto"
     dest.parent.mkdir(exist_ok=True,parents=True)
     copyfile(proto / rel,dest)
 copyfile(repo / "tests/fleet/readings.rs", app / "src/readings.rs")
+copyfile(repo / "tests/fleet/commands.rs", app / "src/commands.rs")
 copyfile(repo / "tests/fleet/robot.rs", app / "src/robot.rs")
 lib = app / "src/lib.rs"
 source = lib.read_text()
@@ -79,3 +80,6 @@ main.write_text(source.replace(point, """let store=store.with_admission(ADMISSIO
     Ok(())
 })?;
     """ + point).replace("transport::{Database, MODEL, POLICIES}","transport::{ADMISSION_SCHEMA, Database, MODEL, POLICIES}"))
+
+with (app / "src/operator.rs").open("a") as operator:
+    operator.write((repo / "tests/fleet/operator-types.rs").read_text())

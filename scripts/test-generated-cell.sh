@@ -33,6 +33,7 @@ cmp "$work/original.rs" "$CELL_PROJECT/src/robot.rs"
 cargo build --quiet --manifest-path "$CELL_PROJECT/Cargo.toml"
 export PAYDIRT_TEST_MOVE=1 CELL_SQLITE_PATH="$work/fleet.sqlite3"
 node generated-cell.mjs
+cargo test --quiet --manifest-path "$CELL_PROJECT/Cargo.toml" --bin fleet operator_tests
 node generated-replicas.mjs
 cargo test --manifest-path "$repo/Cargo.toml" -p paydirt-store --features sqlite,postgres --test notify_policy
 
