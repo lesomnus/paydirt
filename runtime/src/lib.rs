@@ -1,6 +1,7 @@
 //! Transactional entity storage for generated Payday applications.
 mod account;
 mod apply;
+pub mod auth;
 mod crud;
 mod driver;
 pub mod entitle;
@@ -29,6 +30,8 @@ pub type Result<T> = std::result::Result<T, Fault>;
 pub struct Fault {
     pub code: String,
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field: Option<String>,
 }
 impl std::fmt::Display for Fault {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -36,13 +39,21 @@ impl std::fmt::Display for Fault {
     }
 }
 impl std::error::Error for Fault {}
-macro_rules! faults {($($f:ident=>$code:literal),*)=>{$(pub fn $f(msg:impl Into<String>)->Self{Self{code:$code.into(),message:msg.into()}})*};}
+macro_rules! faults {($($f:ident=>$code:literal),*)=>{$(pub fn $f(msg:impl Into<String>)->Self{Self{code:$code.into(),message:msg.into(),field:None}})*};}
 impl Fault {
     faults!(invalid=>"invalid_argument", conflict=>"already_exists",precondition=>"failed_precondition",aborted=>"aborted",internal=>"internal",unsupported=>"unimplemented",denied=>"permission_denied",unauthenticated=>"unauthenticated");
+    pub fn field(name: &str, message: &str) -> Self {
+        Self {
+            code: "invalid_argument".into(),
+            message: message.into(),
+            field: Some(name.into()),
+        }
+    }
     pub fn missing() -> Self {
         Self {
             code: "not_found".into(),
             message: "row not found".into(),
+            field: None,
         }
     }
 }
