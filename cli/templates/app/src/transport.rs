@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 
+pub const ADMISSION_SCHEMA: &str = include_str!("../generated/storage/admission.json");
 pub const MODEL: &str = include_str!("../generated/storage/model.json");
 pub const POLICIES: &str = include_str!("../generated/storage/policies.json");
 /// The current and former names from this application's schema.
@@ -210,6 +211,9 @@ pub fn error(mut f: Fault) -> ConnectError {
         });
     }
     match f.code.as_str() {
+        "unavailable" => ConnectError::unavailable(f.message),
+        "deadline_exceeded" => ConnectError::deadline_exceeded(f.message),
+        "resource_exhausted" => ConnectError::resource_exhausted(f.message),
         "invalid_argument" => ConnectError::invalid_argument(f.message),
         "already_exists" => ConnectError::already_exists(f.message),
         "failed_precondition" => ConnectError::failed_precondition(f.message),
@@ -224,6 +228,7 @@ pub fn error(mut f: Fault) -> ConnectError {
 
 #[derive(Clone)]
 pub struct Database {
+    capture_origin: bool,
     broker: Option<Arc<dyn Broker>>,
     principals: Arc<HashMap<String, Principal>>,
     lock: Arc<async_lock::Mutex<()>>,
@@ -255,6 +260,7 @@ impl Database {
     }
     #[cfg(not(target_arch = "wasm32"))]
     pub fn from_store(mut store: paydirt_store::Store, config: &str) -> Result<Self, String> {
+        let capture_origin = store.has_admission();
         let principals = Arc::new(tokens(config)?);
         let (queue, events) = std::sync::mpsc::channel::<(
             Packet,
@@ -269,6 +275,7 @@ impl Database {
             })
             .map_err(|e| e.to_string())?;
         Ok(Self {
+            capture_origin,
             principals,
             lock: Default::default(),
             queue,
@@ -282,6 +289,7 @@ impl Database {
     #[cfg(target_arch = "wasm32")]
     pub fn worker(config: &str) -> Result<Self, String> {
         Ok(Self {
+            capture_origin: true,
             principals: Arc::new(tokens(config)?),
             lock: Default::default(),
             broker: Some(Arc::new(Memory::default())),
@@ -520,6 +528,32 @@ impl Database {
         Ok(ctx)
     }
     pub async fn begin(&self, ctx: &mut RequestContext) -> Result<Option<Guard>, ConnectError> {
+        self.begin_operation(ctx, None).await
+    }
+    pub async fn begin_request<I: Serialize>(
+        &self,
+        ctx: &mut RequestContext,
+        entity: &str,
+        method: &str,
+        request: impl FnOnce() -> I,
+    ) -> Result<Option<Guard>, ConnectError> {
+        let origin = if self.capture_origin {
+            Some(Call {
+                entity: entity.to_owned(),
+                method: method.to_owned(),
+                request: serde_json::to_value(request())
+                    .map_err(|e| ConnectError::internal(e.to_string()))?,
+            })
+        } else {
+            None
+        };
+        self.begin_operation(ctx, origin).await
+    }
+    async fn begin_operation(
+        &self,
+        ctx: &mut RequestContext,
+        origin: Option<Call>,
+    ) -> Result<Option<Guard>, ConnectError> {
         let Some(frame) = ctx.extensions().get::<Frame>().cloned() else {
             return Ok(None);
         };
@@ -530,9 +564,16 @@ impl Database {
             id: Some(id.clone()),
             _permit: permit,
         };
-        self.send(Packet::Begin {
-            id: id.clone(),
-            frame,
+        self.send(match origin {
+            Some(origin) => Packet::BeginOrigin {
+                id: id.clone(),
+                frame,
+                origin,
+            },
+            None => Packet::Begin {
+                id: id.clone(),
+                frame,
+            },
         })
         .await?;
         ctx.extensions_mut().insert(Session(id));

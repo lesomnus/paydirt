@@ -261,7 +261,7 @@ pub fn generate(work: &Path) -> Result<()> {
             if method["server_stream"] == false && method["client_stream"] == false {
                 writeln!(
                     audit,
-                    "{sig} {{async move {{let mut ctx=ctx;let guard=self.0.begin(&mut ctx).await?;let result=next.{fun}(ctx,{arg}).await;if let Some(guard)=guard {{guard.finish(result.is_ok()).await?;}} result}}}}"
+                    "{sig} {{async move {{let mut ctx=ctx;let guard=self.0.begin_request(&mut ctx,{name:?},{rpc:?},||{arg}.to_owned_message()).await?;let result=next.{fun}(ctx,{arg}).await;if let Some(guard)=guard {{guard.finish(result.is_ok()).await?;}} result}}}}"
                 )?;
                 let (input, output) = types
                     .get(&rpc.to_snake_case())

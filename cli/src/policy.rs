@@ -122,6 +122,71 @@ pub fn generate(work: &Path) -> Result<()> {
             }
         }
     }
+    let mut messages = BTreeMap::new();
+    fn describe(
+        prefix: &str,
+        msg: &Value,
+        out: &mut BTreeMap<String, Value>,
+        policies: &BTreeMap<String, Value>,
+    ) {
+        let Some(short) = msg["name"].as_str() else {
+            return;
+        };
+        let name = if prefix.is_empty() {
+            short.into()
+        } else {
+            format!("{prefix}.{short}")
+        };
+        let mut fields = Vec::new();
+        // Generated CRUD request fields inherit the entity's secret declarations.
+        let entity = policies
+            .keys()
+            .filter(|e| {
+                name == **e
+                    || name
+                        .strip_prefix(e.as_str())
+                        .is_some_and(|s| matches!(s, "AddRequest" | "PatchRequest" | "Ref"))
+            })
+            .max_by_key(|e| e.len());
+        for f in msg["field"].as_array().into_iter().flatten() {
+            let secret = f["options"]["[payday.field]"]["secret"] == true
+                || entity.and_then(|e| policies.get(e)).is_some_and(|p| {
+                    p["fields"][f["name"].as_str().unwrap_or_default()]["secret"] == true
+                });
+            let target = if f["type"] == "TYPE_MESSAGE" {
+                f["typeName"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .trim_start_matches('.')
+            } else {
+                ""
+            };
+            fields.push(
+                json!({"name":f["jsonName"],"number":f["number"],"target":target,"secret":secret}),
+            );
+        }
+        out.insert(
+            name.clone(),
+            json!({"fields":fields,"map":msg["options"]["mapEntry"]==true}),
+        );
+        for nested in msg["nestedType"].as_array().into_iter().flatten() {
+            describe(&name, nested, out, policies);
+        }
+    }
+    for file in image["file"].as_array().unwrap() {
+        for msg in file["messageType"].as_array().into_iter().flatten() {
+            describe(
+                file["package"].as_str().unwrap_or_default(),
+                msg,
+                &mut messages,
+                &policies,
+            );
+        }
+    }
+    fs::write(
+        work.join("generated/storage/admission.json"),
+        serde_json::to_vec(&messages)?,
+    )?;
     fs::write(
         work.join("generated/storage/policies.json"),
         serde_json::to_string_pretty(&policies)? + "\n",

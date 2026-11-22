@@ -210,7 +210,15 @@ mod sink_app_cell {
         > + Send {
             async move {
                 let mut ctx = ctx;
-                let guard = self.0.begin(&mut ctx).await?;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Cell",
+                        "Add",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
                 let result = next.add(ctx, request).await;
                 if let Some(guard) = guard {
                     guard.finish(result.is_ok()).await?;
@@ -230,7 +238,15 @@ mod sink_app_cell {
         > + Send {
             async move {
                 let mut ctx = ctx;
-                let guard = self.0.begin(&mut ctx).await?;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Cell",
+                        "Get",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
                 let result = next.get(ctx, request).await;
                 if let Some(guard) = guard {
                     guard.finish(result.is_ok()).await?;
@@ -253,7 +269,15 @@ mod sink_app_cell {
         > + Send {
             async move {
                 let mut ctx = ctx;
-                let guard = self.0.begin(&mut ctx).await?;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Cell",
+                        "Patch",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
                 let result = next.patch(ctx, request).await;
                 if let Some(guard) = guard {
                     guard.finish(result.is_ok()).await?;
@@ -276,7 +300,15 @@ mod sink_app_cell {
         > + Send {
             async move {
                 let mut ctx = ctx;
-                let guard = self.0.begin(&mut ctx).await?;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Cell",
+                        "Apply",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
                 let result = next.apply(ctx, request).await;
                 if let Some(guard) = guard {
                     guard.finish(result.is_ok()).await?;
@@ -298,7 +330,15 @@ mod sink_app_cell {
         > + Send {
             async move {
                 let mut ctx = ctx;
-                let guard = self.0.begin(&mut ctx).await?;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Cell",
+                        "Erase",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
                 let result = next.erase(ctx, request).await;
                 if let Some(guard) = guard {
                     guard.finish(result.is_ok()).await?;
@@ -532,7 +572,15 @@ mod sink_app_holder {
         > + Send {
             async move {
                 let mut ctx = ctx;
-                let guard = self.0.begin(&mut ctx).await?;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Holder",
+                        "Get",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
                 let result = next.get(ctx, request).await;
                 if let Some(guard) = guard {
                     guard.finish(result.is_ok()).await?;
@@ -557,7 +605,15 @@ mod sink_app_holder {
         > + Send {
             async move {
                 let mut ctx = ctx;
-                let guard = self.0.begin(&mut ctx).await?;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Holder",
+                        "List",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
                 let result = next.list(ctx, request).await;
                 if let Some(guard) = guard {
                     guard.finish(result.is_ok()).await?;
@@ -951,7 +1007,15 @@ mod sink_app_robot {
         > + Send {
             async move {
                 let mut ctx = ctx;
-                let guard = self.0.begin(&mut ctx).await?;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Robot",
+                        "Add",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
                 let result = next.add(ctx, request).await;
                 if let Some(guard) = guard {
                     guard.finish(result.is_ok()).await?;
@@ -976,7 +1040,15 @@ mod sink_app_robot {
         > + Send {
             async move {
                 let mut ctx = ctx;
-                let guard = self.0.begin(&mut ctx).await?;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Robot",
+                        "AddMany",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
                 let result = next.add_many(ctx, request).await;
                 if let Some(guard) = guard {
                     guard.finish(result.is_ok()).await?;
@@ -998,7 +1070,15 @@ mod sink_app_robot {
         > + Send {
             async move {
                 let mut ctx = ctx;
-                let guard = self.0.begin(&mut ctx).await?;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Robot",
+                        "Get",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
                 let result = next.get(ctx, request).await;
                 if let Some(guard) = guard {
                     guard.finish(result.is_ok()).await?;
@@ -1023,7 +1103,15 @@ mod sink_app_robot {
         > + Send {
             async move {
                 let mut ctx = ctx;
-                let guard = self.0.begin(&mut ctx).await?;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Robot",
+                        "Patch",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
                 let result = next.patch(ctx, request).await;
                 if let Some(guard) = guard {
                     guard.finish(result.is_ok()).await?;
@@ -1048,7 +1136,15 @@ mod sink_app_robot {
         > + Send {
             async move {
                 let mut ctx = ctx;
-                let guard = self.0.begin(&mut ctx).await?;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Robot",
+                        "Apply",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
                 let result = next.apply(ctx, request).await;
                 if let Some(guard) = guard {
                     guard.finish(result.is_ok()).await?;
@@ -1070,7 +1166,15 @@ mod sink_app_robot {
         > + Send {
             async move {
                 let mut ctx = ctx;
-                let guard = self.0.begin(&mut ctx).await?;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Robot",
+                        "Erase",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
                 let result = next.erase(ctx, request).await;
                 if let Some(guard) = guard {
                     guard.finish(result.is_ok()).await?;
@@ -1095,7 +1199,15 @@ mod sink_app_robot {
         > + Send {
             async move {
                 let mut ctx = ctx;
-                let guard = self.0.begin(&mut ctx).await?;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Robot",
+                        "List",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
                 let result = next.list(ctx, request).await;
                 if let Some(guard) = guard {
                     guard.finish(result.is_ok()).await?;
@@ -1120,7 +1232,15 @@ mod sink_app_robot {
         > + Send {
             async move {
                 let mut ctx = ctx;
-                let guard = self.0.begin(&mut ctx).await?;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Robot",
+                        "Move",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
                 let result = next.r#move(ctx, request).await;
                 if let Some(guard) = guard {
                     guard.finish(result.is_ok()).await?;
@@ -1330,7 +1450,15 @@ mod sink_app_tenant {
         > + Send {
             async move {
                 let mut ctx = ctx;
-                let guard = self.0.begin(&mut ctx).await?;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Tenant",
+                        "Get",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
                 let result = next.get(ctx, request).await;
                 if let Some(guard) = guard {
                     guard.finish(result.is_ok()).await?;
@@ -1355,7 +1483,15 @@ mod sink_app_tenant {
         > + Send {
             async move {
                 let mut ctx = ctx;
-                let guard = self.0.begin(&mut ctx).await?;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Tenant",
+                        "List",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
                 let result = next.list(ctx, request).await;
                 if let Some(guard) = guard {
                     guard.finish(result.is_ok()).await?;

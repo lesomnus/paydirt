@@ -3,6 +3,7 @@ message RobotRenamePairRequest {
   string first_alias = 2;
   RobotRef second = 3;
   string second_alias = 4;
+  bytes proof = 5;
 }
 
 message RobotAllowanceRequest { string key=1; bool lock=2; }

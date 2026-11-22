@@ -149,3 +149,20 @@ source app schema. The Go comparison also runs Payday's original sandbox page.
 | react.test.tsx | React subscriptions, jsdom and an in-process test transport |
 | code.test.tsx | Editor bindings in jsdom |
 | devtools.test.tsx | Devtools panel in jsdom with generated entity declarations |
+
+### Write admission
+
+Construct a store with `Store::open(...).with_admission(ADMISSION_SCHEMA,
+options, policy)?` and pass it to `Database::from_store`. Policies select
+qualified entity names or whole-component wildcards such as `app.*`. They
+receive the outer operation and its request, the generated write method, row
+ID, verified frame, and the previous and resulting rows. The sink calls the
+policy after the SQL change and before recording and committing. A failed
+decision rolls back the entire request, including earlier changes in a batch.
+
+Declare extra sensitive request fields by message name and field number in
+`Options::secrets`. The policy receives schema-known fields with declared
+secrets, encoded patches and Any payloads withheld. On native servers,
+admission runs with a bounded number of concurrent decisions and a timeout.
+For the sandbox, install the policy on the store in the database Worker
+and use a synchronous local decision there.
