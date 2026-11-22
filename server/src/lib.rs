@@ -118,12 +118,23 @@ pub struct Host {
     listeners: Vec<Listener>,
     telemetry: Option<SdkTracerProvider>,
 }
+pub use axum;
 impl Host {
     pub async fn bind(
         addr: SocketAddr,
         spec: Serving,
         service_name: &str,
         router: connectrpc::Router,
+    ) -> Result<Self> {
+        Self::bind_with_routes(addr, spec, service_name, router, Router::new()).await
+    }
+    /// Mount application HTTP handlers on the same listener and CORS stack as Connect and gRPC.
+    pub async fn bind_with_routes(
+        addr: SocketAddr,
+        spec: Serving,
+        service_name: &str,
+        router: connectrpc::Router,
+        app: Router,
     ) -> Result<Self> {
         let primary = spec.tls.map(tls).transpose()?;
         let web = spec
@@ -174,7 +185,7 @@ impl Host {
                     .max_message_size(bytes),
             );
         }
-        let mut routes = Router::new().fallback_service(service);
+        let mut routes = app.fallback_service(service);
         let telemetry = if let Some(endpoint) = spec.otlp_traces_endpoint {
             if service_name.is_empty() {
                 return Err("telemetry requires a service name".into());

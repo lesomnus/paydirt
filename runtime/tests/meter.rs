@@ -142,6 +142,19 @@ fn tenant_pages_resume_after_the_last_id() {
         ids.push(STANDARD.decode(t["id"].as_str().unwrap()).unwrap());
     }
     ids.sort();
+    assert_eq!(db.meter_tenants(None, 100).unwrap(), ids);
+    let mut walked = Vec::new();
+    loop {
+        let page = db
+            .meter_tenants(walked.last().map(Vec::as_slice), 1)
+            .unwrap();
+        if page.is_empty() {
+            break;
+        }
+        assert_eq!(page.len(), 1);
+        walked.extend(page);
+    }
+    assert_eq!(walked, ids);
     assert_eq!(db.meter_tenants(None, 2).unwrap(), ids[..2]);
     assert_eq!(db.meter_tenants(Some(&ids[1]), 2).unwrap(), ids[2..]);
     assert!(db.meter_tenants(Some(&ids[2]), 1).unwrap().is_empty());

@@ -1,4 +1,5 @@
 mod commands;
+mod routes;
 mod grants;
 mod operator;
 mod tree;
@@ -368,7 +369,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Some(v) => return Err(format!("unknown worker lease {v}").into()),
     };
     let routes = router(db.clone(), config.service_name.clone());
-    let listener = paydirt_server::Host::bind(addr, config.serving, &config.service_name, routes)
+    let listener = paydirt_server::Host::bind_with_routes(addr, config.serving, &config.service_name, routes, routes::http(&db))
         .await
         .map_err(|e| e as Box<dyn Error>)?;
     let stop = async {

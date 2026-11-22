@@ -3,7 +3,7 @@ import {execFile,execFileSync,spawn} from "node:child_process";
 import {createServer} from "node:http";
 import {promisify} from "node:util";
 import {readFile} from "node:fs/promises";
-import {createFileRegistry,fromBinary,getOption} from "@bufbuild/protobuf";
+import {create,createFileRegistry,fromBinary,toBinary,getOption} from "@bufbuild/protobuf";
 import {FileDescriptorSetSchema} from "@bufbuild/protobuf/wkt";
 import {createInterface} from "node:readline";
 
@@ -32,6 +32,22 @@ export async function operatorScenario(app,workspace,env,primary){
     },args.join(" "));
   }
   assert.throws(()=>run(["holder","add","alias=surprise"]),err=>/existing row/.test(err.stderr));
+  const pretty=run(["holder","get",named]);
+  assert(pretty.includes(holder.id) && pretty.includes(idText) && !pretty.includes("0001-01-01"));
+  const rawText=run(["holder","get",named,"-o","prototext"]);assert(!rawText.includes(holder.id));
+  const rawJson=JSON.parse(run(["holder","get",named,"-o","protojson"]));assert.equal(rawJson.id,Buffer.from(holder.id.replaceAll("-",""),"hex").toString("base64"));
+  const userJson=run(["holder","get",named,"-o","json"]);assert(userJson.indexOf('"id"')<userJson.indexOf('"alias"'));assert.equal(JSON.parse(userJson).tenant.id,idText);
+  assert.equal(run(["holder","get",named,"-o","name"]),holder.id);
+  const standard=run(["holder","get",named,"-o","table"]);assert(standard.startsWith("ALIAS\tAGE\n") && standard.includes("reference-holder"));
+  assert(run(["holder","get",named,"-o","wide"]).includes(holder.id));
+  assert.throws(()=>run(["holder","get",named,"-o","missing-format"]),e=>e.stderr.includes("missing-format"));
+  assert.throws(()=>run(["holder","get",named],{PAYDIRT_TOKEN:"unknown"}),e=>/unauthenticated/i.test(e.stderr));
+  const stdin=execFileSync(app,["holder","add","-","-o","json"],{cwd:workspace,env,input:JSON.stringify({tenant:{id:idText},alias:"stdin-holder",name:"Dave"}),encoding:"utf8"});
+  assert.equal(JSON.parse(stdin).name,"Dave");
+  const inv=JSON.parse(run(["invitation","list","--size","1","-o","json"])).items[0];
+  assert.equal(run(["invitation","get",inv.id]),"an invitation");assert.equal(JSON.parse(run(["invitation","get",inv.id,"-o","json"])).id,inv.id);
+  const completions=run(["completion","robot"]).split(/\s+/);assert(completions.includes("list") && !completions.includes("ls"));
+  assert(run(["completion","robot","ls"]).includes("--next"));assert(run(["completion","ws"]).includes("get"));
   const audits=JSON.parse(run(["audit","list",JSON.stringify({filters:[{object_id:holder.id}]}),"-o","json"],{PAYDIRT_TOKEN:"audit-review"}));
   assert(audits.items.some(r=>r.objectId===holder.id));
   await uuidRequestCases(app,workspace,env,named,holder.id);
@@ -63,6 +79,14 @@ export async function operatorScenario(app,workspace,env,primary){
   assert.throws(()=>run(["cell","get",add.id]),e=>e.status!==0 && /not.?found/i.test(e.stderr));
   const stdout=JSON.parse(run(["robot","ls","--size","1","--order","alias","-o","protojson"]));
   assert.equal(stdout.items.length,1);
+  const ids=new Set(); let cursor="";
+  do {
+    const args=["holder","ls","--size","1","-o","json"];if(cursor)args.push("--next",cursor);
+    const page=JSON.parse(run(args));assert.equal(page.items.length,1);assert(!ids.has(page.items[0].id));ids.add(page.items[0].id);cursor=page.next;
+  }while(cursor);
+  assert(ids.has(holder.id) && ids.has(JSON.parse(stdin).id));
+  await watchTable(app,workspace,env,run,zoneRow);
+  await watchTermination(app,workspace,env,zoneRow.id);
   const watcher=spawn(app,["robot","watch","@"+tenant+"/scout","-o","protojson"],{cwd:workspace,env,stdio:["ignore","pipe","pipe"]});
   const done=new Promise(resolve=>watcher.once("exit",resolve));
   const lines=createInterface({input:watcher.stdout});
@@ -108,4 +132,50 @@ async function uuidRequestCases(app,workspace,env,ref,uuid){
     assert.equal(captured.length,4);
     assert.equal(schema["app.AuditFilter"].fields.find(f=>f.name==="objectId").uuid,true);
   }finally{await new Promise(resolve=>receiver.close(resolve));}
+}
+
+async function watchTable(app,cwd,env,run,row) {
+  const watch=spawn(app,["robot","watch",row.id,"-o","table"],{cwd,env,stdio:["ignore","pipe","pipe"]});
+  const done=new Promise(r=>watch.once("exit",r));let log="";
+  watch.stdout.on("data",c=>log+=c);let errors="";watch.stderr.on("data",c=>errors+=c);
+  const until=async text=>{for(let i=0;i<160;i++){if(log.includes(text))return;if(watch.exitCode!==null)break;await new Promise(r=>setTimeout(r,30));}throw Error("watch did not print "+text+" "+log+" "+errors);};
+  try{
+    await until(row.alias);run(["robot","patch",row.id,JSON.stringify({dateUpdated:row.dateUpdated,alias:"watch-patched"}),"-o","json"]);
+    await until("watch-patched");run(["robot","erase",row.id,"-o","json"]);await until("Erase");
+    assert(log.includes("Patch"));assert.equal(log.split("ACTION").length-1,1);
+    const erase=log.trim().split("\n").find(l=>l.includes("Erase")).split("\t");assert.equal(erase.length,4);assert.deepEqual(erase.slice(1),["-","-",row.id]);
+  }finally{watch.kill();await done;}
+}
+async function watchTermination(app,cwd,env,id) {
+  const registry=createFileRegistry(fromBinary(FileDescriptorSetSchema,await readFile(cwd+"/generated/storage/descriptors.binpb")));
+  const reqType=registry.getMessage("app.RobotWatchRequest"),resType=registry.getMessage("app.RobotWatchResponse");
+  const frame=(flag,bytes)=>{const h=Buffer.alloc(5);h[0]=flag;h.writeUInt32BE(bytes.length,1);return Buffer.concat([h,bytes]);};
+  const ending=e=>frame(2,Buffer.from(JSON.stringify(e?{error:e}:{})));
+  let mode="eof";const calls=[];
+  const server=createServer(async(req,res)=>{
+    const parts=[];for await(const c of req)parts.push(c);const body=Buffer.concat(parts);
+    calls.push(fromBinary(reqType,body.subarray(5)));
+    res.writeHead(200,{"content-type":"application/connect+proto"});
+    if(mode==="deny"){res.end(ending({code:"permission_denied",message:"refused watch"}));return;}
+    if(mode==="eof"||calls.length===1){res.end(ending());return;}
+    const item={id:Buffer.from(id.replaceAll("-",""),"hex"),value:{alias:"restored"}};
+    res.write(frame(0,toBinary(resType,create(resType,{items:[item]}))));
+  });
+  await new Promise(r=>server.listen(0,"127.0.0.1",r));
+  const target={...env,PAYDIRT_URL:"http://127.0.0.1:"+server.address().port};
+  const args=["robot","watch",id,'{"skipSnapshot":true}',"-o","protojson"];
+  const execute=promisify(execFile);
+  try{
+    await assert.rejects(execute(app,args,{cwd,env:target,timeout:6500}),e=>/watch stream ended/.test(e.stderr));
+    mode="deny";calls.length=0;
+    await assert.rejects(execute(app,[...args,"--retry"],{cwd,env:target,timeout:6500}),e=>/refused watch/.test(e.stderr)&&!/reconnecting/i.test(e.stderr));assert.equal(calls.length,1);
+    mode="retry";calls.length=0;
+    const child=spawn(app,[...args,"--retry"],{cwd,env:target,stdio:["ignore","pipe","pipe"]}),done=new Promise(r=>child.once("exit",r));
+    let out="",err="";child.stdout.on("data",v=>out+=v);child.stderr.on("data",v=>err+=v);
+    try{
+      for(let i=0;i<200&&!out.includes("restored")&&child.exitCode===null;i++)await new Promise(r=>setTimeout(r,25));
+      assert(out.includes("restored"),out+err);assert.match(err,/reconnecting/i);assert.equal(calls.length,2);
+      assert.equal(calls[0].skipSnapshot,true);assert.equal(calls[1].skipSnapshot,false);assert.equal(calls[1].filters.length,1);
+    }finally{child.kill();await done;}
+  }finally{server.closeAllConnections();await new Promise(r=>server.close(r));}
 }

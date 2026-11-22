@@ -18,6 +18,8 @@ pub trait Hook: Send + Sync + 'static {
     ) -> Result<(), ConnectError> {
         Ok(())
     }
+    /// A stream hook may deliver the message to its own consumer. Return false to stop forwarding it.
+    fn forward_stream(&self,_:&str,_:&RequestContext,_:&[u8])->Result<bool,ConnectError>{Ok(true)}
     fn leave(&self, _: &'static str, _: &RequestContext, _: Option<&ConnectError>) {}
 }
 #[derive(Clone, Default)]
@@ -61,6 +63,7 @@ impl Layer {
         })
     }
 }
+enum Delivery<M>{Forward(Option<M>),Consumed}
 pub(crate) struct Call {
     layer: Layer,
     method: &'static str,
@@ -109,34 +112,36 @@ impl Call {
     fn output<M: buffa::Message + buffa::MessageName + serde::Serialize, R: Encodable<M>>(
         &self,
         body: &R,
-    ) -> Result<Option<M>, ConnectError> {
+        stream:bool,
+    ) -> Result<Delivery<M>, ConnectError> {
         static SCHEMA: LazyLock<paydirt_store::secrets::Schema> = LazyLock::new(|| {
             paydirt_store::secrets::Schema::new(crate::transport::ADMISSION_SCHEMA)
                 .expect("generated field rules")
         });
         let redact = self.layer.redact && SCHEMA.protects(M::FULL_NAME);
         if self.layer.hooks.is_empty() && !redact {
-            return Ok(None);
+            return Ok(Delivery::Forward(None));
         }
         let mut wire = body.encode(CodecFormat::Proto)?.to_vec();
         for h in self.layer.hooks.iter().rev() {
             h.send(self.method, &self.ctx, &mut wire)?;
+            if stream && !h.forward_stream(self.method,&self.ctx,&wire)?{return Ok(Delivery::Consumed)}
         }
         if redact {
             wire = SCHEMA
                 .clean(M::FULL_NAME, &wire)
                 .map_err(crate::transport::error)?;
         }
-        Ok(Some(M::decode_from_slice(&wire).map_err(|_| {
+        Ok(Delivery::Forward(Some(M::decode_from_slice(&wire).map_err(|_| {
             ConnectError::internal("invalid interceptor response")
-        })?))
+        })?)))
     }
     pub fn unary<M: buffa::Message + buffa::MessageName + serde::Serialize, R: Encodable<M>>(
         mut self,
         res: Result<Response<R>, ConnectError>,
     ) -> Result<Response<Body<M, R>>, ConnectError> {
         let res = res.and_then(|reply| {
-            let public = self.output(&reply.body)?;
+            let Delivery::Forward(public)=self.output(&reply.body,false)? else {return Err(ConnectError::internal("incomplete unary response"))};
             Ok(reply.map_body(|original| Body { original, public }))
         });
         #[cfg(not(target_arch = "wasm32"))]
@@ -163,8 +168,9 @@ impl Call {
         Ok(reply.map_body(move|mut incoming|{
             let stream=async_stream::stream!{
                 while let Some(item)=incoming.next().await{
-                    match item.and_then(|original|Ok(Body{public:self.output(&original)?,original})){
-                        Ok(row)=>yield Ok(row),
+                    match item.and_then(|original|Ok(match self.output(&original,true)?{Delivery::Consumed=>None,Delivery::Forward(public)=>Some(Body{original,public})})){
+                        Ok(Some(row))=>yield Ok(row),
+                        Ok(None)=>continue,
                         Err(e)=>{self.finish(Some(&e));yield Err(e);return;}
                     }
                 }

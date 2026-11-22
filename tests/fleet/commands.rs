@@ -5,6 +5,8 @@ use crate::{
 use serde_json::json;
 
 pub fn configure(tree: &mut Tree) -> Result<()> {
+    tree.aliases("tenant",&["ws"])?;
+    tree.renderers.insert("app.Invitation".into(),|_|Ok("an invitation".into()));
     tree.mount("inventory", "app")?;
     tree.mount("catalog", "shared")?;
     tree.alias("inventory/view", "cell/get")?;

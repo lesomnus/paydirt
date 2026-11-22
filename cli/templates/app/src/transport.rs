@@ -241,6 +241,7 @@ pub fn error(mut f: Fault) -> ConnectError {
     }
 }
 
+pub type TenantPolicy=dyn Fn(&Frame,&str)->Result<Option<Vec<[u8;16]>>,ConnectError>+Send+Sync;
 #[derive(Clone)]
 pub struct Database {
     flushing_access:Arc<std::sync::atomic::AtomicBool>,
@@ -255,6 +256,7 @@ pub struct Database {
     lock: Arc<async_lock::Mutex<()>>,
     general_writes: bool,
     policy: Option<paydirt::rbac::Policy>,
+    tenant_policy: Option<Arc<TenantPolicy>>,
     account_header: String,
     resolve: Option<Arc<Resolver>>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -306,6 +308,7 @@ impl Database {
             broker: Some(Arc::new(Memory::default())),
             general_writes: false,
             policy: None,
+            tenant_policy: None,
             account_header: "paydirt-tenant".into(),
             presence: None,
             resolve: None,
@@ -321,6 +324,7 @@ impl Database {
             broker: Some(Arc::new(Memory::default())),
             general_writes: false,
             policy: None,
+            tenant_policy: None,
             account_header: "paydirt-tenant".into(),
             presence: None,
             resolve: None,
@@ -407,6 +411,10 @@ impl Database {
     pub fn allow_general_writes(mut self, allow: bool) -> Self {
         self.general_writes = allow;
         self
+    }
+    /// Install the application's method admission and tenant scope policy.
+    pub fn with_tenant_policy(mut self, policy:impl Fn(&Frame,&str)->Result<Option<Vec<[u8;16]>>,ConnectError>+Send+Sync+'static)->Self {
+        self.tenant_policy=Some(Arc::new(policy));self
     }
     pub fn with_policy(mut self, policy: paydirt::rbac::Policy) -> Self {
         self.policy = Some(policy);
@@ -497,7 +505,13 @@ impl Database {
             && let Some(auth) = &self.providers
             && let Some(e) = auth.verify(&ctx).await?
         {
-            principal = Some(auth.principal(&e, &action)?);
+            let selected=auth.principal(&e,&action)?;
+            if auth.uses_session(&ctx)? && let Some(actor)=selected.frame.actor.as_ref().filter(|a|paydirt::has_domain(a,2)) {
+                let session=ctx.extensions().get::<Session>().map(|s|s.0.clone());
+                let _guard=if session.is_none(){Some(self.lock.lock_arc().await)}else{None};
+                self.send(Packet::SessionHolder{session,tenant:selected.frame.tenant.clone(),actor:actor.clone()}).await?;
+            }
+            principal = Some(selected);
             ctx.extensions_mut().insert(providers::Verified(e));
         }
         let Some(mut principal) = principal else {
@@ -607,6 +621,10 @@ impl Database {
                 ));
             }
             ctx.extensions_mut().insert(PolicyRevision(revision));
+        }
+        if !frame.tenant.is_empty() && let Some(policy)=&self.tenant_policy && let Some(owners)=policy(&frame,&action)?{
+            if owners.iter().any(|id|!paydirt::has_domain(id,1)){return Err(ConnectError::internal("tenant policy returned an invalid identifier"));}
+            frame.tenants=Some(owners.into_iter().map(|id|id.to_vec()).collect());
         }
         frame.action = action;
         if let Some(trace) = ctx

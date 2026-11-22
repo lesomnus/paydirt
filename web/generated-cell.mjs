@@ -93,6 +93,11 @@ try {
         await accessCases(registry,baseUrl,typed,cell,own,foreign,primary.id,other.id);
         await resourceCases(registry,resources,cell,typed,own,foreign,primary.id,other.id,true);
         await accountCases(holder,typed,tenantNames);
+        await assert.rejects(typed.add({tenant:tenantRef(primary.id),alias:"intercept-denied"},own),e=>e.code===Code.PermissionDenied && e.message.includes("interceptor"));
+        await assert.rejects(typed.get({ref:{key:{case:"slug",value:{tenant:tenantRef(primary.id),alias:"intercept-denied"}}}},own),e=>e.code===Code.NotFound);
+        const taken=[];
+        for await(const msg of typed.revealStream({},{headers:{...own.headers,"x-consume-stream":"yes"}}))taken.push(msg);
+        assert.equal(taken.length,0,"an inner stream interceptor consumed both writes");
         const revealed=await typed.reveal({},own);
         assert.equal(revealed.alias,"public:inner:outer");
         assert.equal(revealed.secret.length,0);

@@ -39,6 +39,14 @@ const TEMPLATE: &[(&str, &str)] = &[
         "src/commands.rs",
         include_str!("../templates/app/src/commands.rs"),
     ),
+    (
+        "src/display.rs",
+        include_str!("../templates/app/src/display.rs"),
+    ),
+    (
+        "src/routes.rs",
+        include_str!("../templates/app/src/routes.rs"),
+    ),
     ("src/tree.rs", include_str!("../templates/app/src/tree.rs")),
     (
         "src/resource.rs",

@@ -192,6 +192,9 @@ pub fn generate(work: &Path) -> Result<()> {
             {
                 field["personal"] = json!(true);
             }
+            if f["type"] == "TYPE_BYTES" {
+                field["bytes"] = json!(true);
+            }
             if f["options"]["[orm.field]"]["type"] == "TYPE_UUID" {
                 field["uuid"] = json!(true);
             }
