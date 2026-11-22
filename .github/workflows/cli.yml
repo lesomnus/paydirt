@@ -42,6 +42,8 @@ jobs:
       - run: cargo build --locked -p paydirt-cli
       - run: target/debug/paydirt gen --check
       - run: scripts/upstream.sh && python3 scripts/test-payday-contracts.py
+        env:
+          DATABASE_URL: postgres://postgres:paydirt@127.0.0.1:5432/paydirt
       - run: scripts/test-gen.sh && scripts/test-new.sh && scripts/test-project-cli.sh
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/app-target

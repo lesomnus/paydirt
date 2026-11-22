@@ -14,6 +14,7 @@ pub struct Keys {
     active: Vec<u8>,
     previous: BTreeMap<[u8; 8], Vec<u8>>,
     retired: BTreeSet<[u8; 8]>,
+    since: Option<chrono::DateTime<chrono::Utc>>,
 }
 #[derive(Debug, Copy, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -22,6 +23,7 @@ pub enum Verdict {
     Differs,
     NoDigest,
     NoSeal,
+    Predates,
     Missing,
     NotOnTrail,
     Forged,
@@ -97,7 +99,80 @@ impl Keys {
             active,
             previous,
             retired,
+            since: None,
         })
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn from_environment() -> Result<Option<Self>> {
+        use paydirt::environment::*;
+        let get = |name| match std::env::var(name) {
+            Ok(v) => Ok(Some(v)),
+            Err(std::env::VarError::NotPresent) => Ok(None),
+            Err(_) => Err(Fault::invalid(format!("invalid {name}"))),
+        };
+        let bytes =
+            |name, v: &str| hex::decode(v).map_err(|_| Fault::invalid(format!("invalid {name}")));
+        let list = |name| -> Result<Vec<Vec<u8>>> {
+            let entries: Vec<String> =
+                serde_json::from_str(&get(name)?.unwrap_or_else(|| "[]".into()))
+                    .map_err(|_| Fault::invalid(format!("invalid {name}")))?;
+            entries.iter().map(|v| bytes(name, v)).collect()
+        };
+        let previous = list(PAYDIRT_AUDIT_PREVIOUS_KEYS)?;
+        let retired = list(PAYDIRT_AUDIT_RETIRED)?
+            .into_iter()
+            .map(|v| {
+                v.try_into()
+                    .map_err(|_| Fault::invalid("invalid audit key fingerprint"))
+            })
+            .collect::<Result<BTreeSet<_>>>()?;
+        let since = get(PAYDIRT_AUDIT_SINCE)?
+            .map(|v| {
+                v.parse::<chrono::DateTime<chrono::Utc>>()
+                    .map_err(|_| Fault::invalid("invalid audit start time"))
+            })
+            .transpose()?;
+        let Some(active) = get(PAYDIRT_AUDIT_KEY)? else {
+            if previous.is_empty() && retired.is_empty() && since.is_none() {
+                return Ok(None);
+            }
+            return Err(Fault::invalid(
+                "audit configuration requires an active audit key",
+            ));
+        };
+        let mut keys = Self::new(bytes(PAYDIRT_AUDIT_KEY, &active)?, previous, retired)?;
+        keys.since = since;
+        Ok(Some(keys))
+    }
+    pub fn since(mut self, began: chrono::DateTime<chrono::Utc>) -> Self {
+        self.since = Some(began);
+        self
+    }
+    fn check_start(&self, row: &Value) -> Result<()> {
+        let Some(since) = self.since else {
+            return Ok(());
+        };
+        let (created, id) = order(row)?;
+        if created >= since || row["digest"].as_str().is_none_or(str::is_empty) {
+            return Ok(());
+        }
+        let line = Line {
+            id,
+            micros: created.timestamp_micros(),
+            action: row["action"]
+                .as_str()
+                .ok_or_else(|| Fault::internal("missing action"))?,
+        };
+        let object = crate::integrity::id(&row["objectId"])?;
+        if matches!(
+            self.check(&value::bytes(&row["digest"])?, &object, &line, None, false),
+            Verdict::Matches | Verdict::Differs
+        ) {
+            return Err(Fault::precondition(
+                "audit.digest.since is later than an authenticated digest",
+            ));
+        }
+        Ok(())
     }
     fn key(&self, fp: &[u8]) -> std::result::Result<&[u8], Verdict> {
         let fp = <&[u8; 8]>::try_from(fp).map_err(|_| Verdict::Forged)?;
@@ -273,6 +348,30 @@ fn id(v: &Value) -> Result<[u8; 16]> {
         .map_err(|_| Fault::internal("invalid audit object ID"))
 }
 impl Transaction<'_> {
+    /// The integrity image includes a soft-erased row until it is physically removed.
+    fn stored_object(
+        &mut self,
+        entity: &Entity,
+        object: &[u8; 16],
+        lock: bool,
+    ) -> Result<Option<Value>> {
+        let mut q = Query::new("");
+        let id = q.param(Bind::Bytes(object.to_vec()), self.db.dialect());
+        q.sql = format!(
+            "SELECT {} AS value FROM {} r WHERE r.{}={id}",
+            self.project_sql(entity)?,
+            quote(&entity.table()),
+            quote(&entity.key().map_err(Fault::internal)?.column())
+        );
+        if lock && self.db.dialect() == paydirt_model::Dialect::Postgres {
+            q.sql.push_str(" FOR UPDATE");
+        }
+        self.db
+            .rows(q)?
+            .pop()
+            .map(|raw| self.decode_row(entity, &raw))
+            .transpose()
+    }
     pub(crate) fn sign_write(
         &mut self,
         e: &Entity,
@@ -298,6 +397,13 @@ impl Transaction<'_> {
             action: &action,
         };
         let object = id(&audit["objectId"])?;
+        let stored = if after.is_none() && e.erased().is_some() {
+            self.stored_object(e, &object, false)?
+        } else {
+            None
+        };
+        let after = after.or(stored.as_ref());
+
         let desc = rec
             .pool
             .get_message_by_name(&e.name)
@@ -419,6 +525,11 @@ pub struct Finding {
 pub struct KindReport {
     pub checked: usize,
     pub archived: usize,
+    pub forgotten: usize,
+    pub retired: usize,
+    pub predates: usize,
+    pub unsealed: Vec<String>,
+    pub unheld: BTreeSet<String>,
     pub findings: BTreeMap<String, Finding>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skipped: Option<String>,
@@ -492,6 +603,9 @@ impl Transaction<'_> {
             for raw in rows {
                 let row = self.decode_row(&audit, &raw)?;
                 cursor = Some((row["dateCreated"].clone(), row["id"].clone()));
+                if let Some(keys) = self.trail.and_then(|r| r.keys.as_ref()) {
+                    keys.check_start(&row)?;
+                }
                 consider(&mut heads, row, false)?;
             }
             if object.is_some() || count < limit {
@@ -510,6 +624,9 @@ impl Transaction<'_> {
         let mut heads = self.online_heads(name, object)?;
         if let Some(files) = archive {
             for row in self.archived_digests(files, name, object)? {
+                if let Some(keys) = self.trail.and_then(|r| r.keys.as_ref()) {
+                    keys.check_start(&row)?;
+                }
                 consider(&mut heads, row, true)?;
             }
         }
@@ -538,19 +655,15 @@ impl Transaction<'_> {
             .unwrap_or_default();
         if sum.is_empty() {
             return Ok(Finding {
-                digest: Verdict::NoDigest,
+                digest: if keys.since.is_some_and(|since| at < since) {
+                    Verdict::Predates
+                } else {
+                    Verdict::NoDigest
+                },
                 seal: None,
             });
         }
-        let current = match self.lookup(
-            e,
-            &json!({&e.key().map_err(Fault::internal)?.json:value::encoded(&object)}),
-            false,
-        ) {
-            Ok(r) => Some(r),
-            Err(v) if v.code == "not_found" => None,
-            Err(e) => return Err(e),
-        };
+        let current = self.stored_object(e, &object, false)?;
         let check = |sum: &[u8], fields: &Value, seal: bool| -> Result<Verdict> {
             let covered: Vec<u32> = serde_json::from_value(fields.clone())
                 .map_err(|e| Fault::precondition(e.to_string()))?;
@@ -636,7 +749,9 @@ impl Store {
             let key = e.key().map_err(Fault::invalid)?;
             if let Some(why) = policy.entity["trail"].get("off") {
                 report.skipped = Some(
-                    why.as_str()
+                    why.get("why")
+                        .and_then(Value::as_str)
+                        .or_else(|| why.as_str())
                         .map(str::to_string)
                         .unwrap_or_else(|| why.to_string()),
                 );
@@ -650,7 +765,7 @@ impl Store {
             let mut cursor = None;
             loop {
                 let mut q = Query::new("");
-                let mut filters = tx.wall(e, &mut q)?;
+                let mut filters = Vec::<String>::new();
                 let column = format!("r.{}", quote(&key.column()));
                 if let Some(id) = cursor {
                     let bound = q.param(Bind::Bytes(id), tx.db.dialect());
@@ -689,11 +804,34 @@ impl Store {
                 } else {
                     tx.inspect_sum(e, object, &row)?
                 };
-                if !matches!(finding.digest, Verdict::Matches | Verdict::Retired)
-                    || finding.seal.is_some_and(|s| {
-                        !matches!(s, Verdict::Matches | Verdict::Forgotten | Verdict::Retired)
-                    })
+                report.retired += usize::from(finding.digest == Verdict::Retired);
+                report.predates += usize::from(finding.digest == Verdict::Predates);
+                if finding.seal == Some(Verdict::Forgotten) {
+                    report.forgotten += 1;
+                }
+                let sum = row
+                    .get("digest")
+                    .filter(|v| v.is_string())
+                    .map(value::bytes)
+                    .transpose()?
+                    .unwrap_or_default();
+                if sum.len() == 82
+                    && sum[1] == 0
+                    && policy.fields.values().any(|f| f["personal"] == true)
                 {
+                    report
+                        .unsealed
+                        .push(paydirt::format_id(&object).expect("sixteen-byte id"));
+                }
+                if finding.digest == Verdict::UnknownKey && sum.len() >= 10 {
+                    report.unheld.insert(hex::encode(&sum[2..10]));
+                }
+                if !matches!(
+                    finding.digest,
+                    Verdict::Matches | Verdict::Retired | Verdict::Predates
+                ) || finding.seal.is_some_and(|s| {
+                    !matches!(s, Verdict::Matches | Verdict::Forgotten | Verdict::Retired)
+                }) {
                     report.findings.insert(
                         paydirt::format_id(&object).expect("sixteen-byte id"),
                         finding,
@@ -766,16 +904,14 @@ impl Transaction<'_> {
             if !paydirt::has_domain(&object, domain) {
                 return Err(Fault::invalid("identifier belongs to another kind"));
             }
-            let row = match self.lookup(
-                entity,
-                &json!({&entity.key().map_err(Fault::internal)?.json:value::encoded(&object)}),
-                true,
-            ) {
-                Ok(_) if erased => return Err(Fault::precondition("object still exists")),
-                Ok(row) => Some(row),
-                Err(f) if f.code == "not_found" && erased => None,
-                Err(f) => return Err(f),
-            };
+            let row = self.stored_object(entity, &object, true)?;
+            if erased == row.is_some() {
+                return Err(Fault::precondition(if erased {
+                    "object still exists"
+                } else {
+                    "there is no row for the object"
+                }));
+            }
             let tenant = match &row {
                 Some(r) => self.object_tenant(entity, r)?,
                 None => {
@@ -792,5 +928,140 @@ impl Transaction<'_> {
             self.insert(&audit, &line)?;
         }
         Ok(objects.len())
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Keys {
+    /// Bind the original row MAC to a new line. Never derive evidence from current columns.
+    fn carry(
+        &self,
+        sum: &[u8],
+        object: &[u8; 16],
+        old: &Line<'_>,
+        new: &Line<'_>,
+        seal: bool,
+    ) -> Result<Vec<u8>> {
+        match self.check(sum, object, old, None, seal) {
+            Verdict::Forgotten if seal => return Ok(self.forgotten(object)),
+            Verdict::Differs | Verdict::Matches => {}
+            _ => return Err(Fault::precondition("cannot carry unauthenticated evidence")),
+        }
+        if !seal {
+            return Ok(self.bind(object, new, sum[1], &sum[42..]));
+        }
+        if sum.len() != 82 {
+            return Err(Fault::precondition("invalid personal seal"));
+        }
+        let sk = mac(&self.active, &[b"payday.trail.seal.key\0"]);
+        let part = &sum[42..];
+        let mut result = vec![1, 0];
+        result.extend(fingerprint(&self.active));
+        result.extend(binding(
+            &sk,
+            b"payday.trail.seal.line\0",
+            b"",
+            object,
+            new,
+            part,
+        ));
+        result.extend(part);
+        Ok(result)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Default)]
+pub(crate) struct CarryHeads(BTreeMap<String, Heads>);
+#[cfg(not(target_arch = "wasm32"))]
+impl Transaction<'_> {
+    pub(crate) fn carry_latest(
+        &mut self,
+        name: &str,
+        row: &Value,
+        files: &crate::archive_files::Archive,
+        cached: &mut CarryHeads,
+        dry: bool,
+    ) -> Result<bool> {
+        let Some(keys) = self.trail.and_then(|t| t.keys.as_ref()) else {
+            return Ok(false);
+        };
+        if row["digest"].as_str().is_none_or(str::is_empty) {
+            return Ok(false);
+        }
+        let e = self.model.entity(name).map_err(Fault::invalid)?;
+        let object = id(&row["objectId"])?;
+        if self.stored_object(e, &object, true)?.is_none() {
+            return Ok(false);
+        }
+        if !cached.0.contains_key(name) {
+            cached
+                .0
+                .insert(name.to_owned(), self.heads(name, None, Some(files))?);
+        }
+        let Some((newest, _)) = cached.0[name].get(&object) else {
+            return Ok(false);
+        };
+        if newest["id"] != row["id"] {
+            return Ok(false);
+        }
+        let (created, line_id) = order(row)?;
+        if let Some((online, _)) = self.online_heads(name, Some(object))?.get(&object)
+            && order(online)? > (created, line_id)
+        {
+            return Ok(false);
+        }
+        let old = Line {
+            id: line_id,
+            micros: created.timestamp_micros(),
+            action: row["action"]
+                .as_str()
+                .ok_or_else(|| Fault::invalid("invalid audit action"))?,
+        };
+        let audit = self.owned_kind("OWN_AUDIT")?.clone();
+        let domain = self.policies[&audit.name].entity["domain"]
+            .as_u64()
+            .ok_or_else(|| Fault::internal("missing audit domain"))? as u8;
+        let now = (self.inputs.clock)();
+        let new = Line {
+            id: (self.inputs.mint)(domain),
+            micros: now.timestamp_micros(),
+            action: "payday.trail.carry",
+        };
+        let prior = value::bytes(&row["digest"])?;
+        let digest = keys.carry(&prior, &object, &old, &new, false)?;
+        let record = json!({"id":value::encoded(&new.id),"tenantId":row["tenantId"],"actorId":value::encoded(&[0;16]),
+            "actorTenantId":row["tenantId"],"traceId":value::encoded(&[0;16]),"objectId":row["objectId"],"action":new.action,
+            "domain":row["domain"],"digest":value::encoded(&digest),"digestFields":row["digestFields"],
+            "dateCreated":now.to_rfc3339_opts(chrono::SecondsFormat::Micros,true)});
+        if prior[1] == 1 {
+            let seal = self.owned_kind("OWN_ROW_SEAL")?.clone();
+            let mut q = Query::new("");
+            let key = q.param(Bind::Bytes(object.to_vec()), self.db.dialect());
+            q.sql = format!(
+                "SELECT {} AS value FROM {} r WHERE r.f1={key}",
+                self.project_sql(&seal)?,
+                quote(&seal.table())
+            );
+            if self.db.dialect() == paydirt_model::Dialect::Postgres {
+                q.sql.push_str(" FOR UPDATE");
+            }
+            let raw = self
+                .db
+                .rows(q)?
+                .pop()
+                .ok_or_else(|| Fault::precondition("cannot carry missing seal"))?;
+            let seal = self.decode_row(&seal, &raw)?;
+            let rebound = keys.carry(&value::bytes(&seal["sum"])?, &object, &old, &new, true)?;
+            let fields: Vec<u32> = serde_json::from_value(seal["fields"].clone())
+                .map_err(|e| Fault::invalid(e.to_string()))?;
+            if !dry {
+                self.save_seal(&object, &row["tenantId"], Some(&rebound), &fields)?;
+            }
+        }
+        if !dry {
+            self.insert(&audit, &record)?;
+        }
+        Ok(true)
     }
 }

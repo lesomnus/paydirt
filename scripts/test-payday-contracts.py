@@ -42,6 +42,9 @@ with tempfile.TemporaryDirectory() as tmp:
     assert conflict.returncode and "redefines generated RPC Get" in conflict.stderr, conflict.stderr
     overlay.write_bytes(original)
     subprocess.run([cli, "gen", "--check", app], check=True)
+    subprocess.run(["cargo", "test", "--locked", "-p", "paydirt-store", "--features", "sqlite,postgres",
+                    "--test", "reference_cases"], cwd=repo, check=True,
+                   env={**os.environ, "PAYDIRT_REFERENCE_STORAGE": str(app / "generated/storage")})
     shutil.copytree(app / "generated/proto", app / "proto", dirs_exist_ok=True)
     actual = descriptors(app, Path(tmp) / "rust.json")
     expected = descriptors(upstream, Path(tmp) / "go.json")

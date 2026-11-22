@@ -68,7 +68,7 @@ def validate(row):
     issue = row["issue"]
     if status not in ("verified", "tracked"):
         raise ValueError(f"{case} has unknown status {status}")
-    if status == "verified" and (issue or not proof):
+    if status == "verified" and (issue != "-" or not proof):
         raise ValueError(f"{case} needs executable evidence")
     if status == "tracked" and not re.fullmatch(r"[1-9][0-9]*", issue):
         raise ValueError(f"{case} needs a follow-up issue")

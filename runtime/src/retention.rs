@@ -82,6 +82,7 @@ pub struct Report {
     pub policy: Policy,
     pub inventory: BTreeMap<String, String>,
     pub archived: Vec<String>,
+    pub carried: Vec<String>,
     pub removed: Vec<String>,
     pub held: Vec<String>,
     pub blanked: Vec<String>,
@@ -319,7 +320,7 @@ impl Transaction<'_> {
         );
         let body = if blank {
             let empty = q.param(Bind::Bytes(vec![]), self.db.dialect());
-            let fields: Vec<_> = ["patch", "value", "digest"]
+            let fields: Vec<_> = ["patch", "value"]
                 .iter()
                 .filter_map(|n| entity.field(n).ok())
                 .map(|f| format!("{}={empty}", quote(&f.column())))
@@ -444,6 +445,7 @@ fn run_pass(
     }
     let mut waiting = BTreeSet::new();
     let mut exported = Vec::new();
+    let mut carry = crate::integrity::CarryHeads::default();
     let shared = !matches!(request.action, Action::Retire | Action::Purge);
     let mut rows = tx.live_trail(&tenant, shared)?;
     for entry in tx.trail_docs::<Entry>("paydirt_trail_archive")?.into_iter() {
@@ -519,6 +521,14 @@ fn run_pass(
             waiting.extend(subjects.iter().cloned());
         }
         if target && !held && !shared_departure {
+            if matches!(request.action, Action::Collect)
+                && !state.retired
+                && !row["objectId"].is_null()
+                && tx.carry_latest(&e.kind, &row, files, &mut carry, dry)?
+            {
+                out.carried
+                    .push(row_id(&row["objectId"]).ok_or_else(|| bad("invalid carried id"))?);
+            }
             out.removed.push(e.id.clone());
             if !dry {
                 if let Some(old) = &e.digest {
@@ -533,12 +543,12 @@ fn run_pass(
         }
         let blank = !held
             && (shared_departure || forget && !subjects.is_empty())
-            && ["patch", "value", "digest"]
+            && ["patch", "value"]
                 .iter()
                 .any(|k| row[k].as_str().is_some_and(|s| !s.is_empty()));
         if blank {
             out.blanked.push(e.id.clone());
-            for key in ["patch", "value", "digest"] {
+            for key in ["patch", "value"] {
                 if row.get(key).is_some() {
                     row[key] = json!("")
                 }

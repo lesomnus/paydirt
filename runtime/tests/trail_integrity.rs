@@ -286,7 +286,40 @@ fn check_database(url: &str, directory: &std::path::Path, raw: impl Fn(&str)) {
     })
     .unwrap();
     assert!(scan(&mut db, None).findings.is_empty());
+    let bad = db.transaction(&Scope::Internal, |tx| {
+        tx.record_objects("app.Cell", &[object], "", false)
+    });
+    assert!(bad.is_err());
+    let missing = db.transaction(&Scope::Internal, |tx| {
+        tx.record_objects("app.Cell", &[paydirt::mint(10)], "/ops/record", false)
+    });
+    assert!(missing.is_err());
+    let mut future = open(6)
+        .with_audit_keys(
+            Keys::new(vec![6; 32], vec![], Default::default())
+                .unwrap()
+                .since(chrono::Utc::now() + chrono::TimeDelta::days(1)),
+        )
+        .unwrap();
+    assert!(
+        future
+            .check_kind("app.Cell", None)
+            .unwrap_err()
+            .message
+            .contains("audit.digest.since")
+    );
     let mut wrong = open(121);
+    let original = paydirt_store::integrity::fingerprint(&[6; 32]);
+    assert_eq!(
+        scan(&mut wrong, None).unheld,
+        BTreeSet::from([hex::encode(original)])
+    );
+    let mut retired = open(121)
+        .with_audit_keys(Keys::new(vec![121; 32], vec![], BTreeSet::from([original])).unwrap())
+        .unwrap();
+    let report = scan(&mut retired, None);
+    assert_eq!(report.retired, 1);
+    assert!(report.findings.is_empty());
     assert_eq!(
         scan(&mut wrong, None).findings[&reference].digest,
         Verdict::UnknownKey
@@ -375,6 +408,117 @@ fn check_database(url: &str, directory: &std::path::Path, raw: impl Fn(&str)) {
     assert_eq!(
         scan(&mut db, Some(&verify)).findings[&reference].digest,
         Verdict::NoDigest
+    );
+    // The current row is not an input to the MAC of a carried line.
+    let person = paydirt::mint(2);
+    let pid = paydirt::format_id(&person).unwrap();
+    db.seed(vec![("app.Holder".into(),json!({"id":STANDARD.encode(person),"tenant":{"id":STANDARD.encode(t)},"alias":"member","name":"First"}))]).unwrap();
+    db.transaction(&Scope::Internal, |tx| {
+        tx.record_objects("app.Holder", &[person], "/ops/initial", false)
+    })
+    .unwrap();
+    let manage = |db: &mut Store, req: serde_json::Value| {
+        db.manage_trail(&vault, None, serde_json::from_value(req).unwrap())
+            .unwrap()
+    };
+    manage(
+        &mut db,
+        json!({"tenant":tenant,"action":"policy","policy":{"by":{"holder":{"retain_ms":0}}}}),
+    );
+    manage(&mut db, json!({"tenant":tenant,"action":"collect"}));
+    raw("UPDATE \"pd_app__Holder\" SET f5='Edited' WHERE f4='member'");
+    manage(
+        &mut db,
+        json!({"tenant":tenant,"action":"policy","policy":{"by":{"holder":{"retain_ms":0,"discard":true}}}}),
+    );
+    assert_eq!(
+        manage(
+            &mut db,
+            json!({"tenant":tenant,"action":"collect","dry_run":true})
+        )
+        .carried,
+        [pid.as_str()]
+    );
+    assert_eq!(
+        manage(&mut db, json!({"tenant":tenant,"action":"collect"})).carried,
+        [pid.as_str()]
+    );
+    let check = db.check_kind("app.Holder", Some(&verify)).unwrap();
+    assert_eq!(check.archived, 0);
+    assert_eq!(check.findings[pid.as_str()].seal, Some(Verdict::Differs));
+    raw("UPDATE \"pd_app__Holder\" SET f5='First' WHERE f4='member'");
+    assert!(
+        db.check_kind("app.Holder", Some(&verify))
+            .unwrap()
+            .findings
+            .is_empty()
+    );
+    let original_date = db
+        .call(
+            &Scope::Internal,
+            Call {
+                entity: "app.Holder".into(),
+                method: "Get".into(),
+                request: json!({"ref":{"id":STANDARD.encode(person)}}),
+            },
+        )
+        .unwrap()["dateCreated"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    raw("UPDATE \"pd_app__Holder\" SET f15='2000-01-01T00:00:00Z' WHERE f4='member'");
+    assert_eq!(
+        db.verify_object("app.Holder", person).unwrap().digest,
+        Verdict::Differs
+    );
+    raw(&format!(
+        "UPDATE \"pd_app__Holder\" SET f15='{original_date}' WHERE f4='member'"
+    ));
+    if url.starts_with("postgres") {
+        {
+            let barrier = std::sync::Barrier::new(2);
+            let run = |arg| {
+                let mut store = open(6);
+                let archive = Archive::open(&archive_dir, &[54; 32])
+                    .unwrap()
+                    .with_notary(notary(directory.join("witness")));
+                barrier.wait();
+                store
+                    .manage_trail(&archive, None, serde_json::from_value(arg).unwrap())
+                    .unwrap();
+            };
+            // Both stores target the same committed state on separate connections.
+            let forget = json!({"tenant":tenant,"action":"forget","subject":pid});
+            let collect = json!({"tenant":tenant,"action":"collect"});
+            std::thread::scope(|threads| {
+                threads.spawn(|| run(forget));
+                threads.spawn(|| run(collect));
+            });
+        }
+    } else {
+        manage(
+            &mut db,
+            json!({"tenant":tenant,"action":"forget","subject":pid}),
+        );
+        manage(&mut db, json!({"tenant":tenant,"action":"collect"}));
+    }
+    assert_eq!(
+        db.check_kind("app.Holder", Some(&verify))
+            .unwrap()
+            .forgotten,
+        1
+    );
+    assert_eq!(
+        db.verify_object("app.Holder", person).unwrap().seal,
+        Some(Verdict::Forgotten)
+    );
+    db.transaction(&Scope::Internal, |tx| {
+        tx.record_objects("app.Holder", &[person], "/ops/approve", false)
+    })
+    .unwrap();
+    assert_eq!(
+        db.verify_object("app.Holder", person).unwrap().seal,
+        Some(Verdict::Matches)
     );
 }
 
