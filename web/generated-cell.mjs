@@ -10,7 +10,10 @@ import {operatorScenario} from "./generated-operator.mjs";
 import { exerciseTenancy } from "./generated-tenancy.mjs";
 import {queryScenario} from "./generated-query.js";
 import {goReference} from "./compare-queries.mjs";
-import {writeFile} from "node:fs/promises";
+import {runPair} from "./generated-pair.js";
+import {fromBinary,createFileRegistry} from "@bufbuild/protobuf";
+import {FileDescriptorSetSchema} from "@bufbuild/protobuf/wkt";
+import {readFile,writeFile} from "node:fs/promises";
 import { exerciseMove } from "./generated-move.js";
 const app = process.env.GENERATED_APP;
 const [primary,other] = Array.from({length:2},()=>{
@@ -65,6 +68,16 @@ try {
       await assert.rejects(cell.get({ref},own),e=>e.code===Code.NotFound);
       if(process.env.PAYDIRT_TEST_MOVE==="1"){
         const robots=createClient(RobotService,createConnectTransport({baseUrl,useBinaryFormat:true}));
+        const descriptors=fromBinary(FileDescriptorSetSchema,await readFile(process.env.CELL_PROJECT+"/generated/storage/descriptors.binpb"));
+        const robotType=createFileRegistry(descriptors).getService("app.RobotService");
+        const typed=createClient(robotType,createConnectTransport({baseUrl,useBinaryFormat:true}));
+        await runPair(typed,own,primary.id);
+        for(const [table,column] of [["Audit","f10"],["Outbox","f9"]]){
+          const sql='SELECT count(*) FROM "pd_app__'+table+'" WHERE '+column+"='/app.RobotService/RenamePair'";
+          const count= engine==="postgres" ? execFileSync("psql",[url,"-Atq","-c",sql],{encoding:"utf8"}).trim()
+            : execFileSync("python3",["-c","import sqlite3,sys;print(sqlite3.connect(sys.argv[1]).execute(sys.argv[2]).fetchone()[0])",url,sql],{encoding:"utf8"}).trim();
+          assert.equal(count,"2",table+" must contain exactly the committed pair");
+        }
         const report=await queryScenario(robots,primary.id,own);
         if(reference){assert.deepEqual(report,reference);console.log(engine,"matches the Go reference for List and Watch",report);}
         await exerciseMove(robots,cell,own,foreign,opts("represented"),opts("reader"),primary.id,other.id);
