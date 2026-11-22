@@ -26,12 +26,12 @@ serde_json = "1"
 hex = "0.4"
 chrono-tz="0.10"
 chrono={version="0.4",features=["wasmbind"]}
-paydirt = {git="https://github.com/lesomnus/paydirt",rev="0683ed2c38459deb9b2ef522ff3a0ef02007f19e"}
+paydirt = {git="https://github.com/lesomnus/paydirt",rev="7918f6cbe6be2bb656048acfb576ab1581d66cfc"}
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-paydirt-server = {git="https://github.com/lesomnus/paydirt",rev="0683ed2c38459deb9b2ef522ff3a0ef02007f19e"}
-paydirt = {git="https://github.com/lesomnus/paydirt",rev="0683ed2c38459deb9b2ef522ff3a0ef02007f19e",features=["watch-postgres","watch-nats"]}
-paydirt-store = {git="https://github.com/lesomnus/paydirt",rev="0683ed2c38459deb9b2ef522ff3a0ef02007f19e",features=["postgres","sqlite","workers"]}
+paydirt-server = {git="https://github.com/lesomnus/paydirt",rev="7918f6cbe6be2bb656048acfb576ab1581d66cfc"}
+paydirt = {git="https://github.com/lesomnus/paydirt",rev="7918f6cbe6be2bb656048acfb576ab1581d66cfc",features=["watch-postgres","watch-nats"]}
+paydirt-store = {git="https://github.com/lesomnus/paydirt",rev="7918f6cbe6be2bb656048acfb576ab1581d66cfc",features=["postgres","sqlite","workers"]}
 connectrpc = {version="=0.8.2",default-features=false,features=["server","client-tls"]}
 buffa-reflect = {version="0.9.2", default-features=false, features=["serde","text-format"]}
 gtmpl = "0.7.1"
@@ -42,7 +42,7 @@ uuid="1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-paydirt-store = {git="https://github.com/lesomnus/paydirt",rev="0683ed2c38459deb9b2ef522ff3a0ef02007f19e"}
+paydirt-store = {git="https://github.com/lesomnus/paydirt",rev="7918f6cbe6be2bb656048acfb576ab1581d66cfc"}
 wasm-bindgen = "=0.2.130"
 js-sys = "0.3"
 wasm-bindgen-futures = "0.4"
@@ -50,7 +50,7 @@ send_wrapper = {version="0.6",features=["futures"]}
 drpc-rs = { git = "https://github.com/lesomnus/drpc-rs", rev = "4b8d42cbab7fe29d78eba73f9f7d2c6edd560e12" }
 web-sys = { version = "0.3", features = ["MessagePort"] }
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-paydirt-test = {git="https://github.com/lesomnus/paydirt",rev="0683ed2c38459deb9b2ef522ff3a0ef02007f19e"}
+paydirt-test = {git="https://github.com/lesomnus/paydirt",rev="7918f6cbe6be2bb656048acfb576ab1581d66cfc"}
 chrono = "0.4"
 
 [profile.release]
