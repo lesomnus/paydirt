@@ -32,7 +32,7 @@ cp -a "$schema/generated/ts" "$work/gen"
 echo 'message PageProbe { string label = 1; }' >> "$schema/proto/app/robot.proto"
 if "$paydirt" gen --ts --check "$schema"; then echo 'stale schema passed --check' >&2; exit 1; fi
 "$paydirt" gen "$schema"
-rg -q 'PageProbeSchema' "$schema/generated/ts/app/robot_pb.ts"
+grep -q 'PageProbeSchema' "$schema/generated/ts/app/robot_pb.ts"
 "$paydirt" gen --check "$schema"
 cp -a "$suite"/{src,package.json,tsconfig.json,vite.config.ts,index.html,sandbox.html} "$work/"
 ln -s "$suite/node_modules" "$work/node_modules"
@@ -46,7 +46,7 @@ if [[ "${PAYDIRT_SDK_ONLY_BROWSER:-0}" != 1 ]]; then
     mkdir -p "$app/src/bin"
     cp "$repo/tests/fleet/sdk.rs" "$app/src/bin/sdk.rs"
     # Only the test issuer needs a localhost sign-in endpoint and a disposable database.
-    if ! rg -q '^axum=' "$app/Cargo.toml"; then sed -i '/^\[target.*not(target_arch.*dependencies\]/a axum="0.8"\ntempfile="3"' "$app/Cargo.toml"; fi
+    if ! grep -q '^axum=' "$app/Cargo.toml"; then sed -i '/^\[target.*not(target_arch.*dependencies\]/a axum="0.8"\ntempfile="3"' "$app/Cargo.toml"; fi
     cargo build --manifest-path "$app/Cargo.toml" --bin sdk --quiet
     target=$(cargo metadata --manifest-path "$app/Cargo.toml" --no-deps --format-version 1 | python3 -c 'import sys,json;print(json.load(sys.stdin)["target_directory"])')
     PAYDIRT_SDK_SERVER="$target/debug/sdk"
