@@ -190,7 +190,7 @@ impl Plan<'_> {
             self.mutable(e, f, tx)?;
             self.patch[&f.json] = match op {
                 "assign" => typed(f, &entry["assign"]["value"])?,
-                "remove" => value::default_value(f),
+                "remove" => value::default_value(f, tx.inputs),
                 "insert" if f.collection == "list" => {
                     let mut out = self.current(f).clone();
                     let v = typed(f, &entry["insert"]["value"])?;
@@ -284,7 +284,7 @@ impl Plan<'_> {
                 "remove" => {
                     self.mutable(e, f, tx)?;
                     if !f.collection.is_empty() {
-                        self.patch[&f.json] = value::default_value(f);
+                        self.patch[&f.json] = value::default_value(f, tx.inputs);
                     } else if f.nullable {
                         self.patch[format!("{}Null", f.json)] = json!(true);
                     } else {

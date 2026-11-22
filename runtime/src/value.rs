@@ -18,16 +18,12 @@ pub fn bytes(v: &Value) -> Result<Vec<u8>> {
 pub fn encoded(v: &[u8]) -> Value {
     json!(STANDARD.encode(v))
 }
-pub fn stamp() -> Value {
-    json!(Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true))
-}
-pub fn next_stamp(old: &Value) -> Result<Value> {
+pub fn next_stamp(old: &Value, now: DateTime<Utc>) -> Result<Value> {
     let time = DateTime::parse_from_rfc3339(old.as_str().unwrap_or(""))
         .map_err(|_| Fault::internal("bad stored timestamp"))?
         .to_utc();
     Ok(json!(
-        Utc::now()
-            .max(time + chrono::TimeDelta::nanoseconds(1))
+        now.max(time + chrono::TimeDelta::nanoseconds(1))
             .to_rfc3339_opts(SecondsFormat::Nanos, true)
     ))
 }
@@ -98,7 +94,7 @@ pub fn decode(f: &Field, text: &str) -> Result<Value> {
         _ => json!(text),
     })
 }
-pub fn default_value(f: &Field) -> Value {
+pub fn default_value(f: &Field, inputs: &crate::Inputs) -> Value {
     if f.collection == "list" {
         return json!([]);
     }
@@ -106,7 +102,7 @@ pub fn default_value(f: &Field) -> Value {
         return json!({});
     }
     match f.kind.as_str() {
-        "TIME" => stamp(),
+        "TIME" => inputs.stamp(),
         "BYTES" | "STRING" => json!(""),
         "BOOL" => json!(false),
         "INT64" | "SINT64" | "SFIXED64" | "UINT64" | "FIXED64" => json!("0"),

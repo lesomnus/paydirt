@@ -45,6 +45,10 @@ wasm-bindgen-futures = "0.4"
 send_wrapper = {version="0.6",features=["futures"]}
 drpc-rs = { git = "https://github.com/lesomnus/drpc-rs", rev = "2e9d63e2c21a908b88c3569c9c8d785b3b33893c" }
 web-sys = { version = "0.3", features = ["MessagePort"] }
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+paydirt-test = {git="https://github.com/lesomnus/paydirt",rev="f0df9acd1d3644562d6d2a75c41043ce90b91020"}
+chrono = "0.4"
+
 [profile.release]
 opt-level = "s"
 lto = true
