@@ -1,0 +1,29 @@
+name: cli
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  external-app:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          version: '1.72.0'
+          github_token: ${{ github.token }}
+      - name: Install code generators
+        run: |
+          scripts/install-codegen-linux.sh "$RUNNER_TEMP/paydirt-tools"
+          echo "$RUNNER_TEMP/paydirt-tools" >> "$GITHUB_PATH"
+      - run: cargo build --locked -p paydirt-cli
+      - run: scripts/test-gen.sh
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/app-target

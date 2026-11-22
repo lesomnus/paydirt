@@ -12,6 +12,12 @@ Paydirt is an early Rust port of [Payday](https://github.com/lesomnus/payday). T
 
 The root crate contains the reusable ID and tenant-token primitives. The robot application uses checked-in Buffa, Connect and [protoc-gen-orm-rust](https://github.com/protobuf-orm/protoc-gen-orm-rust) output. The storage implementation and RPC handlers are handwritten for this slice. Further work includes generating the entity write path and migrations, porting Payday's gate, audit and outbox layers, and supporting additional fields, orders, and methods such as `Apply` and `Move`.
 
+## Generate Rust contracts for an application
+
+Install the CLI with `cargo install --path cli --locked`. Generation uses Buf 1.72, Buffa 0.8.1 (including its packaging plugin), Connect Rust 0.8.2, and the ORM service and Rust plugins. On Linux x86_64, `scripts/install-codegen-linux.sh "$HOME/.local/bin"` installs the pinned plugins. Put that directory and `buf` on your path.
+
+Place the app's entity declarations in `proto/` with a v2 `buf.yaml` at the project root and pin the dependencies in `buf.lock`. Run `paydirt gen` there or pass the project directory. The CLI first generates standard ORM service contracts, then compiles messages, services and Rust lookup helpers from those contracts. It stages all outputs before replacing its owned `generated/` tree. Use `paydirt gen --check` in CI. The Robot interoperability fixture below still uses its original Buf template.
+
 ## Browser sandbox
 
 The page creates two dedicated Workers and transfers the ends of a private `MessageChannel` to them.

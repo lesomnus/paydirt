@@ -1,0 +1,6 @@
+version: v2
+plugins:
+  - local: protoc-gen-orm-service
+    strategy: all
+    out: generated/proto
+    opt: ['namer={{.Name}}_svc.g.proto']

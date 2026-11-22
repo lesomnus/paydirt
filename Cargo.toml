@@ -1,5 +1,5 @@
 [workspace]
-members = ["robot", "robot/protocol", "storage"]
+members = ["cli", "robot", "robot/protocol", "storage"]
 resolver = "3"
 
 [package]
