@@ -42,6 +42,8 @@ impl Watch {
 #[derive(Deserialize)]
 struct Config {
     watch: Watch,
+    #[serde(default)]
+    worker_lease: Option<String>,
     listen: std::net::SocketAddr,
     service_name: String,
     #[serde(default)]
@@ -105,21 +107,55 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if let Ok(header) = std::env::var("PAYDIRT_ACCOUNT_HEADER") {
         db = db.with_account_header(header)?;
     }
+    use paydirt::spin::{Lease, Placement};
+    let mut workers = __APP_CRATE__::workers(&db)?;
     if let (Some(ms), Some(broker)) = (config.watch.drain_every_ms, broker) {
-        let mut store = paydirt_store::Store::open(&url, MODEL, POLICIES)?;
-        tokio::spawn(async move {
-            let mut tick = tokio::time::interval(Duration::from_millis(ms));
-            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            loop {
-                tick.tick().await;
-                if let Err(e) = store.drain_once(&*broker, 128).await {
-                    eprintln!("outbox drain failed: {e}");
+        let url = url.clone();
+        workers.add("paydirt.outbox", Placement::Singleton, move |stop| {
+            let url = url.clone();
+            let broker = broker.clone();
+            async move {
+                let mut store =
+                    paydirt_store::Store::open(&url, MODEL, POLICIES).map_err(|e| e.to_string())?;
+                let mut tick = tokio::time::interval(Duration::from_millis(ms));
+                tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    tokio::select! {_=stop.cancelled()=>return Ok(()),_=tick.tick()=>{}}
+                    if let Err(err) = store.drain_once(&*broker, 128).await {
+                        eprintln!("outbox drain failed: {err}");
+                    }
                 }
             }
-        });
+        })?;
     }
-    Server::new(router(db, config.service_name))
-        .serve(addr)
+    let lease = match config.worker_lease.as_deref() {
+        None | Some("local") => Lease::Local,
+        Some("postgres") => Lease::Postgres {
+            dsn: url,
+            retry: Duration::from_secs(1),
+        },
+        Some(v) => return Err(format!("unknown worker lease {v}").into()),
+    };
+    let listener = Server::bind(addr).await.map_err(|e| e as Box<dyn Error>)?;
+    let routes = router(db, config.service_name);
+    let stop = async {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{SignalKind, signal};
+            if let Ok(mut term) = signal(SignalKind::terminate()) {
+                tokio::select! {_=term.recv()=>{},_=tokio::signal::ctrl_c()=>{}}
+                return;
+            }
+        }
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    workers
+        .run(lease, stop, move |stop| async move {
+            listener
+                .serve_with_graceful_shutdown(routes, async move { stop.cancelled().await })
+                .await
+                .map_err(|e| e.to_string())
+        })
         .await
-        .map_err(|e| e as Box<dyn Error>)
+        .map_err(Into::into)
 }
