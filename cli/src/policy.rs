@@ -163,6 +163,13 @@ pub fn generate(work: &Path) -> Result<()> {
             };
             let mut field =
                 json!({"name":f["jsonName"],"number":f["number"],"target":target,"secret":secret});
+            if f["options"]["[payday.field]"]["personal"] == true
+                || entity.and_then(|n| policies.get(n)).is_some_and(|p| {
+                    p["fields"][f["name"].as_str().unwrap_or_default()]["personal"] == true
+                })
+            {
+                field["personal"] = json!(true);
+            }
             if f["options"]["[orm.field]"]["type"] == "TYPE_UUID" {
                 field["uuid"] = json!(true);
             }

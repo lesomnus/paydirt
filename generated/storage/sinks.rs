@@ -760,6 +760,533 @@ impl<
         }
     }
 }
+mod sink_app_access {
+    use super::*;
+    pub struct Sink(pub Database);
+    #[allow(refining_impl_trait)]
+    impl<
+        N: crate::services::r#app::AccessService,
+    > crate::services::r#app::AccessServiceLayer<N> for Sink {
+        async fn get(
+            &self,
+            _: &N,
+            ctx: RequestContext,
+            request: ServiceRequest<'_, crate::proto::r#app::r#AccessGetRequest>,
+        ) -> ServiceResult<crate::proto::r#app::r#Access> {
+            Response::ok(
+                self.0.rpc(&ctx, "app.Access", "Get", &request.to_owned_message()).await?,
+            )
+        }
+        async fn list(
+            &self,
+            _: &N,
+            ctx: RequestContext,
+            request: ServiceRequest<'_, crate::proto::r#app::r#AccessListRequest>,
+        ) -> ServiceResult<crate::proto::r#app::r#AccessListResponse> {
+            Response::ok(
+                self
+                    .0
+                    .rpc(&ctx, "app.Access", "List", &request.to_owned_message())
+                    .await?,
+            )
+        }
+    }
+    impl<
+        N: crate::services::r#app::AccessService,
+    > crate::services::r#app::AccessServiceLayer<N> for Gate {
+        fn get<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::AccessGetRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::Access,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.AccessGetRequest",
+                    "app.Access",
+                    "/app.AccessService/Get",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
+                    .db
+                    .authorize(
+                        ctx,
+                        "app.Access",
+                        "Get",
+                        self.public.contains(&"/app.AccessService/Get"),
+                        false,
+                        false,
+                    )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.get(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<crate::proto::r#app::r#Access, _>(&self.db, &response.body)
+                    .await?;
+                Ok(response)
+            }
+        }
+        fn list<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::AccessListRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::AccessListResponse,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.AccessListRequest",
+                    "app.AccessListResponse",
+                    "/app.AccessService/List",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
+                    .db
+                    .authorize(
+                        ctx,
+                        "app.Access",
+                        "List",
+                        self.public.contains(&"/app.AccessService/List"),
+                        false,
+                        false,
+                    )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.list(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<
+                        crate::proto::r#app::r#AccessListResponse,
+                        _,
+                    >(&self.db, &response.body)
+                    .await?;
+                Ok(response)
+            }
+        }
+    }
+    impl<
+        N: crate::services::r#app::AccessService,
+    > crate::services::r#app::AccessServiceLayer<N> for Audit {
+        fn get<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::AccessGetRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::Access,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            async move {
+                let mut ctx = ctx;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Access",
+                        "Get",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
+                let result = next.get(ctx, request).await;
+                if let Some(guard) = guard {
+                    guard.finish(result.is_ok()).await?;
+                }
+                result
+            }
+        }
+        fn list<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::AccessListRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::AccessListResponse,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            async move {
+                let mut ctx = ctx;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Access",
+                        "List",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
+                let result = next.list(ctx, request).await;
+                if let Some(guard) = guard {
+                    guard.finish(result.is_ok()).await?;
+                }
+                result
+            }
+        }
+    }
+}
+mod sink_app_audit {
+    use super::*;
+    pub struct Sink(pub Database);
+    #[allow(refining_impl_trait)]
+    impl<
+        N: crate::services::r#app::AuditService,
+    > crate::services::r#app::AuditServiceLayer<N> for Sink {
+        async fn get(
+            &self,
+            _: &N,
+            ctx: RequestContext,
+            request: ServiceRequest<'_, crate::proto::r#app::r#AuditGetRequest>,
+        ) -> ServiceResult<crate::proto::r#app::r#Audit> {
+            Response::ok(
+                self.0.rpc(&ctx, "app.Audit", "Get", &request.to_owned_message()).await?,
+            )
+        }
+        async fn list(
+            &self,
+            _: &N,
+            ctx: RequestContext,
+            request: ServiceRequest<'_, crate::proto::r#app::r#AuditListRequest>,
+        ) -> ServiceResult<crate::proto::r#app::r#AuditListResponse> {
+            Response::ok(
+                self.0.rpc(&ctx, "app.Audit", "List", &request.to_owned_message()).await?,
+            )
+        }
+    }
+    impl<
+        N: crate::services::r#app::AuditService,
+    > crate::services::r#app::AuditServiceLayer<N> for Gate {
+        fn add<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<'_, crate::proto::app::AuditAddRequest>,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::Audit,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            let _ = next;
+            crate::services::r#app::AuditService::add(
+                &crate::services::r#app::AuditServiceUnimplemented,
+                ctx,
+                request,
+            )
+        }
+        fn get<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<'_, crate::proto::app::AuditGetRequest>,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::Audit,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.AuditGetRequest",
+                    "app.Audit",
+                    "/app.AuditService/Get",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
+                    .db
+                    .authorize(
+                        ctx,
+                        "app.Audit",
+                        "Get",
+                        self.public.contains(&"/app.AuditService/Get"),
+                        false,
+                        false,
+                    )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.get(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<crate::proto::r#app::r#Audit, _>(&self.db, &response.body)
+                    .await?;
+                Ok(response)
+            }
+        }
+        fn patch<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::AuditPatchRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::Audit,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            let _ = next;
+            crate::services::r#app::AuditService::patch(
+                &crate::services::r#app::AuditServiceUnimplemented,
+                ctx,
+                request,
+            )
+        }
+        fn apply<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::AuditApplyRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::Audit,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            let _ = next;
+            crate::services::r#app::AuditService::apply(
+                &crate::services::r#app::AuditServiceUnimplemented,
+                ctx,
+                request,
+            )
+        }
+        fn erase<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<'_, crate::proto::app::AuditRef>,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::AuditEraseResponse,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            let _ = next;
+            crate::services::r#app::AuditService::erase(
+                &crate::services::r#app::AuditServiceUnimplemented,
+                ctx,
+                request,
+            )
+        }
+        fn list<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::AuditListRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::AuditListResponse,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.AuditListRequest",
+                    "app.AuditListResponse",
+                    "/app.AuditService/List",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
+                    .db
+                    .authorize(
+                        ctx,
+                        "app.Audit",
+                        "List",
+                        self.public.contains(&"/app.AuditService/List"),
+                        false,
+                        false,
+                    )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.list(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<
+                        crate::proto::r#app::r#AuditListResponse,
+                        _,
+                    >(&self.db, &response.body)
+                    .await?;
+                Ok(response)
+            }
+        }
+    }
+    impl<
+        N: crate::services::r#app::AuditService,
+    > crate::services::r#app::AuditServiceLayer<N> for Audit {
+        fn get<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<'_, crate::proto::app::AuditGetRequest>,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::Audit,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            async move {
+                let mut ctx = ctx;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Audit",
+                        "Get",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
+                let result = next.get(ctx, request).await;
+                if let Some(guard) = guard {
+                    guard.finish(result.is_ok()).await?;
+                }
+                result
+            }
+        }
+        fn list<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::AuditListRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::AuditListResponse,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            async move {
+                let mut ctx = ctx;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Audit",
+                        "List",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
+                let result = next.list(ctx, request).await;
+                if let Some(guard) = guard {
+                    guard.finish(result.is_ok()).await?;
+                }
+                result
+            }
+        }
+    }
+}
 mod sink_app_cell {
     use super::*;
     pub struct Sink(pub Database);
@@ -836,7 +1363,21 @@ mod sink_app_cell {
                     ctx,
                     || request.to_owned_message(),
                 )?;
-                let ctx = self
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.CellAddRequest",
+                    "app.Cell",
+                    "/app.CellService/Add",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
                     .db
                     .authorize(
                         ctx,
@@ -846,8 +1387,19 @@ mod sink_app_cell {
                         false,
                         false,
                     )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.add(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<crate::proto::r#app::r#Cell, _>(&self.db, &response.body)
                     .await?;
-                next.add(ctx, request).await
+                Ok(response)
             }
         }
         fn get<'a>(
@@ -865,7 +1417,21 @@ mod sink_app_cell {
                     ctx,
                     || request.to_owned_message(),
                 )?;
-                let ctx = self
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.CellGetRequest",
+                    "app.Cell",
+                    "/app.CellService/Get",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
                     .db
                     .authorize(
                         ctx,
@@ -875,8 +1441,19 @@ mod sink_app_cell {
                         false,
                         false,
                     )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.get(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<crate::proto::r#app::r#Cell, _>(&self.db, &response.body)
                     .await?;
-                next.get(ctx, request).await
+                Ok(response)
             }
         }
         fn patch<'a>(
@@ -897,7 +1474,21 @@ mod sink_app_cell {
                     ctx,
                     || request.to_owned_message(),
                 )?;
-                let ctx = self
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.CellPatchRequest",
+                    "app.Cell",
+                    "/app.CellService/Patch",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
                     .db
                     .authorize(
                         ctx,
@@ -907,8 +1498,19 @@ mod sink_app_cell {
                         false,
                         false,
                     )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.patch(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<crate::proto::r#app::r#Cell, _>(&self.db, &response.body)
                     .await?;
-                next.patch(ctx, request).await
+                Ok(response)
             }
         }
         fn apply<'a>(
@@ -929,7 +1531,21 @@ mod sink_app_cell {
                     ctx,
                     || request.to_owned_message(),
                 )?;
-                let ctx = self
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.CellApplyRequest",
+                    "app.Cell",
+                    "/app.CellService/Apply",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
                     .db
                     .authorize(
                         ctx,
@@ -939,8 +1555,19 @@ mod sink_app_cell {
                         false,
                         false,
                     )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.apply(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<crate::proto::r#app::r#Cell, _>(&self.db, &response.body)
                     .await?;
-                next.apply(ctx, request).await
+                Ok(response)
             }
         }
         fn erase<'a>(
@@ -960,7 +1587,21 @@ mod sink_app_cell {
                     ctx,
                     || request.to_owned_message(),
                 )?;
-                let ctx = self
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.CellRef",
+                    "app.CellEraseResponse",
+                    "/app.CellService/Erase",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
                     .db
                     .authorize(
                         ctx,
@@ -970,8 +1611,22 @@ mod sink_app_cell {
                         false,
                         false,
                     )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.erase(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<
+                        crate::proto::r#app::r#CellEraseResponse,
+                        _,
+                    >(&self.db, &response.body)
                     .await?;
-                next.erase(ctx, request).await
+                Ok(response)
             }
         }
     }
@@ -1204,7 +1859,21 @@ mod sink_app_holder {
                     ctx,
                     || request.to_owned_message(),
                 )?;
-                let ctx = self
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.HolderGetRequest",
+                    "app.Holder",
+                    "/app.HolderService/Get",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
                     .db
                     .authorize(
                         ctx,
@@ -1214,8 +1883,19 @@ mod sink_app_holder {
                         false,
                         false,
                     )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.get(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<crate::proto::r#app::r#Holder, _>(&self.db, &response.body)
                     .await?;
-                next.get(ctx, request).await
+                Ok(response)
             }
         }
         fn patch<'a>(
@@ -1301,7 +1981,21 @@ mod sink_app_holder {
                     ctx,
                     || request.to_owned_message(),
                 )?;
-                let ctx = self
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.HolderListRequest",
+                    "app.HolderListResponse",
+                    "/app.HolderService/List",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
                     .db
                     .authorize(
                         ctx,
@@ -1311,8 +2005,22 @@ mod sink_app_holder {
                         false,
                         false,
                     )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.list(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<
+                        crate::proto::r#app::r#HolderListResponse,
+                        _,
+                    >(&self.db, &response.body)
                     .await?;
-                next.list(ctx, request).await
+                Ok(response)
             }
         }
         fn watch(
@@ -1531,7 +2239,21 @@ mod sink_app_robot {
                     ctx,
                     || request.to_owned_message(),
                 )?;
-                let ctx = self
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.RobotAddRequest",
+                    "app.Robot",
+                    "/app.RobotService/Add",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
                     .db
                     .authorize(
                         ctx,
@@ -1541,8 +2263,19 @@ mod sink_app_robot {
                         false,
                         false,
                     )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.add(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<crate::proto::r#app::r#Robot, _>(&self.db, &response.body)
                     .await?;
-                next.add(ctx, request).await
+                Ok(response)
             }
         }
         fn add_many<'a>(
@@ -1565,7 +2298,21 @@ mod sink_app_robot {
                     ctx,
                     || request.to_owned_message(),
                 )?;
-                let ctx = self
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.RobotAddManyRequest",
+                    "app.RobotAddManyResponse",
+                    "/app.RobotService/AddMany",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
                     .db
                     .authorize_cost(
                         ctx,
@@ -1576,8 +2323,22 @@ mod sink_app_robot {
                         false,
                         request.items.len(),
                     )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.add_many(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<
+                        crate::proto::r#app::r#RobotAddManyResponse,
+                        _,
+                    >(&self.db, &response.body)
                     .await?;
-                next.add_many(ctx, request).await
+                Ok(response)
             }
         }
         fn get<'a>(
@@ -1597,7 +2358,21 @@ mod sink_app_robot {
                     ctx,
                     || request.to_owned_message(),
                 )?;
-                let ctx = self
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.RobotGetRequest",
+                    "app.Robot",
+                    "/app.RobotService/Get",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
                     .db
                     .authorize(
                         ctx,
@@ -1607,8 +2382,19 @@ mod sink_app_robot {
                         false,
                         false,
                     )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.get(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<crate::proto::r#app::r#Robot, _>(&self.db, &response.body)
                     .await?;
-                next.get(ctx, request).await
+                Ok(response)
             }
         }
         fn patch<'a>(
@@ -1631,7 +2417,21 @@ mod sink_app_robot {
                     ctx,
                     || request.to_owned_message(),
                 )?;
-                let ctx = self
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.RobotPatchRequest",
+                    "app.Robot",
+                    "/app.RobotService/Patch",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
                     .db
                     .authorize(
                         ctx,
@@ -1641,8 +2441,19 @@ mod sink_app_robot {
                         false,
                         false,
                     )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.patch(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<crate::proto::r#app::r#Robot, _>(&self.db, &response.body)
                     .await?;
-                next.patch(ctx, request).await
+                Ok(response)
             }
         }
         fn apply<'a>(
@@ -1665,7 +2476,21 @@ mod sink_app_robot {
                     ctx,
                     || request.to_owned_message(),
                 )?;
-                let ctx = self
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.RobotApplyRequest",
+                    "app.Robot",
+                    "/app.RobotService/Apply",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
                     .db
                     .authorize(
                         ctx,
@@ -1675,8 +2500,19 @@ mod sink_app_robot {
                         false,
                         false,
                     )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.apply(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<crate::proto::r#app::r#Robot, _>(&self.db, &response.body)
                     .await?;
-                next.apply(ctx, request).await
+                Ok(response)
             }
         }
         fn erase<'a>(
@@ -1696,7 +2532,21 @@ mod sink_app_robot {
                     ctx,
                     || request.to_owned_message(),
                 )?;
-                let ctx = self
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.RobotRef",
+                    "app.RobotEraseResponse",
+                    "/app.RobotService/Erase",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
                     .db
                     .authorize(
                         ctx,
@@ -1706,8 +2556,22 @@ mod sink_app_robot {
                         false,
                         false,
                     )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.erase(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<
+                        crate::proto::r#app::r#RobotEraseResponse,
+                        _,
+                    >(&self.db, &response.body)
                     .await?;
-                next.erase(ctx, request).await
+                Ok(response)
             }
         }
         fn list<'a>(
@@ -1730,7 +2594,21 @@ mod sink_app_robot {
                     ctx,
                     || request.to_owned_message(),
                 )?;
-                let ctx = self
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.RobotListRequest",
+                    "app.RobotListResponse",
+                    "/app.RobotService/List",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
                     .db
                     .authorize(
                         ctx,
@@ -1740,8 +2618,22 @@ mod sink_app_robot {
                         false,
                         false,
                     )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.list(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<
+                        crate::proto::r#app::r#RobotListResponse,
+                        _,
+                    >(&self.db, &response.body)
                     .await?;
-                next.list(ctx, request).await
+                Ok(response)
             }
         }
         fn watch(
@@ -1766,7 +2658,21 @@ mod sink_app_robot {
                     ctx,
                     || request.to_owned_message(),
                 )?;
-                let ctx = self
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.RobotWatchRequest",
+                    "app.RobotWatchResponse",
+                    "/app.RobotService/Watch",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
                     .db
                     .authorize(
                         ctx,
@@ -1776,9 +2682,25 @@ mod sink_app_robot {
                         false,
                         false,
                     )
-                    .await?;
-                let response = next.watch(ctx.clone(), request).await?;
-                Ok(response.map_body(|body| Database::enforce_presence(&ctx, body)))
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.watch(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                Ok(
+                    response
+                        .map_body(|body| {
+                            attempt
+                                .stream::<
+                                    crate::proto::r#app::r#RobotWatchResponse,
+                                    _,
+                                >(self.db.clone(), Database::enforce_presence(&ctx, body))
+                        }),
+                )
             }
         }
         fn r#move<'a>(
@@ -1801,7 +2723,21 @@ mod sink_app_robot {
                     ctx,
                     || request.to_owned_message(),
                 )?;
-                let ctx = self
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.RobotMoveRequest",
+                    "app.Robot",
+                    "/app.RobotService/Move",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
                     .db
                     .authorize(
                         ctx,
@@ -1811,8 +2747,19 @@ mod sink_app_robot {
                         true,
                         false,
                     )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.r#move(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<crate::proto::r#app::r#Robot, _>(&self.db, &response.body)
                     .await?;
-                next.r#move(ctx, request).await
+                Ok(response)
             }
         }
     }
@@ -2152,7 +3099,21 @@ mod sink_app_tenant {
                     ctx,
                     || request.to_owned_message(),
                 )?;
-                let ctx = self
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.TenantGetRequest",
+                    "app.Tenant",
+                    "/app.TenantService/Get",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
                     .db
                     .authorize(
                         ctx,
@@ -2162,8 +3123,19 @@ mod sink_app_tenant {
                         false,
                         false,
                     )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.get(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<crate::proto::r#app::r#Tenant, _>(&self.db, &response.body)
                     .await?;
-                next.get(ctx, request).await
+                Ok(response)
             }
         }
         fn patch<'a>(
@@ -2249,7 +3221,21 @@ mod sink_app_tenant {
                     ctx,
                     || request.to_owned_message(),
                 )?;
-                let ctx = self
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.TenantListRequest",
+                    "app.TenantListResponse",
+                    "/app.TenantService/List",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
                     .db
                     .authorize(
                         ctx,
@@ -2259,8 +3245,22 @@ mod sink_app_tenant {
                         false,
                         false,
                     )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.list(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<
+                        crate::proto::r#app::r#TenantListResponse,
+                        _,
+                    >(&self.db, &response.body)
                     .await?;
-                next.list(ctx, request).await
+                Ok(response)
             }
         }
     }
@@ -2343,6 +3343,18 @@ struct Audit(Database);
 #[derive(Clone)]
 pub struct Next(pub Database);
 impl Next {
+    pub fn app_access(&self) -> impl crate::services::r#app::AccessService {
+        crate::services::r#app::AccessServiceOverlay {
+            next: crate::services::r#app::AccessServiceUnimplemented,
+            layer: sink_app_access::Sink(self.0.clone()),
+        }
+    }
+    pub fn app_audit(&self) -> impl crate::services::r#app::AuditService {
+        crate::services::r#app::AuditServiceOverlay {
+            next: crate::services::r#app::AuditServiceUnimplemented,
+            layer: sink_app_audit::Sink(self.0.clone()),
+        }
+    }
     pub fn app_cell(&self) -> impl crate::services::r#app::CellService {
         crate::services::r#app::CellServiceOverlay {
             next: crate::services::r#app::CellServiceUnimplemented,
@@ -2368,6 +3380,132 @@ impl Next {
         }
     }
 }
+#[allow(async_fn_in_trait)]
+pub trait AccessCalls: crate::services::r#app::AccessService {
+    async fn get_owned(
+        &self,
+        ctx: &RequestContext,
+        req: crate::proto::r#app::r#AccessGetRequest,
+    ) -> Result<crate::proto::r#app::r#Access, ::connectrpc::ConnectError> {
+        use buffa::{Message, HasMessageView};
+        use connectrpc::Encodable;
+        let bytes = req.encode_to_bytes();
+        let view = crate::proto::r#app::r#AccessGetRequest::decode_view(&bytes)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream request",
+            ))?;
+        let reply = self
+            .get(ctx.clone(), ServiceRequest::from_parts(&view, &bytes))
+            .await?;
+        let wire = reply.body.encode(connectrpc::CodecFormat::Proto)?;
+        crate::proto::r#app::r#Access::decode_from_slice(&wire)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream response",
+            ))
+    }
+    fn list_all<'a>(
+        &'a self,
+        ctx: &'a RequestContext,
+        request: &crate::proto::r#app::r#AccessListRequest,
+    ) -> impl ::paydirt::page::Stream<
+        Item = Result<crate::proto::r#app::Access, ::connectrpc::ConnectError>,
+    > + 'a {
+        ::paydirt::page::all(
+            request,
+            |q| &mut q.after,
+            move |q| async move {
+                let page = self.list_owned(ctx, q).await?;
+                Ok((page.items, page.next))
+            },
+            || ::connectrpc::ConnectError::internal("repeated continuation token"),
+        )
+    }
+    async fn list_owned(
+        &self,
+        ctx: &RequestContext,
+        req: crate::proto::r#app::r#AccessListRequest,
+    ) -> Result<crate::proto::r#app::r#AccessListResponse, ::connectrpc::ConnectError> {
+        use buffa::{Message, HasMessageView};
+        use connectrpc::Encodable;
+        let bytes = req.encode_to_bytes();
+        let view = crate::proto::r#app::r#AccessListRequest::decode_view(&bytes)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream request",
+            ))?;
+        let reply = self
+            .list(ctx.clone(), ServiceRequest::from_parts(&view, &bytes))
+            .await?;
+        let wire = reply.body.encode(connectrpc::CodecFormat::Proto)?;
+        crate::proto::r#app::r#AccessListResponse::decode_from_slice(&wire)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream response",
+            ))
+    }
+}
+impl<N: crate::services::r#app::AccessService> AccessCalls for N {}
+#[allow(async_fn_in_trait)]
+pub trait AuditCalls: crate::services::r#app::AuditService {
+    async fn get_owned(
+        &self,
+        ctx: &RequestContext,
+        req: crate::proto::r#app::r#AuditGetRequest,
+    ) -> Result<crate::proto::r#app::r#Audit, ::connectrpc::ConnectError> {
+        use buffa::{Message, HasMessageView};
+        use connectrpc::Encodable;
+        let bytes = req.encode_to_bytes();
+        let view = crate::proto::r#app::r#AuditGetRequest::decode_view(&bytes)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream request",
+            ))?;
+        let reply = self
+            .get(ctx.clone(), ServiceRequest::from_parts(&view, &bytes))
+            .await?;
+        let wire = reply.body.encode(connectrpc::CodecFormat::Proto)?;
+        crate::proto::r#app::r#Audit::decode_from_slice(&wire)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream response",
+            ))
+    }
+    fn list_all<'a>(
+        &'a self,
+        ctx: &'a RequestContext,
+        request: &crate::proto::r#app::r#AuditListRequest,
+    ) -> impl ::paydirt::page::Stream<
+        Item = Result<crate::proto::r#app::Audit, ::connectrpc::ConnectError>,
+    > + 'a {
+        ::paydirt::page::all(
+            request,
+            |q| &mut q.after,
+            move |q| async move {
+                let page = self.list_owned(ctx, q).await?;
+                Ok((page.items, page.next))
+            },
+            || ::connectrpc::ConnectError::internal("repeated continuation token"),
+        )
+    }
+    async fn list_owned(
+        &self,
+        ctx: &RequestContext,
+        req: crate::proto::r#app::r#AuditListRequest,
+    ) -> Result<crate::proto::r#app::r#AuditListResponse, ::connectrpc::ConnectError> {
+        use buffa::{Message, HasMessageView};
+        use connectrpc::Encodable;
+        let bytes = req.encode_to_bytes();
+        let view = crate::proto::r#app::r#AuditListRequest::decode_view(&bytes)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream request",
+            ))?;
+        let reply = self
+            .list(ctx.clone(), ServiceRequest::from_parts(&view, &bytes))
+            .await?;
+        let wire = reply.body.encode(connectrpc::CodecFormat::Proto)?;
+        crate::proto::r#app::r#AuditListResponse::decode_from_slice(&wire)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream response",
+            ))
+    }
+}
+impl<N: crate::services::r#app::AuditService> AuditCalls for N {}
 #[allow(async_fn_in_trait)]
 pub trait CellCalls: crate::services::r#app::CellService {
     async fn add_owned(
@@ -2802,6 +3940,18 @@ pub trait Layers {
     fn public_methods(&self) -> &'static [&'static str] {
         &[]
     }
+    fn app_access(
+        &self,
+        next: impl crate::services::r#app::AccessService,
+    ) -> impl crate::services::r#app::AccessService {
+        next
+    }
+    fn app_audit(
+        &self,
+        next: impl crate::services::r#app::AuditService,
+    ) -> impl crate::services::r#app::AuditService {
+        next
+    }
     fn app_cell(
         &self,
         next: impl crate::services::r#app::CellService,
@@ -2830,85 +3980,149 @@ pub trait Layers {
 pub fn mount(router: Router, db: Database, layers: &impl Layers) -> Router {
     let next = Next(db.clone());
     let interceptors = layers.interceptors().public();
-    let core = layers.app_cell(next.app_cell());
-    let core = crate::services::r#app::CellServiceOverlay {
-        next: core,
-        layer: interceptors.clone(),
+    let router = if crate::transport::access::OPTIONS.reads {
+        let core = layers.app_access(next.app_access());
+        let core = crate::services::r#app::AccessServiceOverlay {
+            next: core,
+            layer: interceptors.clone(),
+        };
+        let audit = crate::services::r#app::AccessServiceOverlay {
+            next: core,
+            layer: Audit(db.clone()),
+        };
+        let gate = crate::services::r#app::AccessServiceOverlay {
+            next: audit,
+            layer: Gate {
+                db: db.clone(),
+                public: layers.public_methods(),
+            },
+        };
+        crate::services::r#app::AccessServiceExt::register(
+            ::std::sync::Arc::new(gate),
+            router,
+        )
+    } else {
+        router
     };
-    let audit = crate::services::r#app::CellServiceOverlay {
-        next: core,
-        layer: Audit(db.clone()),
+    let router = if crate::transport::access::OPTIONS.reads {
+        let core = layers.app_audit(next.app_audit());
+        let core = crate::services::r#app::AuditServiceOverlay {
+            next: core,
+            layer: interceptors.clone(),
+        };
+        let audit = crate::services::r#app::AuditServiceOverlay {
+            next: core,
+            layer: Audit(db.clone()),
+        };
+        let gate = crate::services::r#app::AuditServiceOverlay {
+            next: audit,
+            layer: Gate {
+                db: db.clone(),
+                public: layers.public_methods(),
+            },
+        };
+        crate::services::r#app::AuditServiceExt::register(
+            ::std::sync::Arc::new(gate),
+            router,
+        )
+    } else {
+        router
     };
-    let gate = crate::services::r#app::CellServiceOverlay {
-        next: audit,
-        layer: Gate {
-            db: db.clone(),
-            public: layers.public_methods(),
-        },
+    let router = if true {
+        let core = layers.app_cell(next.app_cell());
+        let core = crate::services::r#app::CellServiceOverlay {
+            next: core,
+            layer: interceptors.clone(),
+        };
+        let audit = crate::services::r#app::CellServiceOverlay {
+            next: core,
+            layer: Audit(db.clone()),
+        };
+        let gate = crate::services::r#app::CellServiceOverlay {
+            next: audit,
+            layer: Gate {
+                db: db.clone(),
+                public: layers.public_methods(),
+            },
+        };
+        crate::services::r#app::CellServiceExt::register(
+            ::std::sync::Arc::new(gate),
+            router,
+        )
+    } else {
+        router
     };
-    let router = crate::services::r#app::CellServiceExt::register(
-        ::std::sync::Arc::new(gate),
-        router,
-    );
-    let core = layers.app_holder(next.app_holder());
-    let core = crate::services::r#app::HolderServiceOverlay {
-        next: core,
-        layer: interceptors.clone(),
+    let router = if true {
+        let core = layers.app_holder(next.app_holder());
+        let core = crate::services::r#app::HolderServiceOverlay {
+            next: core,
+            layer: interceptors.clone(),
+        };
+        let audit = crate::services::r#app::HolderServiceOverlay {
+            next: core,
+            layer: Audit(db.clone()),
+        };
+        let gate = crate::services::r#app::HolderServiceOverlay {
+            next: audit,
+            layer: Gate {
+                db: db.clone(),
+                public: layers.public_methods(),
+            },
+        };
+        crate::services::r#app::HolderServiceExt::register(
+            ::std::sync::Arc::new(gate),
+            router,
+        )
+    } else {
+        router
     };
-    let audit = crate::services::r#app::HolderServiceOverlay {
-        next: core,
-        layer: Audit(db.clone()),
+    let router = if true {
+        let core = layers.app_robot(next.app_robot());
+        let core = crate::services::r#app::RobotServiceOverlay {
+            next: core,
+            layer: interceptors.clone(),
+        };
+        let audit = crate::services::r#app::RobotServiceOverlay {
+            next: core,
+            layer: Audit(db.clone()),
+        };
+        let gate = crate::services::r#app::RobotServiceOverlay {
+            next: audit,
+            layer: Gate {
+                db: db.clone(),
+                public: layers.public_methods(),
+            },
+        };
+        crate::services::r#app::RobotServiceExt::register(
+            ::std::sync::Arc::new(gate),
+            router,
+        )
+    } else {
+        router
     };
-    let gate = crate::services::r#app::HolderServiceOverlay {
-        next: audit,
-        layer: Gate {
-            db: db.clone(),
-            public: layers.public_methods(),
-        },
+    let router = if true {
+        let core = layers.app_tenant(next.app_tenant());
+        let core = crate::services::r#app::TenantServiceOverlay {
+            next: core,
+            layer: interceptors.clone(),
+        };
+        let audit = crate::services::r#app::TenantServiceOverlay {
+            next: core,
+            layer: Audit(db.clone()),
+        };
+        let gate = crate::services::r#app::TenantServiceOverlay {
+            next: audit,
+            layer: Gate {
+                db: db.clone(),
+                public: layers.public_methods(),
+            },
+        };
+        crate::services::r#app::TenantServiceExt::register(
+            ::std::sync::Arc::new(gate),
+            router,
+        )
+    } else {
+        router
     };
-    let router = crate::services::r#app::HolderServiceExt::register(
-        ::std::sync::Arc::new(gate),
-        router,
-    );
-    let core = layers.app_robot(next.app_robot());
-    let core = crate::services::r#app::RobotServiceOverlay {
-        next: core,
-        layer: interceptors.clone(),
-    };
-    let audit = crate::services::r#app::RobotServiceOverlay {
-        next: core,
-        layer: Audit(db.clone()),
-    };
-    let gate = crate::services::r#app::RobotServiceOverlay {
-        next: audit,
-        layer: Gate {
-            db: db.clone(),
-            public: layers.public_methods(),
-        },
-    };
-    let router = crate::services::r#app::RobotServiceExt::register(
-        ::std::sync::Arc::new(gate),
-        router,
-    );
-    let core = layers.app_tenant(next.app_tenant());
-    let core = crate::services::r#app::TenantServiceOverlay {
-        next: core,
-        layer: interceptors.clone(),
-    };
-    let audit = crate::services::r#app::TenantServiceOverlay {
-        next: core,
-        layer: Audit(db.clone()),
-    };
-    let gate = crate::services::r#app::TenantServiceOverlay {
-        next: audit,
-        layer: Gate {
-            db: db.clone(),
-            public: layers.public_methods(),
-        },
-    };
-    let router = crate::services::r#app::TenantServiceExt::register(
-        ::std::sync::Arc::new(gate),
-        router,
-    );
     router
 }

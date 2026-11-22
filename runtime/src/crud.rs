@@ -378,7 +378,7 @@ impl Transaction<'_> {
         self.write_edges(e, &id, req, true)?;
         // The postimage must belong to the caller as well. Failure rolls back the insert.
         let row = self.lookup(e, &json!({&key.json:id}), false)?;
-        self.record(e, "Add", None, Some(&row))?;
+        self.record(e, "Add", req, None, Some(&row))?;
         self.image(e, row, &Value::Null).map(Some)
     }
     pub(crate) fn patch(&mut self, e: &Entity, req: &Value, method: &str) -> Result<Value> {
@@ -460,7 +460,7 @@ impl Transaction<'_> {
         let edges_changed = self.write_edges(e, &row[&key.json], req, false)?;
         let updated = self.lookup(e, &reference, false)?;
         if !sets.is_empty() || edges_changed {
-            self.record(e, method, Some(&row), Some(&updated))?;
+            self.record(e, method, &req, Some(&row), Some(&updated))?;
         }
         self.image(e, updated, &Value::Null)
     }
@@ -498,7 +498,7 @@ impl Transaction<'_> {
         let erased = self.db.exec(q)? == 1;
         if erased {
             self.forget_references();
-            self.record(e, "Erase", Some(&row), None)?;
+            self.record(e, "Erase", &Value::Null, Some(&row), None)?;
         }
         Ok(json!({"erased":erased}))
     }

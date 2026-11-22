@@ -1,0 +1,142 @@
+use super::{Database, Frame, Packet};
+use base64::{
+    Engine,
+    engine::general_purpose::{STANDARD, STANDARD_NO_PAD},
+};
+use connectrpc::{CodecFormat, ConnectError, Encodable, RequestContext, ServiceStream};
+use futures_util::StreamExt;
+use paydirt_store::{access::Observation, audit_content::Options};
+use serde_json::Value;
+use std::{
+    collections::BTreeSet,
+    sync::{Arc, LazyLock, Mutex},
+};
+pub static OPTIONS: LazyLock<Options> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("../trail.json")).expect("trail configuration")
+});
+#[derive(Clone, Default)]
+pub struct Attempt {
+    frame: Arc<Mutex<Option<Frame>>>,
+    written: Arc<Mutex<BTreeSet<String>>>,
+    request: Value,
+    reason: Option<String>,
+    input: &'static str,
+    output: &'static str,
+}
+impl Attempt {
+    pub fn start(
+        ctx: &mut RequestContext,
+        input: &'static str,
+        output: &'static str,
+        action: &str,
+        download: bool,
+        request: impl FnOnce() -> Result<Value, ConnectError>,
+    ) -> Result<Self, ConnectError> {
+        if !OPTIONS.access {
+            return Ok(Default::default());
+        }
+        let reason = if download || OPTIONS.downloads.contains(action) {
+            let raw = ctx.header("payday-reason-bin").ok_or_else(|| {
+                ConnectError::invalid_argument("download requires payday-reason-bin")
+            })?;
+            let bytes = STANDARD
+                .decode(raw)
+                .or_else(|_| STANDARD_NO_PAD.decode(raw))
+                .map_err(|_| ConnectError::invalid_argument("invalid binary reason"))?;
+            let reason = std::str::from_utf8(&bytes)
+                .map_err(|_| ConnectError::invalid_argument("reason must be UTF-8"))?
+                .trim();
+            if reason.is_empty() || reason.len() > 1024 {
+                return Err(ConnectError::invalid_argument(
+                    "expected a reason of up to 1024 bytes",
+                ));
+            }
+            Some(reason.into())
+        } else {
+            None
+        };
+        let call = Self {
+            input,
+            output,
+            reason,
+            request: request()?,
+            ..Default::default()
+        };
+        ctx.extensions_mut().insert(call.clone());
+        Ok(call)
+    }
+    pub(super) fn frame(ctx: &RequestContext, f: &Frame, action: &str) {
+        if let Some(attempt) = ctx.extensions().get::<Self>() {
+            let mut f = f.clone();
+            f.action = action.into();
+            *attempt.frame.lock().unwrap() = Some(f);
+        }
+    }
+    pub(super) fn committed(&self, receipt: &Value) {
+        for change in receipt["changes"].as_array().into_iter().flatten() {
+            if let Some(id) = change["key"].as_str().and_then(paydirt::parse_id) {
+                self.written.lock().unwrap().insert(STANDARD.encode(id));
+            }
+        }
+    }
+    async fn record(
+        &self,
+        db: &Database,
+        answer: Option<Value>,
+        result: &str,
+    ) -> Result<(), ConnectError> {
+        let Some(frame) = self.frame.lock().unwrap().clone() else {
+            return Ok(());
+        };
+        let observation = Observation {
+            frame,
+            request: self.request.clone(),
+            input: self.input.into(),
+            output: self.output.into(),
+            answer,
+            result: result.into(),
+            reason: self.reason.clone(),
+            written: self.written.lock().unwrap().clone(),
+        };
+        let _permit = db.lock.lock_arc().await;
+        db.send(Packet::Observe(observation))
+            .await
+            .map_err(|_| ConnectError::unavailable("access record could not be written"))?;
+        Ok(())
+    }
+    pub async fn failed(&self, db: &Database, err: ConnectError) -> ConnectError {
+        let _ = self.record(db, None, err.code.as_str()).await;
+        err
+    }
+    pub fn output<'a, M: buffa::Message, R: Encodable<M>>(
+        &'a self,
+        db: &'a Database,
+        body: &R,
+    ) -> impl std::future::Future<Output = Result<(), ConnectError>> + Send + use<'a, M, R> {
+        let doc = OPTIONS
+            .access
+            .then(|| {
+                serde_json::from_slice(&body.encode(CodecFormat::Json)?)
+                    .map_err(|_| ConnectError::internal("invalid access response"))
+            })
+            .transpose();
+        async move {
+            if let Some(doc) = doc? {
+                self.record(db, Some(doc), "ok").await?
+            }
+            Ok(())
+        }
+    }
+    pub fn stream<M: buffa::Message, R: Encodable<M> + Send + 'static>(
+        self,
+        db: Database,
+        mut body: ServiceStream<R>,
+    ) -> ServiceStream<R> {
+        if !OPTIONS.access {
+            return body;
+        }
+        Box::pin(
+            async_stream::try_stream! {while let Some(item)=body.next().await{match item {Ok(v)=>{self.output::<M,_>(&db,&v).await?;yield v},Err(e)=>Err(self.failed(&db,e).await)?}}},
+        )
+    }
+}

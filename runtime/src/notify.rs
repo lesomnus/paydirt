@@ -231,6 +231,7 @@ impl Transaction<'_> {
             seen: None,
             changes: self.changes,
             outbox: self.outbox,
+            trail: self.trail,
             resources: self.resources,
             topic_policy: self.topic_policy,
             inputs: self.inputs,
@@ -460,6 +461,7 @@ impl Transaction<'_> {
                 db: self.db,
                 model: self.model,
                 policies: self.policies,
+                trail: self.trail,
                 resources: self.resources,
                 topic_policy: self.topic_policy,
                 inputs: self.inputs,
@@ -770,7 +772,7 @@ impl crate::Store {
                 let tenant=value::bytes(&row["tenantId"])?;
                 let ref_id=json!({"id":row["id"]});
                 let frame=crate::entitle::deployment(tenant,"payday.notify.expire");
-                let mut writer=Transaction{inputs:tx.inputs,resources:tx.resources,topic_policy:None,admission:None,origin:None,seen:None,changes:tx.changes,outbox:tx.outbox,namer:tx.namer,db:tx.db,model:tx.model,policies:tx.policies,scope:&Scope::Internal,frame:Some(&frame),failed:None};
+                let mut writer=Transaction{inputs:tx.inputs,trail:tx.trail,resources:tx.resources,topic_policy:None,admission:None,origin:None,seen:None,changes:tx.changes,outbox:tx.outbox,namer:tx.namer,db:tx.db,model:tx.model,policies:tx.policies,scope:&Scope::Internal,frame:Some(&frame),failed:None};
                 let mut del=Query::new("");
                 let k=del.param(Bind::Bytes(value::bytes(&row["id"])?),d);
                 del.sql=format!("DELETE FROM {} WHERE {}={k}",quote(&r.table()),quote(&r.field("notification_id").map_err(Fault::internal)?.column()));

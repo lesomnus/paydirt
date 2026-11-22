@@ -231,8 +231,12 @@ pub fn generate(work: &Path) -> Result<()> {
         // specific to those services before exposing them on a public router.
         let notification = policy["notification"] == true;
         let own = policy["entity"]["own"].as_str();
-        if own.is_some_and(|v| !matches!(v, "OWN_HOLDER" | "OWN_TENANT" | "OWN_EVENT" | "OWN_FACT"))
-        {
+        if own.is_some_and(|v| {
+            !matches!(
+                v,
+                "OWN_HOLDER" | "OWN_TENANT" | "OWN_EVENT" | "OWN_FACT" | "OWN_AUDIT" | "OWN_ACCESS"
+            )
+        }) {
             continue;
         }
         let svc = format!("crate::services::{}::{short}Service", module(package));
@@ -333,16 +337,40 @@ pub fn generate(work: &Path) -> Result<()> {
             } else {
                 format!("let ctx=Database::presence_request(ctx,||{arg}.to_owned_message())?;")
             };
-            let deliver = if method["server_stream"] == true {
+            let input = method["input"]
+                .as_str()
+                .ok_or("missing input")?
+                .trim_start_matches('.');
+            let output = method["output"]
+                .as_str()
+                .ok_or("missing output")?
+                .trim_start_matches('.');
+            let mut call_types = RpcTypes::default();
+            syn::visit_mut::VisitMut::visit_signature_mut(&mut call_types, &mut f.sig.clone());
+            let result_ty = message_path(
+                &call_types.response.ok_or("missing access output")?,
+                "crate::proto",
+            );
+            let download = method["policy"].get("download").is_some();
+            let request = if method["client_stream"] == true {
+                "Ok(serde_json::Value::Null)".into()
+            } else {
                 format!(
-                    "let response=next.{fun}(ctx.clone(),{arg}).await?;Ok(response.map_body(|body|Database::enforce_presence(&ctx,body)))"
+                    "serde_json::to_value({arg}.to_owned_message()).map_err(|_|connectrpc::ConnectError::invalid_argument(\"invalid access request\"))"
+                )
+            };
+            let finish = if method["server_stream"] == true {
+                format!(
+                    "Ok(response.map_body(|body|attempt.stream::<{result_ty},_>(self.db.clone(),Database::enforce_presence(&ctx,body))))"
                 )
             } else {
-                format!("next.{fun}(ctx,{arg}).await")
+                format!(
+                    "attempt.output::<{result_ty},_>(&self.db,&response.body).await?; Ok(response)"
+                )
             };
             writeln!(
                 gate,
-                "{sig} {{async move {{{capture}let ctx=self.db.{authorize}.await?;{deliver}}}}}"
+                "{sig} {{async move {{{capture}let mut ctx=ctx;let attempt=crate::transport::access::Attempt::start(&mut ctx,{input:?},{output:?},{action:?},{download},||{request})?; let ctx=match self.db.{authorize}.await{{Ok(c)=>c, Err(e)=>return Err(attempt.failed(&self.db,e).await)}}; let response=match next.{fun}(ctx.clone(),{arg}).await{{Ok(v)=>v,Err(e)=>return Err(attempt.failed(&self.db,e).await)}};{finish}}}}}"
             )?;
             if method["server_stream"] == false && method["client_stream"] == false {
                 writeln!(
@@ -389,9 +417,14 @@ pub fn generate(work: &Path) -> Result<()> {
             layers,
             "fn {layer}(&self, next: impl {svc}) -> impl {svc} {{ next }}"
         )?;
+        let install = if matches!(own, Some("OWN_AUDIT" | "OWN_ACCESS")) {
+            "crate::transport::access::OPTIONS.reads"
+        } else {
+            "true"
+        };
         writeln!(
             mount,
-            "let core=layers.{layer}(next.{layer}()); let core={svc}Overlay{{next:core,layer:interceptors.clone()}}; let audit={svc}Overlay{{next:core,layer:Audit(db.clone())}}; let gate={svc}Overlay{{next:audit,layer:Gate{{db:db.clone(),public:layers.public_methods()}}}}; let router={svc}Ext::register(::std::sync::Arc::new(gate),router);"
+            "let router=if {install} {{let core=layers.{layer}(next.{layer}()); let core={svc}Overlay{{next:core,layer:interceptors.clone()}}; let audit={svc}Overlay{{next:core,layer:Audit(db.clone())}}; let gate={svc}Overlay{{next:audit,layer:Gate{{db:db.clone(),public:layers.public_methods()}}}}; {svc}Ext::register(::std::sync::Arc::new(gate),router)}}else{{router}};"
         )?;
     }
     writeln!(

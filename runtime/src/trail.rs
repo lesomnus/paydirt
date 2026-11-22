@@ -8,6 +8,7 @@ impl Transaction<'_> {
         &mut self,
         e: &Entity,
         method: &str,
+        request: &Value,
         before: Option<&Value>,
         after: Option<&Value>,
     ) -> Result<()> {
@@ -52,8 +53,10 @@ impl Transaction<'_> {
                 self.inputs.stamp(),
             )?;
         }
-        if !matches!(policy["own"].as_str(), Some("OWN_AUDIT" | "OWN_OUTBOX"))
-            && let Ok(id) = value::bytes(&row[&e.key().map_err(Fault::internal)?.json])
+        if !matches!(
+            policy["own"].as_str(),
+            Some("OWN_AUDIT" | "OWN_ACCESS" | "OWN_OUTBOX")
+        ) && let Ok(id) = value::bytes(&row[&e.key().map_err(Fault::internal)?.json])
             && let Some(key) = paydirt::format_id(&id)
         {
             let by = format!("/{}Service/{method}", e.name);
@@ -87,6 +90,9 @@ impl Transaction<'_> {
             .map(|f| f.number)
             .collect();
         let mut audit = json!({"actorId":actor,"tenantId":object_tenant,"actorTenantId":tenant,"objectId":object,"traceId":value::encoded(&frame.trace),"fields":changed,"domain":p["domain"],"action":frame.action});
+        if let Some(recorder) = self.trail {
+            recorder.content(e, request, before, after, &mut audit)?;
+        }
         if let Some(id) = &frame.caller {
             audit["callerId"] = value::encoded(id)
         }
@@ -106,6 +112,7 @@ impl Transaction<'_> {
             seen: None,
             changes: self.changes,
             outbox: self.outbox,
+            trail: self.trail,
             resources: self.resources,
             topic_policy: self.topic_policy,
             inputs: self.inputs,
@@ -117,6 +124,14 @@ impl Transaction<'_> {
             frame: None,
             failed: None,
         };
+        if recorder.trail.is_some_and(|r| r.options.access)
+            && self.policies[&e.name]
+                .fields
+                .values()
+                .any(|v| v["personal"] == true)
+        {
+            recorder.access_write(frame, &object_tenant, object)?;
+        }
         for (own, data) in [("OWN_AUDIT", audit), ("OWN_OUTBOX", outbox)] {
             if (own == "OWN_AUDIT" && p["trail"].get("off").is_some())
                 || (own == "OWN_OUTBOX" && !recorder.outbox)

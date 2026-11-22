@@ -17,6 +17,14 @@ impl Drop for Active {
 
 #[allow(refining_impl_trait)]
 impl<N: RobotService> RobotServiceLayer<N> for Pair {
+    async fn export_robot(
+        &self,
+        next: &N,
+        ctx: RequestContext,
+        request: ServiceRequest<'_, RobotGetRequest>,
+    ) -> ServiceResult<Robot> {
+        Response::ok(next.get_owned(&ctx, request.to_owned_message()).await?)
+    }
     async fn recent(
         &self,
         _: &N,

@@ -30,6 +30,7 @@ pub struct Frame {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Packet {
+    Observe(crate::access::Observation),
     BeginOrigin {
         id: String,
         frame: Frame,
@@ -72,6 +73,7 @@ impl Store {
     /// Only a session opened on this connection can issue operations or finish it.
     pub fn handle(&mut self, packet: Packet) -> Result<Value> {
         match packet {
+            Packet::Observe(o) => self.observe(o),
             Packet::ResolveAccount {
                 account,
                 bound,
@@ -190,6 +192,7 @@ impl Store {
             seen: (!session.frame.tenant.is_empty()).then_some(&mut session.seen),
             changes: &mut session.changes,
             outbox: self.outbox,
+            trail: self.trail.as_ref(),
             resources: self.resources.as_ref(),
             topic_policy: self.topic_policy.as_deref(),
             inputs: &self.inputs,
@@ -229,6 +232,7 @@ impl Store {
                     seen: None,
                     changes: tx.changes,
                     outbox: tx.outbox,
+                    trail: tx.trail,
                     resources: tx.resources,
                     topic_policy: tx.topic_policy,
                     inputs: tx.inputs,

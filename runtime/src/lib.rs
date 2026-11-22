@@ -1,8 +1,10 @@
 //! Transactional entity storage for generated Payday applications.
 mod account;
 pub use account::{AccountReads, ReadFilter};
+pub mod access;
 pub mod admission;
 mod apply;
+pub mod audit_content;
 pub mod auth;
 mod crud;
 pub mod domain;
@@ -187,6 +189,7 @@ impl Default for Inputs {
     }
 }
 pub struct Store {
+    trail: Option<audit_content::Recorder>,
     resources: Option<resource::Recorder>,
     topic_policy: Option<Box<dyn notify::Policy>>,
     inputs: Inputs,
@@ -213,6 +216,7 @@ impl Store {
             watch::install(tx)
         })?;
         Ok(Self {
+            trail: None,
             resources: None,
             topic_policy: None,
             admission: None,
@@ -340,6 +344,7 @@ impl Store {
                 seen: Some(&mut seen),
                 changes: &mut changes,
                 outbox: self.outbox,
+                trail: self.trail.as_ref(),
                 resources: self.resources.as_ref(),
                 topic_policy: self.topic_policy.as_deref(),
                 inputs: &self.inputs,
@@ -367,6 +372,7 @@ impl Store {
     }
 }
 pub struct Transaction<'a> {
+    trail: Option<&'a audit_content::Recorder>,
     resources: Option<&'a resource::Recorder>,
     topic_policy: Option<&'a dyn notify::Policy>,
     admission: Option<&'a admission::Rules>,
