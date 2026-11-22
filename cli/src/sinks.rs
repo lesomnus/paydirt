@@ -254,9 +254,22 @@ pub fn generate(work: &Path) -> Result<()> {
                 continue;
             }
             let account = method["policy"].get("account").is_some();
+            let authorize = if rpc == "AddMany"
+                && method["input"]
+                    .as_str()
+                    .is_some_and(|input| input.ends_with("AddManyRequest"))
+            {
+                format!(
+                    "authorize_cost(ctx,{name:?},{rpc:?},self.public.contains(&{action:?}),{direct},{account},{arg}.items.len())"
+                )
+            } else {
+                format!(
+                    "authorize(ctx,{name:?},{rpc:?},self.public.contains(&{action:?}),{direct},{account})"
+                )
+            };
             writeln!(
                 gate,
-                "{sig} {{async move {{let ctx=self.db.authorize(ctx,{name:?},{rpc:?},self.public.contains(&{action:?}),{direct},{account}).await?;next.{fun}(ctx,{arg}).await}}}}"
+                "{sig} {{async move {{let ctx=self.db.{authorize}.await?;next.{fun}(ctx,{arg}).await}}}}"
             )?;
             if method["server_stream"] == false && method["client_stream"] == false {
                 writeln!(

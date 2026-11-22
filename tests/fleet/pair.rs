@@ -17,6 +17,19 @@ impl Drop for Active {
 
 #[allow(refining_impl_trait)]
 impl<N: RobotService> RobotServiceLayer<N> for Pair {
+    async fn pause(
+        &self,
+        _: &N,
+        _: RequestContext,
+        request: ServiceRequest<'_, StreamNumber>,
+    ) -> ServiceResult<StreamNumber> {
+        let req = request.to_owned_message();
+        futures_timer::Delay::new(std::time::Duration::from_millis(
+            req.value.clamp(0, 2000) as u64,
+        ))
+        .await;
+        Response::ok(req)
+    }
     async fn in_flight(
         &self,
         _: &N,

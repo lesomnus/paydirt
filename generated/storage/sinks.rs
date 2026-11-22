@@ -771,13 +771,14 @@ mod sink_app_robot {
             async move {
                 let ctx = self
                     .db
-                    .authorize(
+                    .authorize_cost(
                         ctx,
                         "app.Robot",
                         "AddMany",
                         self.public.contains(&"/app.RobotService/AddMany"),
                         false,
                         false,
+                        request.items.len(),
                     )
                     .await?;
                 next.add_many(ctx, request).await

@@ -40,7 +40,7 @@ source = source.replace("database, &App(name)", "database.clone(), &App(name, st
 # Test the transaction boundary with a second independent user layer.
 copyfile(repo / "tests/fleet/pair.rs", app / "src/pair.rs")
 overlay = app / "proto/ext/app/robot_svc.ext.proto"
-overlay.write_text(overlay.read_text().replace("service RobotService {", "service RobotService {\n  rpc InFlight(StreamNumber) returns (StreamNumber);\n  rpc Collect(stream StreamNumber) returns (StreamNumber);\n  rpc Converse(stream StreamNumber) returns (stream StreamNumber);\n  rpc RenamePair(RobotRenamePairRequest) returns (Robot);\n  rpc Allowance(RobotAllowanceRequest) returns (RobotAllowanceResponse);") + "\n" + (repo / "tests/fleet/pair.proto").read_text())
+overlay.write_text(overlay.read_text().replace("service RobotService {", "service RobotService {\n  rpc InFlight(StreamNumber) returns (StreamNumber);\n  rpc Pause(StreamNumber) returns (StreamNumber);\n  rpc Collect(stream StreamNumber) returns (StreamNumber);\n  rpc Converse(stream StreamNumber) returns (stream StreamNumber);\n  rpc RenamePair(RobotRenamePairRequest) returns (Robot);\n  rpc Allowance(RobotAllowanceRequest) returns (RobotAllowanceResponse);") + "\n" + (repo / "tests/fleet/pair.proto").read_text())
 source = "mod pair;\n" + source.replace("services::app::RobotServiceOverlay { next, layer: robot::Fleet(self.1.clone()) }", """let core=services::app::RobotServiceOverlay { next, layer: robot::Fleet(self.1.clone()) };
             services::app::RobotServiceOverlay { next:core, layer:pair::Pair(self.1.clone()) }""")
 lib.write_text(source)

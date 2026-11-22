@@ -26,6 +26,7 @@ hex = "0.4"
 paydirt = {git="https://github.com/lesomnus/paydirt",rev="002c91369d21f1dbd01875f6779bce891ae89c0b"}
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+paydirt-server = {git="https://github.com/lesomnus/paydirt",rev="002c91369d21f1dbd01875f6779bce891ae89c0b"}
 paydirt = {git="https://github.com/lesomnus/paydirt",rev="002c91369d21f1dbd01875f6779bce891ae89c0b",features=["watch-postgres","watch-nats"]}
 paydirt-store = {git="https://github.com/lesomnus/paydirt",rev="002c91369d21f1dbd01875f6779bce891ae89c0b",features=["postgres","sqlite","workers"]}
 connectrpc = {version="=0.8.2",default-features=false,features=["server","client-tls"]}
