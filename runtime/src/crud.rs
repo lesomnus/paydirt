@@ -57,7 +57,7 @@ impl Transaction<'_> {
         }
         Ok(Value::Object(out))
     }
-    fn path(&self, e: &Entity, path: &str, alias: &str, depth: u32) -> Result<String> {
+    pub(crate) fn path(&self, e: &Entity, path: &str, alias: &str, depth: u32) -> Result<String> {
         let (name, rest) = path.split_once('.').unwrap_or((path, ""));
         let f = e.field(name).map_err(Fault::invalid)?;
         let col = format!("{alias}.{}", quote(&f.column()));
@@ -192,7 +192,7 @@ impl Transaction<'_> {
             .ok_or_else(Fault::missing)?;
         self.decode_row(e, &row)
     }
-    fn image(&mut self, e: &Entity, mut row: Value, select: &Value) -> Result<Value> {
+    pub(crate) fn image(&mut self, e: &Entity, mut row: Value, select: &Value) -> Result<Value> {
         let all = select.is_null() || select["all"] == true;
         let secrets = self.policies.get(&e.name);
         for f in &e.fields {
@@ -221,7 +221,7 @@ impl Transaction<'_> {
             .as_u64()
             .and_then(|v| u8::try_from(v).ok())
     }
-    fn insert(&mut self, e: &Entity, req: &Value) -> Result<Value> {
+    pub(crate) fn insert(&mut self, e: &Entity, req: &Value) -> Result<Value> {
         let mut q = Query::new("");
         let mut cols = Vec::new();
         let mut params = Vec::new();
@@ -273,6 +273,7 @@ impl Transaction<'_> {
         self.db.exec(q)?;
         // The postimage must belong to the caller as well. Failure rolls back the insert.
         let row = self.lookup(e, &json!({&key.json:id}), false)?;
+        self.record(e, "Add", None, Some(&row))?;
         self.image(e, row, &Value::Null)
     }
     fn patch(&mut self, e: &Entity, req: &Value) -> Result<Value> {
@@ -330,6 +331,7 @@ impl Transaction<'_> {
             }
         }
         let updated = self.lookup(e, &reference, false)?;
+        self.record(e, "Patch", Some(&row), Some(&updated))?;
         self.image(e, updated, &Value::Null)
     }
     fn erase(&mut self, e: &Entity, reference: &Value) -> Result<Value> {
@@ -360,7 +362,11 @@ impl Transaction<'_> {
                 conditions.join(" AND ")
             )
         };
-        Ok(json!({"erased":self.db.exec(q)?==1}))
+        let erased = self.db.exec(q)? == 1;
+        if erased {
+            self.record(e, "Erase", Some(&row), None)?;
+        }
+        Ok(json!({"erased":erased}))
     }
     pub(crate) fn dispatch(&mut self, e: &Entity, method: &str, req: &Value) -> Result<Value> {
         match method {
