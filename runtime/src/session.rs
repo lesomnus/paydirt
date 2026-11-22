@@ -10,6 +10,10 @@ pub struct Frame {
     #[serde(default)]
     pub actor: Option<Vec<u8>>,
     #[serde(default)]
+    pub tenants: Option<Vec<Vec<u8>>>,
+    #[serde(default)]
+    pub sets: Option<Vec<Vec<u8>>>,
+    #[serde(default)]
     pub caller: Option<Vec<u8>>,
     #[serde(default)]
     pub caller_tenant: Option<Vec<u8>>,
@@ -64,7 +68,14 @@ impl Store {
                 if let Some(e) = &session.failed {
                     return Err(e.clone());
                 }
-                let scope = Scope::Tenant(session.frame.tenant.clone());
+                let scope = Scope::Granted {
+                    tenants: session
+                        .frame
+                        .tenants
+                        .clone()
+                        .unwrap_or_else(|| vec![session.frame.tenant.clone()]),
+                    sets: session.frame.sets.clone(),
+                };
                 let mut tx = Transaction {
                     db: self.db.driver()?,
                     policies: &self.policies,

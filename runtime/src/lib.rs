@@ -3,6 +3,7 @@ mod crud;
 mod driver;
 mod migrate;
 mod session;
+mod tenancy;
 mod trail;
 mod value;
 pub use driver::Connection;
@@ -39,6 +40,10 @@ impl Fault {
 pub enum Scope {
     Internal,
     Tenant(Vec<u8>),
+    Granted {
+        tenants: Vec<Vec<u8>>,
+        sets: Option<Vec<Vec<u8>>>,
+    },
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Call {

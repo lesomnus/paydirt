@@ -82,7 +82,33 @@ impl Transaction<'_> {
         if let Some(f) = e.erased() {
             parts.push(format!("r.{} IS NULL", quote(&f.column())))
         }
-        let Scope::Tenant(id) = self.scope else {
+        if let Scope::Granted {
+            sets: Some(sets), ..
+        } = self.scope
+        {
+            let group = e
+                .fields
+                .iter()
+                .find(|f| f.number == 3 && !f.target.is_empty() && f.is_column());
+            let is_set = self.model.entities.iter().any(|entity| {
+                entity
+                    .fields
+                    .iter()
+                    .any(|f| f.number == 3 && f.target == e.name && f.is_column())
+            });
+            if let Some(f) = group.or_else(|| is_set.then(|| e.key().ok()).flatten()) {
+                let ids: Vec<_> = sets
+                    .iter()
+                    .map(|id| q.param(Bind::Bytes(id.clone()), self.db.dialect()))
+                    .collect();
+                if ids.is_empty() {
+                    parts.push("1=0".into());
+                } else {
+                    parts.push(format!("r.{} IN ({})", quote(&f.column()), ids.join(",")));
+                }
+            }
+        }
+        let Some(ids) = self.scope.tenants() else {
             return Ok(parts);
         };
         let p = &self
@@ -97,7 +123,10 @@ impl Transaction<'_> {
             vec![&e.key]
         } else if let Some(v) = p["tenanted"]["field"].as_array() {
             v.iter().filter_map(Value::as_str).collect()
-        } else if let Some(v) = p["tenanted"]["via"].as_str() {
+        } else if let Some(v) = p["tenanted"]["stamp"]
+            .as_str()
+            .or_else(|| p["tenanted"]["via"].as_str())
+        {
             vec![v]
         } else {
             vec![
@@ -113,10 +142,17 @@ impl Transaction<'_> {
             return Err(Fault::denied("empty tenant scope"));
         }
         let mut any = Vec::new();
+        if ids.is_empty() {
+            parts.push("1=0".into());
+            return Ok(parts);
+        }
         for path in paths {
             let name = self.path(e, path, "r", 0)?;
-            let v = q.param(Bind::Bytes(id.clone()), self.db.dialect());
-            any.push(format!("{name}={v}"));
+            let vs: Vec<_> = ids
+                .iter()
+                .map(|id| q.param(Bind::Bytes(id.clone()), self.db.dialect()))
+                .collect();
+            any.push(format!("{name} IN ({})", vs.join(",")));
         }
         parts.push(format!("({})", any.join(" OR ")));
         Ok(parts)
@@ -165,7 +201,7 @@ impl Transaction<'_> {
         }
         Ok(fields)
     }
-    fn lookup(&mut self, e: &Entity, key: &Value, lock: bool) -> Result<Value> {
+    pub(crate) fn lookup(&mut self, e: &Entity, key: &Value, lock: bool) -> Result<Value> {
         let mut q = Query::new("");
         let mut where_ = self.wall(e, &mut q)?;
         for (f, v) in self.key_parts(e, key)? {
@@ -223,6 +259,7 @@ impl Transaction<'_> {
     }
     pub(crate) fn insert(&mut self, e: &Entity, req: &Value) -> Result<Value> {
         let mut q = Query::new("");
+        let req = self.admit(e, req)?;
         let mut cols = Vec::new();
         let mut params = Vec::new();
         let key = e.key().map_err(Fault::invalid)?;
@@ -281,6 +318,17 @@ impl Transaction<'_> {
         let mut q = Query::new("");
         let mut sets = Vec::new();
         for f in &e.fields {
+            if self
+                .policies
+                .get(&e.name)
+                .and_then(|p| p.entity["tenanted"]["stamp"].as_str())
+                == Some(f.name.as_str())
+            {
+                if req.get(&f.json).is_some() {
+                    return Err(Fault::invalid("tenant stamp is server-owned"));
+                }
+                continue;
+            }
             if !f.is_column() || f.immutable || f.erased || f.name == e.key {
                 continue;
             }
