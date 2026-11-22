@@ -26,3 +26,9 @@ Run `cargo run -- gauge --help` for the verbs its schema declares. The lowercase
 Declare a domain operation in `proto/ext/`, run `paydirt gen`, then implement that method on the generated service layer and mount it in `src/lib.rs`. The request passes through Gate, Audit, your Core, and the storage Sink. Use the typed next service with the incoming request context to keep related changes in the same scoped transaction. Service overlays and application Rust sources are preserved on regeneration. A failed write rolls back the transaction, including its audit trail and outbox records.
 
 The server reads `PAYDIRT_PRINCIPALS` when it starts. A simple tenant credential uses a JSON map such as `{"dev-token":"<32 hex digits>"}`. Set `PAYDIRT_TOKEN=dev-token` on a client to use that credential. Deployments can also supply a role policy with `PAYDIRT_POLICY_FILE` and select an account membership using the header configured by `PAYDIRT_ACCOUNT_HEADER`.
+
+## Native background workers
+
+Register application workers in the `workers` function in `src/lib.rs`. Each named worker receives a stop token. Choose `Placement::Everywhere` or `Placement::Singleton`. Set `"worker_lease":"postgres"` in `app.json` to run each singleton on one PostgreSQL session across replicas. The default local lease runs workers in the current process. A fatal error shuts down the RPC listener and the other workers.
+
+Enable scheduled schema meters with `"meter":{"directory":"measurements","every_ms":86400000,"retry_ms":60000}`. The reader starts at launch, visits tenant IDs in pages, and runs again at UTC epoch-aligned boundaries. Each file records a single tenant, meter and measurement time. Failed deliveries retry with the original readings. An app can register its own singleton with `paydirt_store::meter::periodic` and use `Pass::run_with` to supply a tenant source, custom measurements and a billing sink.
