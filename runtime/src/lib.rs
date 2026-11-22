@@ -177,7 +177,7 @@ impl Store {
             serde_json::from_str(policy_json).map_err(|e| Fault::invalid(e.to_string()))?;
         let mut db = Connection::open(url)?;
         db.transaction(|tx| {
-            migrate::install(tx, &model)?;
+            migrate::install(tx, &model, &policies)?;
             if policies.values().any(|p| p.notification) {
                 notify::install(tx)?;
             }
