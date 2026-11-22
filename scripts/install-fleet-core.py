@@ -8,7 +8,7 @@ repo = Path(__file__).resolve().parents[1]
 app = Path(sys.argv[1])
 proto = repo / "web/upstream/internal/apptest/proto"
 (app / "proto/app/cell.proto").unlink(missing_ok=True)
-for rel in ["shared/thing.proto", "app/robot.proto", "ext/app/robot_svc.ext.proto"]:
+for rel in ["app/computed_reading.proto", "ext/app/computed_reading_svc.ext.proto", "shared/thing.proto", "app/robot.proto", "ext/app/robot_svc.ext.proto"]:
     dest = app / "proto" / rel
     dest.parent.mkdir(exist_ok=True, parents=True)
     copyfile(proto / rel, dest)
@@ -22,11 +22,15 @@ for rel in ["ext/app/payday/holder_svc.ext.proto", "ext/payday/holder.ext.proto"
     dest=app / "proto" / rel
     dest.parent.mkdir(exist_ok=True,parents=True)
     copyfile(proto / rel,dest)
+copyfile(repo / "tests/fleet/readings.rs", app / "src/readings.rs")
 copyfile(repo / "tests/fleet/robot.rs", app / "src/robot.rs")
 lib = app / "src/lib.rs"
 source = lib.read_text()
-source = "mod robot;\n" + source.replace("struct App(String);", "struct App(String, storage::Next);")
+source = "mod readings;\nmod robot;\n" + source.replace("struct App(String);", "struct App(String, storage::Next);")
 source = source.replace("impl storage::Layers for App {", """impl storage::Layers for App {
+        fn app_computed_reading(&self) -> impl services::app::ComputedReadingService {
+            readings::PublicReadings
+        }
         fn app_robot(&self, next: impl services::app::RobotService) -> impl services::app::RobotService {
             services::app::RobotServiceOverlay { next, layer: robot::Fleet(self.1.clone()) }
         }""")

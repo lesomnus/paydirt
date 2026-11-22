@@ -77,6 +77,18 @@ To regenerate this repository's fixture, run `paydirt gen` at the root. The Type
 
 The generated app checks its stored ORM model and physical database layout at startup. Field numbers identify existing columns across protobuf field renames. New tables, nullable columns, supported default-valued columns and index changes run in a single transaction. A unique index that conflicts with existing data rolls back its migration. Removing a stored column, changing its key/type or adding a required field that needs a backfill reports a version or schema error. The upgrade suite exercises both dialects with rows written against the previous generated model.
 
+### Computed read resources
+
+A message with `(payday.resource)` generates a read-only Connect service. Implement its
+service trait and return the provider from the matching method on `storage::Layers`.
+For example, `app.ComputedReading` generates `fn app_computed_reading(&self) -> impl
+services::app::ComputedReadingService`. The default provider returns `Unimplemented`.
+
+The provider owns its data source, checks access on every read and subsequent Watch
+snapshot, and chooses its pagination and revision semantics. List can return metadata
+even for an empty page. Watch replaces the complete collection on each message. The
+same provider is mounted by the native and sandbox routers. [Runnable example](tests/fleet/readings.rs)
+
 ### Watch brokers and the outbox
 
 Generated native apps select their Watch broker in `app.json`. Add a `watch` entry
