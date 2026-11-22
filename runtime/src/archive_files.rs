@@ -19,6 +19,7 @@ pub struct Archive {
     pub(crate) root: PathBuf,
     pub(crate) notary: Option<crate::attestation::Notary>,
     key: Option<aead::LessSafeKey>,
+    pub(crate) tenant_keys: Option<crate::tenant_keys::TenantKeys>,
 }
 impl Archive {
     pub fn open(root: impl AsRef<Path>, key: &[u8]) -> Result<Self> {
@@ -27,6 +28,7 @@ impl Archive {
         Ok(Self {
             root: root.as_ref().into(),
             notary: None,
+            tenant_keys: None,
             key: Some(aead::LessSafeKey::new(key)),
         })
     }
@@ -34,6 +36,7 @@ impl Archive {
         Self {
             root: root.as_ref().into(),
             notary: None,
+            tenant_keys: None,
             key: None,
         }
     }

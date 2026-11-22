@@ -44,6 +44,20 @@ pub fn generate(work: &Path) -> Result<()> {
             apps.insert(package, config);
         }
         for message in file["messageType"].as_array().into_iter().flatten() {
+            let own = &message["options"]["[payday.entity]"]["own"];
+            if matches!(own.as_str(), Some("OWN_AUDIT" | "OWN_ACCESS"))
+                && message["field"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|f| f["name"] == "sealed" || f["jsonName"] == "sealed")
+            {
+                return Err(format!(
+                    "{}.{} reserves the field and JSON name sealed for archive contents",
+                    package, message["name"]
+                )
+                .into());
+            }
             if message["options"].get("[payday.notification]").is_some() {
                 payloads.push(format!(
                     "{package}.{}",

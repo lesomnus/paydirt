@@ -147,12 +147,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("{}",serde_json::to_string(&f)?);
         return Ok(());
     }
-    if let [command, argument] = args.as_slice() && matches!(command.as_str(),"trail"|"trail-check") {
+    if let [command, argument] = args.as_slice() && matches!(command.as_str(),"trail"|"trail-check"|"trail-read") {
         use paydirt_store::archive_files::Archive;
         let archive=Archive::from_environment;
         let vault=archive(paydirt::environment::PAYDIRT_ARCHIVE_DIR,paydirt::environment::PAYDIRT_ARCHIVE_KEY)?;
         let export=std::env::var_os(paydirt::environment::PAYDIRT_EXPORT_DIR).map(|_|archive(paydirt::environment::PAYDIRT_EXPORT_DIR,paydirt::environment::PAYDIRT_EXPORT_KEY)).transpose()?;
         let mut store=__APP_CRATE__::resource::record(paydirt_store::Store::open(&url,MODEL,POLICIES)?)?;
+        if command=="trail-read"{
+            let tenant=paydirt::parse_id(argument).ok_or("invalid tenant identifier")?;
+            println!("{}",serde_json::to_string(&store.read_tenant_trail(&vault,tenant)?)?);
+            return Ok(());
+        }
         if command=="trail-check"{
             let result=match argument.as_str(){
                 "checkpoint"|"verify"=>serde_json::to_value(store.attest_trail(&vault,argument=="checkpoint")?)?,

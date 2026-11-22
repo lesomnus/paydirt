@@ -514,7 +514,7 @@ impl Archive {
             &hex::decode(std::env::var(key).map_err(bad)?).map_err(bad)?,
         )?;
         if dir == paydirt::environment::PAYDIRT_ARCHIVE_DIR {
-            files = files.with_environment_notary()?;
+            files = files.with_environment_notary()?.environment_keys()?;
         }
         Ok(files)
     }
