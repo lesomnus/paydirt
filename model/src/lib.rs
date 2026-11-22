@@ -128,6 +128,9 @@ impl Entity {
     pub fn table(&self) -> String {
         sql_name(&format!("pd_{}", self.name.replace('.', "__")))
     }
+    pub fn edge_table(&self, field: &Field) -> String {
+        sql_name(&format!("{}__edge_{}", self.table(), field.number))
+    }
     pub fn managed_tables(&self) -> Vec<String> {
         let table = self.table();
         let mut names = vec![table.clone()];
@@ -135,7 +138,7 @@ impl Entity {
             self.fields
                 .iter()
                 .filter(|f| !f.is_column() && f.inverse.is_empty())
-                .map(|f| sql_name(&format!("{table}__edge_{}", f.number))),
+                .map(|f| self.edge_table(f)),
         );
         names
     }
@@ -250,7 +253,7 @@ impl Model {
                     // uses a relation table whose two references are checked by the DB.
                     if f.inverse.is_empty() {
                         let target = self.entity(&f.target)?;
-                        let link = sql_name(&format!("{table}__edge_{}", f.number));
+                        let link = e.edge_table(f);
                         if !names.insert(link.to_ascii_lowercase()) {
                             return Err(format!("duplicate table {link}"));
                         }

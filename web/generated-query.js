@@ -45,5 +45,15 @@ export async function queryScenario(robot, tenantId, options) {
     controller.abort();
     report.canceled=await code(()=>stream.next());
   } finally {controller.abort();await stream.return?.();}
+  const choice=(name,value)=>({case:name,value});
+  const scope=choice("targets",{selectors:[{kind:choice("key",{kind:choice("field",{number:4})})}]});
+  const str=value=>({kind:choice("s",value)});
+  const entries=[
+    {scope,kind:choice("test",{want:choice("value",str("query-a"))})},
+    {scope,kind:choice("assign",{value:str("query-applied")})},
+  ];
+  const request={ref:ref(rows[1].id),patch:{messageType:"app.Robot",delta:{entries}}};
+  report.applied=(await robot.apply(request,options)).alias;
+  report.precondition=await code(()=>robot.apply(request,options));
   return report;
 }

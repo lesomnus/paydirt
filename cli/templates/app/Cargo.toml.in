@@ -21,10 +21,10 @@ connectrpc = { version = "=0.8.2", default-features = false, features = ["json"]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 hex = "0.4"
-paydirt = {git="https://github.com/lesomnus/paydirt",rev="7ff86815180149790fa1fc5f996ab99687bd4d60"}
+paydirt = {git="https://github.com/lesomnus/paydirt",rev="faf150fbc4a292ddfbbc874964ddc810026efebc"}
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-paydirt-store = {git="https://github.com/lesomnus/paydirt",rev="7ff86815180149790fa1fc5f996ab99687bd4d60",features=["postgres","sqlite"]}
+paydirt-store = {git="https://github.com/lesomnus/paydirt",rev="faf150fbc4a292ddfbbc874964ddc810026efebc",features=["postgres","sqlite"]}
 connectrpc = {version="=0.8.2",default-features=false,features=["server","client-tls"]}
 http="1"
 rustls="0.23"
@@ -34,7 +34,7 @@ base64="0.22"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-paydirt-store = {git="https://github.com/lesomnus/paydirt",rev="7ff86815180149790fa1fc5f996ab99687bd4d60"}
+paydirt-store = {git="https://github.com/lesomnus/paydirt",rev="faf150fbc4a292ddfbbc874964ddc810026efebc"}
 wasm-bindgen = "=0.2.130"
 js-sys = "0.3"
 wasm-bindgen-futures = "0.4"
