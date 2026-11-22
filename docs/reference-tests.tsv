@@ -307,19 +307,19 @@ stamped_layer_test.go	54	TestAppLayerFillsStampedAddFieldsBehindTheGate	tracked	
 tenantlist_test.go	23	TestATenantListIsNarrowedLikeAnyOtherRead	tracked			102
 tenantlist_test.go	49	TestHoldersCanBeListedByTenant	tracked			102
 time_zone_test.go	13	TestCommandsUseTheRequestedDisplayZoneBeforeCallingTheServer	verified	connect/sqlite+postgres	web/generated-operator.mjs#L26	-
-trail_test.go	45	TestTheTrailIsKeptPerKindOfThing	tracked			98
+trail_test.go	45	TestTheTrailIsKeptPerKindOfThing	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1010	-
 trail_test.go	116	TestAKindTheAppDoesNotHaveIsRefused	verified	store/sqlite+postgres	runtime/tests/trail_retention.rs#L270	-
 trail_test.go	185	TestARenamedKindIsConfiguredByEitherWordAndNotBoth	verified	store/sqlite+postgres	runtime/tests/trail_retention.rs#L281	-
-trail_test.go	216	TestTheArchiveIsSplitByKindSoThatTheSecondClockCanBe	tracked			98
-trail_test.go	293	TestOnePersonLeavesTheTrailWithoutTakingTheEventWithThem	tracked			98
+trail_test.go	216	TestTheArchiveIsSplitByKindSoThatTheSecondClockCanBe	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1010	-
+trail_test.go	293	TestOnePersonLeavesTheTrailWithoutTakingTheEventWithThem	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1145	-
 trail_test.go	373	TestAnArchivedRowIsForgottenToo	verified	store/sqlite+postgres	runtime/tests/trail_retention.rs#L184	-
 trail_test.go	457	TestTheStoreSaysWhoseARowIs	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L413	-
 trail_test.go	557	TestRowsWrittenAtOneInstantAreReadOnceEach	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L413	-
-trail_test.go	595	TestEachTenantKeepsItsTrailForItsOwnWindow	tracked	store/sqlite+postgres	runtime/tests/trail_retention.rs#L128	98
+trail_test.go	595	TestEachTenantKeepsItsTrailForItsOwnWindow	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1010	-
 trail_test.go	682	TestARowTwoTenantsMayReadLastsAsLongAsTheLongerKeepsIt	verified	store/sqlite+postgres	runtime/tests/trail_retention.rs#L302	-
 trail_test.go	754	TestAHeldTenantKeepsItsTrail	verified	store/sqlite+postgres	runtime/tests/trail_retention.rs#L143	-
 trail_test.go	803	TestErasingASubjectThroughTheStoreLeavesWhatIsHeld	verified	store/sqlite+postgres	runtime/tests/trail_retention.rs#L140	-
-trail_test.go	851	TestATenantLeavesTheDatabase	tracked			98
+trail_test.go	851	TestATenantLeavesTheDatabase	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1145	-
 trail_test.go	906	TestTheManifestIsKeptInTheAppsOwnTable	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L610	-
 trail_test.go	983	TestTheManifestIsSignedAndChainedInTheAppsOwnTable	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L675	-
 trail_test.go	1069	TestADatabaseRestoredFromBeforeTheLatestCheckpointIsAcceptedInTheAppsOwnTable	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L636	-

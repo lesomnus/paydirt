@@ -60,6 +60,10 @@ pub enum Action {
     Inspect,
     Collect,
     Purge,
+    PurgeKind {
+        kind: String,
+        before: DateTime<Utc>,
+    },
     Retire,
     Forget {
         subject: String,
@@ -94,32 +98,36 @@ pub struct Report {
     pub bundle: Option<String>,
     pub retired: bool,
 }
+const DEPLOYMENT: &str = "00000000-0000-0000-0000-000000000000";
+fn canonical_kind(policies: &crate::Policies, name: &str) -> Result<String> {
+    let domains = crate::domain::Domains::from_policies(policies)?;
+    let number = domains
+        .lookup(name)
+        .or_else(|| domains.domain_of(name))
+        .ok_or_else(|| Fault::invalid(format!("unknown or ambiguous trail kind {name}")))?;
+    let mut matches = policies
+        .iter()
+        .filter(|(_, p)| p.entity["domain"].as_u64() == Some(number as u64));
+    let (entity, policy) = matches
+        .next()
+        .ok_or_else(|| Fault::invalid("unknown domain"))?;
+    if matches.next().is_some() {
+        return Err(Fault::invalid(format!("ambiguous trail kind {name}")));
+    }
+    Ok(if policy.entity["own"] == "OWN_ACCESS" {
+        "access".into()
+    } else {
+        entity.clone()
+    })
+}
 impl Policy {
     fn resolve(&self, policies: &crate::Policies) -> Result<Self> {
-        let domains = crate::domain::Domains::from_policies(policies)?;
-        let canonical = |name: &str| -> Result<String> {
-            let number = domains
-                .lookup(name)
-                .or_else(|| domains.domain_of(name))
-                .ok_or_else(|| Fault::invalid(format!("unknown or ambiguous trail kind {name}")))?;
-            let mut matches = policies
-                .iter()
-                .filter(|(_, p)| p.entity["domain"].as_u64() == Some(number as u64));
-            let (entity, policy) = matches
-                .next()
-                .ok_or_else(|| Fault::invalid("unknown domain"))?;
-            if matches.next().is_some() {
-                return Err(Fault::invalid(format!("ambiguous trail kind {name}")));
-            }
-            Ok(if policy.entity["own"] == "OWN_ACCESS" {
-                "access".into()
-            } else {
-                entity.clone()
-            })
-        };
         let mut by = BTreeMap::new();
         for (name, value) in &self.by {
-            if by.insert(canonical(name)?, value.clone()).is_some() {
+            if by
+                .insert(canonical_kind(policies, name)?, value.clone())
+                .is_some()
+            {
                 return Err(Fault::invalid("trail policy names the same kind twice"));
             }
         }
@@ -128,7 +136,7 @@ impl Policy {
             let kind = if name == "*" {
                 name.clone()
             } else {
-                canonical(name)?
+                canonical_kind(policies, name)?
             };
             if !held.insert(kind) {
                 return Err(Fault::invalid("trail hold names the same kind twice"));
@@ -180,6 +188,7 @@ CREATE TABLE IF NOT EXISTS paydirt_trail_archive (id TEXT PRIMARY KEY, doc TEXT 
 CREATE TABLE IF NOT EXISTS paydirt_trail_owed (id TEXT PRIMARY KEY, doc TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS paydirt_trail_removed (id TEXT PRIMARY KEY, doc TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS paydirt_trail_gc (id TEXT PRIMARY KEY, doc TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS paydirt_trail_receipt (id TEXT PRIMARY KEY, doc TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS paydirt_trail_format (id TEXT PRIMARY KEY, doc TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS paydirt_checkpoint_pending (id TEXT PRIMARY KEY, doc TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS paydirt_trail_key_gc (id TEXT PRIMARY KEY, doc TEXT NOT NULL);";
@@ -229,6 +238,63 @@ impl Transaction<'_> {
         let subject = paydirt::format_id(&subject).expect("sixteen-byte identifier");
         self.lock_trail()?;
         self.queue_obligation(&tenant, &subject).map(|_| ())
+    }
+    /// Blanks online audit content in the caller's transaction and leaves the
+    /// independent archive work queued until that transaction commits.
+    pub fn forget_trail_in(&mut self, tenant: [u8; 16], subjects: &[[u8; 16]]) -> Result<Report> {
+        if !matches!(self.scope, Scope::Internal) {
+            return Err(Fault::denied("erasure requires a host transaction"));
+        }
+        if !paydirt::has_domain(&tenant, 1) || subjects.contains(&[0; 16]) {
+            return Err(Fault::invalid("expected tenant and subject IDs"));
+        }
+        let mut report = Report::default();
+        if subjects.is_empty() {
+            return Ok(report);
+        }
+        self.lock_trail()?;
+        let states: BTreeMap<String, State> = self
+            .trail_docs::<(String, State)>("paydirt_trail_policy")?
+            .into_iter()
+            .collect();
+        let default = states.get(DEPLOYMENT).cloned().unwrap_or_default();
+        let subjects: BTreeSet<_> = subjects.iter().copied().collect();
+        let tenant = paydirt::format_id(&tenant).unwrap();
+        // Bound each IN list for deployments using the SQLite variable limit.
+        for chunk in subjects.iter().copied().collect::<Vec<_>>().chunks(200) {
+            let select = crate::trail_page::Selection {
+                whose: crate::trail_page::Whose::Named,
+                tenant: paydirt::parse_id(&tenant).unwrap(),
+                objects: chunk.iter().copied().collect(),
+                ..Default::default()
+            };
+            for (entry, row) in self.selected_live_trail(&select)? {
+                if !row["objectId"].is_string() {
+                    continue;
+                }
+                let held = entry.owners.iter().chain([&entry.tenant]).any(|owner| {
+                    let p = &states.get(owner).unwrap_or(&default).policy;
+                    p.held.contains("*") || p.held.contains(&entry.kind)
+                });
+                if held {
+                    report.held.push(entry.id);
+                    continue;
+                }
+                if ["value", "patch"]
+                    .iter()
+                    .any(|k| row[k].as_str().is_some_and(|s| !s.is_empty()))
+                {
+                    self.alter_live(&entry, true)?;
+                    report.blanked.push(entry.id);
+                }
+            }
+        }
+        for subject in subjects {
+            let subject = paydirt::format_id(&subject).unwrap();
+            self.queue_obligation(&tenant, &subject)?;
+            report.owed.push(subject);
+        }
+        Ok(report)
     }
     fn queue_obligation(&mut self, tenant: &str, subject: &str) -> Result<Obligation> {
         let id = format!("{tenant}/{subject}");
@@ -396,10 +462,16 @@ impl Transaction<'_> {
             tenant: paydirt::parse_id(tenant).ok_or_else(|| bad("invalid tenant"))?,
             ..Default::default()
         };
+        self.selected_live_trail(&select)
+    }
+    fn selected_live_trail(
+        &mut self,
+        select: &crate::trail_page::Selection,
+    ) -> Result<Vec<(Entry, Value)>> {
         let mut rows = Vec::new();
         let mut after = None;
         loop {
-            let page = self.read_trail_page(&select, None, after, 256, false, true)?;
+            let page = self.read_trail_page(select, None, after, 256, false, true)?;
             let count = page.len();
             for item in page {
                 after = Some(item.cursor);
@@ -475,6 +547,39 @@ impl Transaction<'_> {
         self.db.exec(q)?;
         Ok(())
     }
+    fn store_blob(&mut self, files: &Archive, e: &mut Entry, row: &Value) -> Result<()> {
+        if e.digest.is_some() {
+            self.removal(files, e)?;
+        }
+        if e.digest.is_none() && e.owners.len() > 1 {
+            e.namespace = Some("shared".into());
+        }
+        e.manifest = None;
+        self.begin_blob(files, e)?;
+        let stored = if let Some(keys) = &files.tenant_keys {
+            keys.seal(row.clone(), &e.owners, e.created.parse().map_err(bad)?)?
+        } else {
+            row.clone()
+        };
+        let hash = files.stage(&serde_json::to_vec(&stored).map_err(bad)?)?;
+        if let Some(old) = e.digest.replace(hash) {
+            self.trail_set("paydirt_trail_gc", &old, Some(&old))?;
+        }
+        if files.notary.is_some() && row.get("objectId").is_some() {
+            e.proof = Some(evidence(row));
+            e.ciphertext =
+                Some(files.ciphertext_digest(e.digest.as_deref().expect("staged digest"))?);
+        }
+        self.settle_blob(
+            files,
+            e,
+            crate::manifest::State::Adding,
+            crate::manifest::State::Present,
+        )?;
+        e.sign(files, "present")?;
+        self.trail_set("paydirt_trail_archive", &e.id, Some(e))?;
+        Ok(())
+    }
     fn collect_keys(&mut self, files: &Archive) -> Result<()> {
         let owed = self.trail_docs::<(String, DateTime<Utc>)>("paydirt_trail_key_gc")?;
         for (owner, at) in owed {
@@ -489,6 +594,18 @@ impl Transaction<'_> {
     }
     fn collect_gc(&mut self, files: &Archive) -> Result<()> {
         self.collect_keys(files)?;
+        for item in self.trail_docs::<SignedReceipt>("paydirt_trail_receipt")? {
+            files.check_receipt(&item)?;
+            let id = uuid(&item.receipt.id)?;
+            crate::attestation::write_once(
+                &files
+                    .root
+                    .join(".maintenance-receipts")
+                    .join(format!("{id}.json")),
+                &serde_json::to_vec(&item).map_err(bad)?,
+            )?;
+            self.trail_clear("paydirt_trail_receipt", &id)?;
+        }
         let active: BTreeSet<String> = self
             .trail_docs::<Entry>("paydirt_trail_archive")?
             .into_iter()
@@ -511,10 +628,76 @@ impl Store {
         recipient: Option<&Archive>,
         request: Request,
     ) -> Result<Report> {
-        let tenant = uuid(&request.tenant)?;
-        if !paydirt::has_domain(&paydirt::parse_id(&tenant).unwrap(), 1) {
-            return Err(Fault::invalid("not a tenant ID"));
+        let tenant = if request.tenant == "deployment" {
+            if !matches!(
+                request.action,
+                Action::Policy { .. } | Action::Inspect | Action::Collect
+            ) {
+                return Err(Fault::invalid("expected a tenant ID for this action"));
+            }
+            DEPLOYMENT.to_owned()
+        } else {
+            let tenant = uuid(&request.tenant)?;
+            if !paydirt::has_domain(&paydirt::parse_id(&tenant).unwrap(), 1) {
+                return Err(Fault::invalid("not a tenant ID"));
+            }
+            tenant
+        };
+        self.manage_filing(files, recipient, request, tenant, false)
+    }
+    /// Applies the deployment policy and per-tenant overrides, once per filing tenant.
+    pub fn sweep_trail(&mut self, files: &Archive, dry: bool) -> Result<BTreeMap<String, Report>> {
+        let tenants = self.transaction(&Scope::Internal, |tx| {
+            tx.lock_trail()?;
+            let mut tenants = BTreeSet::from([DEPLOYMENT.to_owned()]);
+            let mut after = [0; 16];
+            loop {
+                let page = tx.trail_tenants(after, 256)?;
+                for id in &page {
+                    tenants.insert(paydirt::format_id(id).unwrap());
+                }
+                if page.len() < 256 {
+                    break;
+                }
+                after = *page.last().unwrap();
+            }
+            tenants.extend(
+                tx.trail_docs::<Entry>("paydirt_trail_archive")?
+                    .into_iter()
+                    .map(|e| e.tenant),
+            );
+            tenants.extend(
+                tx.trail_docs::<(String, State)>("paydirt_trail_policy")?
+                    .into_iter()
+                    .map(|v| v.0),
+            );
+            for e in tx.trail_docs::<Obligation>("paydirt_trail_owed")? {
+                tenants.insert(match e {
+                    Obligation::Current { tenant, .. } | Obligation::Legacy((tenant, _)) => tenant,
+                });
+            }
+            Ok(tenants)
+        })?;
+        let mut reports = BTreeMap::new();
+        for tenant in tenants {
+            let req = Request {
+                tenant: tenant.clone(),
+                dry_run: dry,
+                action: Action::Collect,
+            };
+            let result = self.manage_filing(files, None, req, tenant.clone(), true)?;
+            reports.insert(tenant, result);
         }
+        Ok(reports)
+    }
+    fn manage_filing(
+        &mut self,
+        files: &Archive,
+        recipient: Option<&Archive>,
+        request: Request,
+        tenant: String,
+        filed_only: bool,
+    ) -> Result<Report> {
         let dry = request.dry_run;
         let maintenance = !dry
             && files.notary.is_some()
@@ -522,6 +705,7 @@ impl Store {
                 request.action,
                 Action::Collect
                     | Action::Purge
+                    | Action::PurgeKind { .. }
                     | Action::Retire
                     | Action::Forget { .. }
                     | Action::Retry
@@ -537,7 +721,15 @@ impl Store {
                 tx.collect_keys(files)?;
             }
             if matches!(request.action, Action::Purge) && files.tenant_keys.is_some() {
-                let preview = run_pass(tx, files, recipient, &request, tenant.clone(), true)?;
+                let preview = run_pass(
+                    tx,
+                    files,
+                    recipient,
+                    &request,
+                    tenant.clone(),
+                    true,
+                    filed_only,
+                )?;
                 if !preview.held.is_empty() || preview.policy.held.contains("*") {
                     return Err(Fault::precondition("tenant archive is under a hold"));
                 }
@@ -545,7 +737,7 @@ impl Store {
             if maintenance && tx.pending_checkpoint()?.is_some() {
                 tx.checkpoint(files, true, None)?;
             }
-            let report = run_pass(tx, files, recipient, &request, tenant, dry)?;
+            let report = run_pass(tx, files, recipient, &request, tenant, dry, filed_only)?;
             let publish = maintenance
                 && (!report.archived.is_empty()
                     || !report.removed.is_empty()
@@ -580,6 +772,7 @@ fn run_pass(
     request: &Request,
     tenant: String,
     dry: bool,
+    filed_only: bool,
 ) -> Result<Report> {
     tx.lock_trail()?;
     let now = (tx.inputs.clock)();
@@ -587,7 +780,19 @@ fn run_pass(
         .trail_docs::<(String, State)>("paydirt_trail_policy")?
         .into_iter()
         .collect();
-    let mut state = states.get(&tenant).cloned().unwrap_or_default();
+    let deployment = states.get(DEPLOYMENT).cloned().unwrap_or_default();
+    let mut state = states
+        .get(&tenant)
+        .cloned()
+        .unwrap_or_else(|| deployment.clone());
+    if matches!(request.action, Action::Purge) && state.policy.held.contains("*") {
+        return Err(Fault::precondition("tenant archive is under a hold"));
+    }
+    let purge_kind = match &request.action {
+        Action::PurgeKind { kind, before } => Some((canonical_kind(tx.policies, kind)?, *before)),
+        _ => None,
+    };
+    let mut counts: BTreeMap<(&str, &str, String), usize> = BTreeMap::new();
     if let Action::Policy { policy } = &request.action {
         for k in policy.by.values().chain([&policy.default]) {
             if matches!((k.retain_ms,k.destroy_ms),(Some(r),Some(d))if d<r) {
@@ -630,7 +835,12 @@ fn run_pass(
     let mut waiting: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut exported = Vec::new();
     let mut carry = crate::integrity::CarryHeads::default();
-    let shared = !matches!(request.action, Action::Retire | Action::Purge);
+    let shared = (!filed_only || !owed.is_empty())
+        && tenant != DEPLOYMENT
+        && !matches!(
+            request.action,
+            Action::Retire | Action::Purge | Action::PurgeKind { .. }
+        );
     let mut rows = tx.live_trail(&tenant, shared)?;
     for entry in tx.trail_docs::<Entry>("paydirt_trail_archive")?.into_iter() {
         tx.check_archive_entry(files, &entry, "present")?;
@@ -657,20 +867,17 @@ fn run_pass(
             );
             continue;
         }
-        let held = e.owners.iter().any(|t| {
-            states
-                .get(t)
-                .is_some_and(|s| s.policy.held.contains("*") || s.policy.held.contains(&e.kind))
-        });
-        let default_policy = Policy::default();
+        let owners: BTreeSet<_> = e.owners.iter().chain([&e.tenant]).collect();
+        let policy = |owner: &str| &states.get(owner).unwrap_or(&deployment).policy;
+        let is_held =
+            |owner: &str| policy(owner).held.contains("*") || policy(owner).held.contains(&e.kind);
+        let held = owners.iter().any(|t| is_held(t));
         let mut collect = true;
         let mut destroy = true;
-        for owner in &e.owners {
-            let keep = states
-                .get(owner)
-                .map(|s| &s.policy)
-                .unwrap_or(&default_policy)
-                .keep(&e.kind);
+        let mut discard = true;
+        for owner in &owners {
+            let keep = policy(owner).keep(&e.kind);
+            discard &= keep.discard;
             let cold = due(&e.created, keep.retain_ms, now)?;
             collect &= cold;
             destroy &= due(&e.created, keep.destroy_ms, now)? || keep.discard && cold;
@@ -689,8 +896,18 @@ fn run_pass(
             .chain(row_id(&row["objectId"]))
             .filter(|s| owed.contains(s))
             .collect();
-        let target = matches!(request.action, Action::Purge)
-            || matches!(request.action, Action::Collect | Action::Retire)
+        let selected = if let Some((kind, before)) = &purge_kind {
+            archived
+                && e.kind == *kind
+                && e.created.parse::<DateTime<Utc>>().map_err(bad)? < *before
+        } else {
+            false
+        };
+        let filing = !filed_only || e.tenant == tenant;
+        let target = selected
+            || matches!(request.action, Action::Purge)
+            || filing
+                && matches!(request.action, Action::Collect | Action::Retire)
                 && (destroy || state.retired && k.retain_ms.is_none() && k.destroy_ms.is_none());
         if matches!(request.action, Action::Export { .. }) {
             out.exported.push(e.id.clone());
@@ -707,11 +924,8 @@ fn run_pass(
                 owners.extend(
                     e.owners
                         .iter()
-                        .filter(|t| {
-                            states.get(*t).is_some_and(|s| {
-                                s.policy.held.contains("*") || s.policy.held.contains(&e.kind)
-                            })
-                        })
+                        .chain([&e.tenant])
+                        .filter(|t| is_held(t))
                         .cloned(),
                 );
             }
@@ -724,6 +938,20 @@ fn run_pass(
             {
                 out.carried
                     .push(row_id(&row["objectId"]).ok_or_else(|| bad("invalid carried id"))?);
+            }
+            let (act, place) = match &request.action {
+                Action::PurgeKind { .. } => ("purge", "archive"),
+                Action::Purge | Action::Retire => (
+                    "purge-tenant",
+                    if archived { "archive" } else { "database" },
+                ),
+                _ if !archived && discard => ("discard", "database"),
+                _ => ("destroy", "archive"),
+            };
+            *counts.entry((act, place, e.kind.clone())).or_default() += 1;
+            if act == "destroy" && !archived && !dry {
+                tx.store_blob(files, &mut e, &row)?;
+                tx.alter_live(&e, false)?;
             }
             out.removed.push(e.id.clone());
             if !dry {
@@ -743,6 +971,13 @@ fn run_pass(
                 .iter()
                 .any(|k| row[k].as_str().is_some_and(|s| !s.is_empty()));
         if blank {
+            *counts
+                .entry((
+                    "forget",
+                    if archived { "archive" } else { "database" },
+                    e.kind.clone(),
+                ))
+                .or_default() += 1;
             out.blanked.push(e.id.clone());
             row.as_object_mut()
                 .ok_or_else(|| bad("invalid trail row"))?
@@ -753,7 +988,8 @@ fn run_pass(
                 }
             }
         }
-        let transfer = !archived
+        let transfer = filing
+            && !archived
             && matches!(
                 request.action,
                 Action::Collect | Action::Retire | Action::Purge
@@ -763,36 +999,7 @@ fn run_pass(
             out.archived.push(e.id.clone());
         }
         if !dry && (transfer || archived && blank) {
-            if e.digest.is_some() {
-                tx.removal(files, &e)?;
-            }
-            if !archived && e.owners.len() > 1 {
-                e.namespace = Some("shared".into());
-            }
-            e.manifest = None;
-            tx.begin_blob(files, &mut e)?;
-            let stored = if let Some(keys) = &files.tenant_keys {
-                keys.seal(row.clone(), &e.owners, e.created.parse().map_err(bad)?)?
-            } else {
-                row.clone()
-            };
-            let hash = files.stage(&serde_json::to_vec(&stored).map_err(bad)?)?;
-            if let Some(old) = e.digest.replace(hash) {
-                tx.trail_set("paydirt_trail_gc", &old, Some(&old))?;
-            }
-            if files.notary.is_some() && row.get("objectId").is_some() {
-                e.proof = Some(evidence(&row));
-                e.ciphertext =
-                    Some(files.ciphertext_digest(e.digest.as_deref().expect("staged digest"))?);
-            }
-            tx.settle_blob(
-                files,
-                &e,
-                crate::manifest::State::Adding,
-                crate::manifest::State::Present,
-            )?;
-            e.sign(files, "present")?;
-            tx.trail_set("paydirt_trail_archive", &e.id, Some(&e))?;
+            tx.store_blob(files, &mut e, &row)?;
             if transfer {
                 tx.alter_live(&e, false)?;
             }
@@ -851,9 +1058,91 @@ fn run_pass(
             tx.trail_set("paydirt_trail_key_gc", &tenant, Some(&(&tenant, now)))?;
         }
     }
+    if !dry {
+        for ((act, place, kind), rows) in counts {
+            let id = paydirt::format_id(&paydirt::mint(0)).unwrap();
+            let receipt = Receipt {
+                id: id.clone(),
+                at: now,
+                tenant: tenant.clone(),
+                kind,
+                act: act.into(),
+                place: place.into(),
+                rows,
+            };
+            let signature = files
+                .notary
+                .as_ref()
+                .map(|n| n.sign(&receipt.statement()?))
+                .transpose()?;
+            tx.trail_set(
+                "paydirt_trail_receipt",
+                &id,
+                Some(&SignedReceipt { receipt, signature }),
+            )?;
+        }
+    }
     Ok(out)
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Receipt {
+    pub id: String,
+    pub at: DateTime<Utc>,
+    pub tenant: String,
+    pub kind: String,
+    pub act: String,
+    #[serde(rename = "where")]
+    pub place: String,
+    pub rows: usize,
+}
+impl Receipt {
+    fn statement(&self) -> Result<Vec<u8>> {
+        let mut out = b"paydirt.trail.receipt.v1\0".to_vec();
+        out.extend(serde_json::to_vec(self).map_err(bad)?);
+        Ok(out)
+    }
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SignedReceipt {
+    receipt: Receipt,
+    signature: Option<crate::attestation::Signature>,
+}
+impl Archive {
+    fn check_receipt(&self, item: &SignedReceipt) -> Result<()> {
+        match (&self.notary, &item.signature) {
+            (Some(n), Some(sig)) => n.verify(&item.receipt.statement()?, sig),
+            (None, None) => Ok(()),
+            _ => Err(bad("receipt signature configuration mismatch")),
+        }
+    }
+    pub fn trail_receipts(&self) -> Result<Vec<Receipt>> {
+        let dir = self.root.join(".maintenance-receipts");
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(bad(e)),
+        };
+        let mut rows = Vec::new();
+        for file in entries {
+            let path = file.map_err(bad)?.path();
+            if path.extension().and_then(|v| v.to_str()) != Some("json") {
+                continue;
+            }
+            let item: SignedReceipt =
+                serde_json::from_slice(&std::fs::read(&path).map_err(bad)?).map_err(bad)?;
+            self.check_receipt(&item)?;
+            if path.file_stem().and_then(|v| v.to_str()) != Some(item.receipt.id.as_str()) {
+                return Err(bad("receipt filename mismatch"));
+            }
+            rows.push(item.receipt);
+        }
+        rows.sort_by(|a, b| (a.at, &a.id).cmp(&(b.at, &b.id)));
+        Ok(rows)
+    }
+}
 fn evidence(row: &Value) -> Value {
     let selected = [
         "id",
