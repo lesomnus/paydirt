@@ -288,53 +288,198 @@ impl Transaction<'_> {
             .and_then(|v| u8::try_from(v).ok())
     }
     pub(crate) fn insert(&mut self, e: &Entity, req: &Value) -> Result<Value> {
-        let mut row = self.admit(e, req)?;
+        let mut rows = self.insert_items(e, std::slice::from_ref(req), false)?;
+        rows.pop()
+            .ok_or_else(|| Fault::internal("insert returned no row"))
+    }
+    pub(crate) fn item_error(mut err: Fault, index: usize, many: bool) -> Fault {
+        if !many {
+            return err;
+        }
+        let path = format!("items[{index}]");
+        if err.code == "invalid_argument" {
+            err.at(&path)
+        } else {
+            err.message = format!("{path}: {}", err.message);
+            err
+        }
+    }
+    fn insert_items(&mut self, e: &Entity, items: &[Value], many: bool) -> Result<Vec<Value>> {
+        if items.is_empty() {
+            return Ok(vec![]);
+        }
         let alias = e
             .field("alias")
-            .ok()
-            .filter(|f| f.number == 4 && f.kind == "STRING");
-        let given = req["alias"].as_str().unwrap_or("");
+            .is_ok_and(|f| f.number == 4 && f.kind == "STRING");
+        let generated = alias
+            && items
+                .iter()
+                .any(|v| v["alias"].as_str().unwrap_or_default().is_empty());
         let mut conflict = String::new();
-        if alias.is_some()
-            && given.is_empty()
+        if generated
             && let Some(index) = e
                 .indexes()
                 .into_iter()
                 .find(|i| i.unique && i.fields.iter().any(|f| f == "alias"))
         {
-            let columns = index
+            let names = index
                 .fields
                 .iter()
                 .map(|name| e.field(name).map(|f| quote(&f.column())))
                 .collect::<std::result::Result<Vec<_>, _>>()
                 .map_err(Fault::invalid)?;
-            conflict = format!(" ON CONFLICT ({})", columns.join(","));
+            conflict = format!(" ON CONFLICT ({})", names.join(","));
             if index.active_only {
-                let erased = e
+                let stamp = e
                     .erased()
                     .ok_or_else(|| Fault::internal("missing erase field"))?;
-                conflict.push_str(&format!(" WHERE {} IS NULL", quote(&erased.column())));
+                conflict.push_str(&format!(" WHERE {} IS NULL", quote(&stamp.column())));
             }
             conflict.push_str(" DO NOTHING");
         }
-        for _ in 0..3 {
-            if alias.is_some() {
-                row["alias"] = json!(self.namer.name(crate::naming::NameRequest {
-                    entity: &e.name,
-                    given,
-                    request: req,
-                    frame: self.frame,
-                })?);
+        let retry_alias = !conflict.is_empty();
+        let mut rows = items
+            .iter()
+            .enumerate()
+            .map(|(i, v)| {
+                self.admit(e, v)
+                    .map_err(|err| Self::item_error(err, i, many))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        for attempt in 0..3 {
+            if alias {
+                for (i, (row, source)) in rows.iter_mut().zip(items).enumerate() {
+                    let given = source["alias"].as_str().unwrap_or_default();
+                    row["alias"] = json!(
+                        self.namer
+                            .name(crate::naming::NameRequest {
+                                entity: &e.name,
+                                given,
+                                request: source,
+                                frame: self.frame
+                            })
+                            .map_err(|mut err| {
+                                if err.code == "invalid_argument"
+                                    && err.field.is_none()
+                                    && err.violations.is_empty()
+                                {
+                                    err.field = Some("alias".into());
+                                }
+                                Self::item_error(err, i, many)
+                            })?
+                    );
+                }
             }
-            if let Some(added) = self.insert_row(e, &row, &conflict)? {
-                return Ok(added);
+            // A name conflict rolls back the entire attempt, including earlier
+            // parameter-limited chunks. Recorders run only for a complete batch.
+            if retry_alias {
+                self.db.batch("SAVEPOINT paydirt_names")?;
             }
+            let result = self.insert_batch(e, &rows, many, &conflict);
+            if retry_alias {
+                if !matches!(&result, Ok(Some(_))) {
+                    self.db.batch("ROLLBACK TO SAVEPOINT paydirt_names")?;
+                }
+                self.db.batch("RELEASE SAVEPOINT paydirt_names")?;
+            }
+            let inserted = match result? {
+                Some(rows) => rows,
+                None if attempt < 2 => continue,
+                None => return Err(Fault::conflict("alias already exists")),
+            };
+            let mut answer = Vec::with_capacity(rows.len());
+            for (i, (req, post)) in rows.iter().zip(inserted).enumerate() {
+                let outcome = (|| {
+                    self.write_edges(e, &post[&e.key().map_err(Fault::invalid)?.json], req, true)?;
+                    self.record(e, "Add", req, None, Some(&post))?;
+                    self.image(e, post, &Value::Null)
+                })();
+                answer.push(outcome.map_err(|err| Self::item_error(err, i, many))?);
+            }
+            return Ok(answer);
         }
         Err(Fault::conflict("key already exists"))
     }
-    fn insert_row(&mut self, e: &Entity, req: &Value, conflict: &str) -> Result<Option<Value>> {
-        let mut q = Query::new("");
-        let mut cols = Vec::new();
+    fn insert_batch(
+        &mut self,
+        e: &Entity,
+        rows: &[Value],
+        many: bool,
+        conflict: &str,
+    ) -> Result<Option<Vec<Value>>> {
+        let columns: Vec<_> = e
+            .fields
+            .iter()
+            .filter(|f| f.is_column() && !f.erased)
+            .map(|f| quote(&f.column()))
+            .collect();
+        let table = quote(&e.table());
+        let projection = self.project_at(e, &table)?;
+        let mut answer = Vec::with_capacity(rows.len());
+        let limit = match self.db.dialect() {
+            Dialect::Postgres => 65000,
+            Dialect::Sqlite => 30000,
+        };
+        let chunk_size = (limit / (columns.len().max(1) + 1)).max(1);
+        for (page, chunk) in rows.chunks(chunk_size).enumerate() {
+            let mut q = Query::new("");
+            let mut keys = Vec::new();
+            let mut tuples = Vec::new();
+            for (offset, req) in chunk.iter().enumerate() {
+                let (key, params) = self
+                    .insert_params(e, req, &mut q)
+                    .map_err(|err| Self::item_error(err, page * chunk_size + offset, many))?;
+                keys.push(key.to_string());
+                tuples.push(format!("({})", params.join(",")));
+            }
+            let predicates = self.wall_at(e, &mut q, &table)?;
+            let visible = if predicates.is_empty() {
+                projection.clone()
+            } else {
+                format!(
+                    "CASE WHEN {} THEN {projection} ELSE 'null' END",
+                    predicates.join(" AND ")
+                )
+            };
+            q.sql = format!(
+                "INSERT INTO {table} ({}) VALUES {}{conflict} RETURNING {visible} AS value",
+                columns.join(","),
+                tuples.join(",")
+            );
+            let mut result = std::collections::BTreeMap::new();
+            let key = &e.key().map_err(Fault::invalid)?.json;
+            for raw in self.db.rows(q)? {
+                if raw == "null" {
+                    return Err(Fault::missing());
+                }
+                let row = self.decode_row(e, &raw)?;
+                let id = match value::bind(e.key().map_err(Fault::invalid)?, &row[key])? {
+                    Bind::Bytes(bytes) => value::encoded(&bytes),
+                    Bind::Big(i) => json!(i.to_string()),
+                    Bind::Integer(i) => json!(i),
+                    _ => row[key].clone(),
+                };
+                result.insert(id.to_string(), row);
+            }
+            if result.len() < chunk.len() && !conflict.is_empty() {
+                return Ok(None);
+            }
+            for id in keys {
+                answer.push(
+                    result
+                        .remove(&id)
+                        .ok_or_else(|| Fault::internal("missing inserted row"))?,
+                );
+            }
+        }
+        Ok(Some(answer))
+    }
+    fn insert_params(
+        &mut self,
+        e: &Entity,
+        req: &Value,
+        q: &mut Query,
+    ) -> Result<(Value, Vec<String>)> {
         let mut params = Vec::new();
         let mut id = Value::Null;
         for f in e.fields.iter().filter(|f| f.is_column()) {
@@ -350,6 +495,7 @@ impl Transaction<'_> {
             {
                 value::encoded(&(self.inputs.mint)(domain))
             } else if f.nullable {
+                params.push("NULL".into());
                 continue;
             } else if !f.target.is_empty() {
                 return Err(Fault::invalid(format!("{} required", f.name)));
@@ -369,38 +515,17 @@ impl Transaction<'_> {
                     crate::domain::Domains::from_policies(self.policies)?
                         .check_id(&value::bytes(&v)?, domain)?;
                 }
-                id = v.clone();
+                id = match value::bind(f, &v)? {
+                    Bind::Bytes(bytes) => value::encoded(&bytes),
+                    Bind::Big(i) => json!(i.to_string()),
+                    Bind::Integer(i) => json!(i),
+                    _ => v.clone(),
+                };
             }
             let b = self.resolved(f, &v)?;
-            cols.push(quote(&f.column()));
             params.push(q.param(b, self.db.dialect()));
         }
-        let table = quote(&e.table());
-        let projection = self.project_at(e, &table)?;
-        let predicates = self.wall_at(e, &mut q, &table)?;
-        let visible = if predicates.is_empty() {
-            projection
-        } else {
-            format!(
-                "CASE WHEN {} THEN {projection} ELSE 'null' END",
-                predicates.join(" AND ")
-            )
-        };
-        q.sql = format!(
-            "INSERT INTO {table} ({}) VALUES ({}){conflict} RETURNING {visible} AS value",
-            cols.join(","),
-            params.join(",")
-        );
-        let Some(raw) = self.db.rows(q)?.into_iter().next() else {
-            return Ok(None);
-        };
-        if raw == "null" {
-            return Err(Fault::missing());
-        }
-        let row = self.decode_row(e, &raw)?;
-        self.write_edges(e, &id, req, true)?;
-        self.record(e, "Add", req, None, Some(&row))?;
-        self.image(e, row, &Value::Null).map(Some)
+        Ok((id, params))
     }
     pub(crate) fn patch(&mut self, e: &Entity, req: &Value, method: &str) -> Result<Value> {
         let mut req = req.clone();
@@ -562,10 +687,7 @@ impl Transaction<'_> {
                 if items.len() > 1000 {
                     return Err(Fault::invalid("batch size exceeds 1000"));
                 }
-                let rows = items
-                    .iter()
-                    .map(|v| self.insert(e, v))
-                    .collect::<Result<Vec<_>>>()?;
+                let rows = self.insert_items(e, items, true)?;
                 Ok(json!({"items":rows}))
             }
             "$watch_start"

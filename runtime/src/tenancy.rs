@@ -6,10 +6,12 @@ impl Transaction<'_> {
     fn at(&mut self, e: &Entity, row: &Value, path: &str) -> Result<Value> {
         let (name, rest) = path.split_once('.').unwrap_or((path, ""));
         let field = e.field(name).map_err(Fault::invalid)?;
-        let v = row
-            .get(&field.json)
-            .filter(|v| !v.is_null())
-            .ok_or_else(|| Fault::invalid(format!("{name} required for tenant path")))?;
+        let Some(v) = row.get(&field.json).filter(|v| !v.is_null()) else {
+            if field.nullable {
+                return Ok(value::encoded(&[0; 16]));
+            }
+            return Err(Fault::invalid(format!("{name} required for tenant path")));
+        };
         if field.target.is_empty() {
             return Ok(v.clone());
         }
@@ -64,18 +66,59 @@ impl Transaction<'_> {
                 }
             }
         }
-        if self.frame.is_some() {
-            for (name, options) in &policy.fields {
-                let field = e.field(name).map_err(Fault::internal)?;
-                if options["stamped"] == true && req.get(&field.json).is_some_and(|v| !v.is_null())
-                {
-                    return Err(Fault::invalid(format!(
-                        "{name} is established by this deployment"
-                    )));
-                }
-            }
+        if self.frame.is_some()
+            && !self.origin.as_ref().is_some_and(|c| {
+                c.entity == e.name && matches!(c.method.as_str(), "Add" | "AddMany")
+            })
+        {
+            self.check_stamps(e, req)?;
         }
         Ok(row)
+    }
+    pub(crate) fn check_stamps(&self, e: &Entity, item: &Value) -> Result<()> {
+        for (name, options) in &self.policies[&e.name].fields {
+            let field = e.field(name).map_err(Fault::internal)?;
+            if options["stamped"] == true && item.get(&field.json).is_some_and(|v| !v.is_null()) {
+                return Err(Fault::field(name, "established by this deployment"));
+            }
+        }
+        Ok(())
+    }
+    pub(crate) fn check_add_input(
+        &mut self,
+        e: &Entity,
+        request: &Value,
+        many: bool,
+    ) -> Result<Value> {
+        let single = std::slice::from_ref(request);
+        let items = if many {
+            request["items"]
+                .as_array()
+                .ok_or_else(|| Fault::invalid("expected items"))?
+                .as_slice()
+        } else {
+            single
+        };
+        if items.len() > 1000 {
+            return Err(Fault::invalid("batch size exceeds 1000"));
+        }
+        for (index, item) in items.iter().enumerate() {
+            let result = (|| {
+                self.admit(e, item)?;
+                for f in &e.fields {
+                    if f.is_column()
+                        && !f.target.is_empty()
+                        && let Some(key) = item.get(&f.json).filter(|v| !v.is_null())
+                    {
+                        let target = self.model.entity(&f.target).map_err(Fault::internal)?;
+                        self.reference_row(target, key)?;
+                    }
+                }
+                Ok(())
+            })();
+            result.map_err(|err| Self::item_error(err, index, many))?;
+        }
+        Ok(Value::Null)
     }
     pub(crate) fn object_tenant(&mut self, e: &Entity, row: &Value) -> Result<Value> {
         let p = &self.policies[&e.name].entity;

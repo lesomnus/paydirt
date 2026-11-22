@@ -1894,22 +1894,26 @@ fn represented_and_direct_frames_preserve_sql_null_and_guard_reentry() {
     });
 }
 
+use diesel::connection::{Instrumentation, InstrumentationEvent};
+thread_local! {static STATEMENTS:std::cell::RefCell<Option<Vec<String>>>=const { std::cell::RefCell::new(None) };}
+fn log() -> Option<Box<dyn Instrumentation>> {
+    Some(Box::new(|event: InstrumentationEvent<'_>| {
+        if let InstrumentationEvent::StartQuery { query, .. } = event {
+            STATEMENTS.with_borrow_mut(|slot| {
+                if let Some(lines) = slot {
+                    lines.push(query.to_string());
+                }
+            });
+        }
+    }))
+}
+fn enable_sql_trace() {
+    diesel::connection::set_default_instrumentation(log).unwrap();
+}
+
 #[test]
 fn audit_snapshots_use_the_rows_returned_by_insert_and_update() {
-    use diesel::connection::{Instrumentation, InstrumentationEvent};
-    thread_local! {static STATEMENTS:std::cell::RefCell<Option<Vec<String>>>=const { std::cell::RefCell::new(None) };}
-    fn log() -> Option<Box<dyn Instrumentation>> {
-        Some(Box::new(|event: InstrumentationEvent<'_>| {
-            if let InstrumentationEvent::StartQuery { query, .. } = event {
-                STATEMENTS.with_borrow_mut(|slot| {
-                    if let Some(lines) = slot {
-                        lines.push(query.to_string());
-                    }
-                });
-            }
-        }))
-    }
-    diesel::connection::set_default_instrumentation(log).unwrap();
+    enable_sql_trace();
     backends(|f, url, _| {
         let mut db = access_store(f, url);
         let t = provision(&mut db);
@@ -1969,5 +1973,256 @@ fn audit_snapshots_use_the_rows_returned_by_insert_and_update() {
         let image = message_json(f, "app.Robot", &line["value"]);
         assert_eq!(image["alias"], changed["alias"]);
         assert_eq!(image["id"], changed["id"]);
+    });
+}
+
+#[test]
+fn bulk_requests_validate_before_core_and_write_every_named_stamped_item_once() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    enable_sql_trace();
+    backends(|f, url, _| {
+        let names = Arc::new(AtomicUsize::new(0));
+        let out = names.clone();
+        let mut db =
+            access_store(f, url).with_namer(move |r: paydirt_store::naming::NameRequest<'_>| {
+                if r.given.is_empty() {
+                    let n = out.fetch_add(1, Ordering::SeqCst) + 1;
+                    Ok(if n == 1 {
+                        "taken".into()
+                    } else {
+                        format!("free-{n}")
+                    })
+                } else {
+                    paydirt_store::naming::names(r)
+                }
+            });
+        let a = provision(&mut db);
+        let other = paydirt::mint(1);
+        db.seed(vec![(
+            "app.Tenant".into(),
+            json!({"id":STANDARD.encode(other),"alias":"other"}),
+        )])
+        .unwrap();
+        let actor = paydirt::mint(2);
+        let begin = |db: &mut Store, call: Call| {
+            let frame=serde_json::from_value(json!({"tenant":a,"actor":actor,"trace":[],"action":format!("/{}Service/{}",call.entity,call.method)})).unwrap();
+            db.handle(Packet::BeginOrigin {
+                id: "bulk".into(),
+                frame,
+                origin: call,
+            })
+        };
+        let exec = |db: &mut Store, call: Call| {
+            begin(db, call.clone())?;
+            let done = db.handle(Packet::Call {
+                id: "bulk".into(),
+                call,
+            });
+            db.handle(Packet::Finish {
+                id: "bulk".into(),
+                commit: done.is_ok(),
+            })?;
+            done
+        };
+        let call = |kind: &str, method: &str, v: Value| Call {
+            entity: kind.into(),
+            method: method.into(),
+            request: v,
+        };
+        let robot = |alias: &str| json!({"tenant":{"id":STANDARD.encode(a)},"alias":alias});
+        let robots = |items: Vec<Value>| call("app.Robot", "AddMany", json!({"items":items}));
+        let alien = json!({"tenant":{"id":STANDARD.encode(other)},"alias":"alien"});
+        let err = begin(&mut db, robots(vec![robot("ok"), robot("ok-2"), alien])).unwrap_err();
+        assert_eq!(err.code, "not_found");
+        assert!(err.message.starts_with("items[2]:"));
+        let stamp = "2023-11-14T22:13:20Z";
+        let mut forged = robot("forged");
+        forged["dateAttested"] = json!(stamp);
+        let err = begin(&mut db, robots(vec![robot("safe"), forged])).unwrap_err();
+        assert_eq!(err.code, "invalid_argument");
+        assert_eq!(err.violations[0].field, "items[1].date_attested");
+        assert!(table_rows(&mut db, "app.Robot").is_empty());
+        for (kind, field) in [("app.Robot", "dateAttested"), ("app.Holder", "directory")] {
+            let original = call(
+                kind,
+                "Add",
+                json!({"tenant":{"id":STANDARD.encode(a)},"alias":"stamped"}),
+            );
+            let mut stamped = original.clone();
+            stamped.request[field] = json!(if kind == "app.Robot" {
+                stamp
+            } else {
+                "server-issued"
+            });
+            assert!(begin(&mut db, stamped.clone()).is_err());
+            begin(&mut db, original).unwrap();
+            let row = db
+                .handle(Packet::Call {
+                    id: "bulk".into(),
+                    call: stamped,
+                })
+                .unwrap();
+            if field == "directory" {
+                assert_eq!(row[field], "server-issued");
+            } else {
+                assert!(
+                    row[field]
+                        .as_str()
+                        .unwrap()
+                        .starts_with("2023-11-14T22:13:20")
+                );
+            }
+            db.handle(Packet::Finish {
+                id: "bulk".into(),
+                commit: true,
+            })
+            .unwrap();
+        }
+        exec(&mut db, robots(vec![robot("taken")])).unwrap();
+        let secret = STANDARD.encode(b"bulk secret");
+        let mut named = robot("GIVEN");
+        named["secret"] = json!(secret);
+        let mut empty = robot("");
+        empty["secret"] = json!(secret);
+        let batch = robots(vec![empty.clone(), named, empty]);
+        begin(&mut db, batch.clone()).unwrap();
+        let mut enriched = batch;
+        for v in enriched.request["items"].as_array_mut().unwrap() {
+            v["dateAttested"] = json!(stamp);
+        }
+        let added = db
+            .handle(Packet::Call {
+                id: "bulk".into(),
+                call: enriched,
+            })
+            .unwrap();
+        db.handle(Packet::Finish {
+            id: "bulk".into(),
+            commit: true,
+        })
+        .unwrap();
+        let rows = added["items"].as_array().unwrap();
+        assert_eq!(names.load(Ordering::SeqCst), 4);
+        assert_eq!(
+            rows.iter()
+                .map(|r| r["alias"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["free-3", "given", "free-4"]
+        );
+        for row in rows {
+            assert!(row["secret"].is_null());
+            assert!(
+                row["dateAttested"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("2023-11-14T22:13:20")
+            );
+            let audit = table_rows(&mut db, "app.Audit")
+                .into_iter()
+                .filter(|r| r["objectId"] == row["id"])
+                .collect::<Vec<_>>();
+            assert_eq!(audit.len(), 1);
+            assert_eq!(audit[0]["actorId"], STANDARD.encode(actor));
+            assert_eq!(audit[0]["tenantId"], STANDARD.encode(a));
+            assert_eq!(audit[0]["action"], "/app.RobotService/AddMany");
+            assert!(
+                !String::from_utf8_lossy(
+                    &STANDARD
+                        .decode(audit[0]["value"].as_str().unwrap())
+                        .unwrap()
+                )
+                .contains("bulk secret")
+            );
+        }
+        let value = if url.starts_with("postgres") {
+            "decode('62756c6b20736563726574','hex')"
+        } else {
+            "X'62756c6b20736563726574'"
+        };
+        assert_eq!(
+            count_sql(
+                url,
+                &format!(r#"SELECT count(*) AS n FROM "pd_app__Robot" WHERE f8={value}"#)
+            ),
+            3
+        );
+        let err = exec(
+            &mut db,
+            robots(vec![robot("valid"), robot("can't name this!")]),
+        )
+        .unwrap_err();
+        assert_eq!(err.violations[0].field, "items[1].alias");
+        for distinct in [false, true] {
+            let mut readings = vec![];
+            for i in 0..10 {
+                let key = if distinct {
+                    exec(
+                        &mut db,
+                        call("app.Robot", "Add", robot(&format!("sensor-{i}"))),
+                    )
+                    .unwrap()["id"]
+                        .clone()
+                } else {
+                    rows[0]["id"].clone()
+                };
+                readings.push(json!({"robot":{"id":key},"celsius":i as f64}));
+            }
+            STATEMENTS.with_borrow_mut(|s| *s = Some(vec![]));
+            let saved = exec(
+                &mut db,
+                call("app.Reading", "AddMany", json!({"items":readings})),
+            )
+            .unwrap();
+            let sql = STATEMENTS.with_borrow_mut(|s| s.take().unwrap());
+            assert_eq!(saved["items"].as_array().unwrap().len(), 10);
+            assert!(
+                saved["items"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|i| i["tenantId"] == STANDARD.encode(a))
+            );
+            assert_eq!(
+                sql.iter()
+                    .filter(|q| q.starts_with("INSERT INTO \"pd_app__Reading\""))
+                    .count(),
+                1
+            );
+            assert_eq!(
+                sql.iter()
+                    .filter(
+                        |q| q.starts_with("SELECT ") && q.contains("FROM \"pd_app__Robot\" AS r")
+                    )
+                    .count(),
+                if distinct { 10 } else { 1 }
+            );
+        }
+        let count = Arc::new(AtomicUsize::new(0));
+        let seen = count.clone();
+        let mut db =
+            access_store(f, url).with_namer(move |r: paydirt_store::naming::NameRequest<'_>| {
+                seen.fetch_add(1, Ordering::SeqCst);
+                Ok(if r.given.is_empty() { "taken" } else { r.given }.into())
+            });
+        assert_eq!(
+            exec(&mut db, robots(vec![robot("a-new-one"), robot("taken")]))
+                .unwrap_err()
+                .code,
+            "already_exists"
+        );
+        assert_eq!(count.swap(0, Ordering::SeqCst), 2);
+        assert_eq!(
+            exec(&mut db, robots(vec![robot("")])).unwrap_err().code,
+            "already_exists"
+        );
+        assert_eq!(count.load(Ordering::SeqCst), 3);
+        assert!(
+            !table_rows(&mut db, "app.Robot")
+                .iter()
+                .any(|r| r["alias"] == "a-new-one")
+        );
     });
 }

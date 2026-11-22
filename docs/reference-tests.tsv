@@ -17,12 +17,12 @@ account_test.go	448	TestAnAccountReadsNothingItDidNotDeclare	tracked	connect/sql
 account_test.go	548	TestTheAccessRecordNamesTheAccount	tracked			102
 account_test.go	576	TestWhichAccountAMembershipIsOfIsTheDeployments	tracked			102
 account_test.go	642	TestAnAccountsMembershipsAndAHoldersAccount	tracked	connect/sqlite+postgres;drpc/opfs	web/generated-account.js#L42	102
-addmany_test.go	73	TestAnAddManyIsAskedWhatAnAddIs	tracked			102
-addmany_test.go	143	TestAnAddManyNamesAndStampsEveryItem	tracked			102
-addmany_test.go	202	TestAnAddManyTriesAgainForANameItMadeUp	tracked			102
-addmany_test.go	281	TestAnAddManyAnswersWithNoSecret	tracked			102
-addmany_test.go	320	TestAnAddManyIsOnTheTrail	tracked			102
-addmany_test.go	350	TestAnAddManyAsksAboutARowOnceInATransaction	tracked			102
+addmany_test.go	73	TestAnAddManyIsAskedWhatAnAddIs	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1980	-
+addmany_test.go	143	TestAnAddManyNamesAndStampsEveryItem	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1980	-
+addmany_test.go	202	TestAnAddManyTriesAgainForANameItMadeUp	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1980	-
+addmany_test.go	281	TestAnAddManyAnswersWithNoSecret	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1980	-
+addmany_test.go	320	TestAnAddManyIsOnTheTrail	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1980	-
+addmany_test.go	350	TestAnAddManyAsksAboutARowOnceInATransaction	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1980	-
 addmany_test.go	402	TestAnAddManyThatFailsPartwayIsNotCommitted	verified	store/sqlite+postgres	runtime/tests/entity.rs#L134	-
 admission_test.go	40	TestAdmissionHasBothPrincipalsAndRedactsEveryImage	tracked			102
 admission_test.go	96	TestAdmissionCannotExpandGateOrWall	tracked			102
@@ -84,7 +84,7 @@ entitle_test.go	444	TestTheCopyGoesWithItsTenant	verified	connect/sqlite+postgre
 entitle_test.go	477	TestTheServerFollowsTheSourceItIsNamed	verified	connect/grant-source	web/generated-grant-follower.mjs#L74	-
 forgetturn_test.go	39	TestTwoErasuresInATransactionBesideAPassFinish	verified	store/postgres	runtime/tests/reference_cases.rs#L522	-
 formerly_earlier_test.go	301	TestAStoreOfARenamedEntityIsMovedWhole	verified	store/sqlite+postgres	runtime/tests/upgrade.rs#L162	-
-handed_test.go	95	TestTheTrailIsTheRowTheWriteRead	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1898	-
+handed_test.go	95	TestTheTrailIsTheRowTheWriteRead	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1915	-
 header_test.go	25	TestTheTrailCanSayWhatTheThingWasCalled	tracked			103
 header_test.go	58	TestOneReadWorksOnEveryEntity	tracked			103
 header_test.go	89	TestAnEntityThatHasNoneOfItSaysSo	tracked			103
@@ -303,7 +303,7 @@ stamp_test.go	53	TestAStampIsNotTheCallersToWrite	verified	connect/sqlite+postgr
 stamp_test.go	82	TestTheWallReadsTheStamp	verified	connect/sqlite+postgres	web/generated-tenancy.mjs#L25	-
 stamp_test.go	127	TestAReadingWithNoRobotIsRefused	verified	connect/sqlite+postgres	web/generated-tenancy.mjs#L26	-
 stamp_test.go	144	TestPathsThatMustAgree	verified	connect/sqlite+postgres	web/generated-tenancy.mjs#L22	-
-stamped_layer_test.go	54	TestAppLayerFillsStampedAddFieldsBehindTheGate	tracked			102
+stamped_layer_test.go	54	TestAppLayerFillsStampedAddFieldsBehindTheGate	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1980	-
 tenantlist_test.go	23	TestATenantListIsNarrowedLikeAnyOtherRead	tracked			102
 tenantlist_test.go	49	TestHoldersCanBeListedByTenant	tracked			102
 time_zone_test.go	13	TestCommandsUseTheRequestedDisplayZoneBeforeCallingTheServer	verified	connect/sqlite+postgres	web/generated-operator.mjs#L26	-

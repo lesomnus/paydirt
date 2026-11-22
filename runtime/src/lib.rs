@@ -448,6 +448,25 @@ impl Transaction<'_> {
             return Err(failure.clone());
         }
         let implicit = self.admission.is_some() && self.origin.is_none();
+        if implicit && self.frame.is_some() && matches!(call.method.as_str(), "Add" | "AddMany") {
+            let e = self.model.entity(&call.entity).map_err(Fault::invalid)?;
+            let many = call.method == "AddMany";
+            let items = if many {
+                call.request["items"]
+                    .as_array()
+                    .map(Vec::as_slice)
+                    .unwrap_or_default()
+            } else {
+                std::slice::from_ref(&call.request)
+            };
+            for (i, item) in items.iter().enumerate() {
+                if let Err(err) = self.check_stamps(e, item) {
+                    let err = Self::item_error(err, i, many);
+                    self.failed = Some(err.clone());
+                    return Err(err);
+                }
+            }
+        }
         if implicit {
             self.origin = Some(call.clone());
         }
