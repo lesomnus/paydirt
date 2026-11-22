@@ -4,11 +4,44 @@ use __APP_CRATE__::{
     transport::{Database, MODEL, POLICIES},
 };
 use connectrpc::Server;
+use paydirt::watch::{Broker, Memory, nats::Nats, postgres::Postgres};
 use serde::Deserialize;
-use std::{error::Error, fs};
+use std::{error::Error, fs, sync::Arc, time::Duration};
 
 #[derive(Deserialize)]
+struct Watch {
+    broker: String,
+    #[serde(default)]
+    dsn: String,
+    #[serde(default)]
+    namespace: String,
+    #[serde(default)]
+    outbox: bool,
+    drain_every_ms: Option<u64>,
+}
+impl Watch {
+    async fn connect(&self, url: &str) -> Result<Option<Arc<dyn Broker>>, Box<dyn Error>> {
+        if self.drain_every_ms.is_some()
+            && (!self.outbox || self.drain_every_ms == Some(0) || self.broker == "none")
+        {
+            return Err("draining requires outbox, a broker and a positive interval".into());
+        }
+        Ok(match self.broker.as_str() {
+            "memory" => Some(Arc::new(Memory::default())),
+            "postgres" => Some(Arc::new(Postgres::new(if self.dsn.is_empty() {
+                url
+            } else {
+                &self.dsn
+            }))),
+            "nats" => Some(Arc::new(Nats::connect(&self.dsn, &self.namespace).await?)),
+            "none" => None,
+            name => return Err(format!("unknown watch broker {name}").into()),
+        })
+    }
+}
+#[derive(Deserialize)]
 struct Config {
+    watch: Watch,
     listen: std::net::SocketAddr,
     service_name: String,
     #[serde(default)]
@@ -28,13 +61,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let [entity, method, argument] = args.as_slice() else {
             return Err("usage: APP ENTITY METHOD JSON".into());
         };
-        let mut store = paydirt_store::Store::open(&url, MODEL, POLICIES)?;
+        let config: Config = serde_json::from_slice(&fs::read("app.json")?)?;
+        let broker = config.watch.connect(&url).await?;
+        let mut store =
+            paydirt_store::Store::open(&url, MODEL, POLICIES)?.with_outbox(config.watch.outbox);
         let call = paydirt_store::Call {
             entity: entity.clone(),
             method: method.clone(),
             request: serde_json::from_str(argument)?,
         };
-        println!("{}", store.operator(call)?);
+        let result = store.operator(call)?;
+        if let (Some(event), Some(broker)) = (store.take_committed(), broker) {
+            if let Err(e) = broker.publish(event).await {
+                eprintln!("watch publication failed: {e}");
+            }
+        }
+        println!("{}", result);
         return Ok(());
     }
     let config: Config = serde_json::from_slice(&fs::read("app.json")?)?;
@@ -44,8 +86,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Err(e) => return Err(e.into()),
     };
     let principals = std::env::var("PAYDIRT_PRINCIPALS").unwrap_or_else(|_| "{}".into());
-    let mut db =
-        Database::open(&url, &principals)?.allow_general_writes(config.allow_general_writes);
+    let broker = config.watch.connect(&url).await?;
+    let store = paydirt_store::Store::open(&url, MODEL, POLICIES)?.with_outbox(config.watch.outbox);
+    let mut db = Database::from_store(store, &principals)?
+        .with_broker(broker.clone())
+        .allow_general_writes(config.allow_general_writes);
     if let Ok(path) = std::env::var("PAYDIRT_POLICY_FILE") {
         let refresh = std::env::var("PAYDIRT_POLICY_REFRESH_MS")
             .ok()
@@ -59,6 +104,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
     if let Ok(header) = std::env::var("PAYDIRT_ACCOUNT_HEADER") {
         db = db.with_account_header(header)?;
+    }
+    if let (Some(ms), Some(broker)) = (config.watch.drain_every_ms, broker) {
+        let mut store = paydirt_store::Store::open(&url, MODEL, POLICIES)?;
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_millis(ms));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tick.tick().await;
+                if let Err(e) = store.drain_once(&*broker, 128).await {
+                    eprintln!("outbox drain failed: {e}");
+                }
+            }
+        });
     }
     Server::new(router(db, config.service_name))
         .serve(addr)

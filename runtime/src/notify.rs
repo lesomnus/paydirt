@@ -98,6 +98,7 @@ fn seq(v: &Value) -> &[Value] {
 }
 
 struct Reader<'a> {
+    namespace: &'a str,
     tenant: Value,
     actor: Vec<u8>,
     grants: &'a TopicGrants,
@@ -167,12 +168,20 @@ impl Transaction<'_> {
             t
         };
         let r = Reader {
+            namespace: cfg["goPackage"]
+                .as_str()
+                .unwrap_or(service.split('.').next().unwrap_or(service))
+                .split(';')
+                .next()
+                .unwrap_or(service),
             tenant: value::encoded(&tenant),
             actor,
             grants,
         };
         let scope = Scope::Tenant(tenant);
         let mut db = Transaction {
+            changes: self.changes,
+            outbox: self.outbox,
             namer: self.namer,
             db: self.db,
             model: self.model,
@@ -187,7 +196,7 @@ impl Transaction<'_> {
             "Add" => db.publish(&record, &r, req, &cfg["notificationPayloads"]),
             "Get" => notice(&db.visible_notice(&record, &r, &req["ref"]["id"])?),
             "Mark" => db.mark(&record, &receipts, &r, req),
-            "Read" | "List" | "Count" | "$listen" => {
+            "Read" | "List" | "Count" | "$listen" | "$listen_interest" => {
                 db.inbox(service, method, &record, &receipts, &r, req)
             }
             _ => Err(Fault::unsupported("unknown notification method")),
@@ -331,6 +340,23 @@ impl Transaction<'_> {
         }
         Ok(json!({"items":out,"readerId":actor}))
     }
+    fn notify_route(r: &Reader<'_>, topic: &str, reader: &str) -> Result<String> {
+        let tenant = paydirt::format_id(&value::bytes(&r.tenant)?)
+            .ok_or_else(|| Fault::internal("invalid stored notification tenant"))?;
+        let who = if reader.is_empty() {
+            "00000000-0000-0000-0000-000000000000".to_owned()
+        } else {
+            paydirt::format_id(&value::bytes(&json!(reader))?)
+                .ok_or_else(|| Fault::internal("invalid notification reader"))?
+        };
+        Ok(paydirt::watch::route_key(&[
+            "payday.notify",
+            r.namespace,
+            &tenant,
+            topic,
+            &who,
+        ]))
+    }
     fn bump(&mut self, r: &Reader<'_>, topic: &str, reader: &str) -> Result<()> {
         let mut q = Query::new("");
         let d = self.db.dialect();
@@ -341,6 +367,51 @@ impl Transaction<'_> {
             parts[0], parts[1], parts[2]
         );
         self.db.exec(q)?;
+        let by = "/payday.notify/internal/Invalidate";
+        let nil = vec![0; 16];
+        let tenant = paydirt::format_id(&value::bytes(&r.tenant)?)
+            .ok_or_else(|| Fault::internal("invalid tenant"))?;
+        let reader_id = if reader.is_empty() {
+            nil.clone()
+        } else {
+            value::bytes(&json!(reader))?
+        };
+        let who =
+            paydirt::format_id(&reader_id).ok_or_else(|| Fault::internal("invalid reader"))?;
+        let topic_value = if let Some(name) = topic.strip_prefix("n:") {
+            json!({"Name":name,"Resource":paydirt::format_id(&nil)})
+        } else {
+            json!({"Name":"","Resource":topic.trim_start_matches("r:")})
+        };
+        let signal = value::encoded(
+            &serde_json::to_vec(&json!({"Tenant":tenant,"Topics":[topic_value],"Reader":who}))
+                .map_err(|e| Fault::internal(e.to_string()))?,
+        );
+        let routes = vec![Self::notify_route(r, topic, reader)?];
+        self.changes.push(paydirt::watch::Change {
+            by: by.into(),
+            method: by.into(),
+            key: tenant,
+            routes: Some(routes.clone()),
+            signal: signal.as_str().unwrap().into(),
+            ..Default::default()
+        });
+        if self.outbox {
+            let e = self.owned_entity("OWN_OUTBOX")?.clone();
+            let mut queue = Transaction {
+                db: self.db,
+                model: self.model,
+                policies: self.policies,
+                namer: self.namer,
+                outbox: false,
+                changes: self.changes,
+                scope: &Scope::Internal,
+                frame: None,
+                failed: None,
+            };
+            queue.insert(&e,&json!({"actorId":value::encoded(&nil),"tenantId":r.tenant,"method":by,"by":by,"objectId":r.tenant,
+                "routes":value::encoded(&serde_json::to_vec(&routes).map_err(|e|Fault::internal(e.to_string()))?),"signal":signal}))?;
+        }
         Ok(())
     }
     fn inbox(
@@ -367,6 +438,14 @@ impl Transaction<'_> {
             }
         }
         let actor = value::encoded(&r.actor);
+        if method == "$listen_interest" {
+            let mut routes = Vec::new();
+            for t in topics.keys() {
+                routes.push(Self::notify_route(r, t, "")?);
+                routes.push(Self::notify_route(r, t, actor.as_str().unwrap())?);
+            }
+            return Ok(json!(routes));
+        }
         if method == "$listen" {
             let mut revisions = Vec::new();
             for k in topics.keys() {

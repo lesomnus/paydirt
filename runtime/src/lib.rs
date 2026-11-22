@@ -10,6 +10,7 @@ pub mod meter;
 mod migrate;
 pub mod naming;
 mod notify;
+pub mod outbox;
 mod past;
 mod relations;
 mod session;
@@ -28,11 +29,27 @@ use std::collections::BTreeMap;
 
 pub type Result<T> = std::result::Result<T, Fault>;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Violation {
+    pub field: String,
+    pub description: String,
+}
+impl Violation {
+    pub fn new(field: impl Into<String>, description: impl Into<String>) -> Self {
+        Self {
+            field: field.into(),
+            description: description.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Fault {
     pub code: String,
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub field: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub violations: Vec<Violation>,
 }
 impl std::fmt::Display for Fault {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -40,7 +57,7 @@ impl std::fmt::Display for Fault {
     }
 }
 impl std::error::Error for Fault {}
-macro_rules! faults {($($f:ident=>$code:literal),*)=>{$(pub fn $f(msg:impl Into<String>)->Self{Self{code:$code.into(),message:msg.into(),field:None}})*};}
+macro_rules! faults {($($f:ident=>$code:literal),*)=>{$(pub fn $f(msg:impl Into<String>)->Self{Self{code:$code.into(),message:msg.into(),field:None,violations:Vec::new()}})*};}
 impl Fault {
     faults!(invalid=>"invalid_argument", conflict=>"already_exists",precondition=>"failed_precondition",aborted=>"aborted",internal=>"internal",unsupported=>"unimplemented",denied=>"permission_denied",unauthenticated=>"unauthenticated");
     pub fn field(name: &str, message: &str) -> Self {
@@ -48,13 +65,59 @@ impl Fault {
             code: "invalid_argument".into(),
             message: message.into(),
             field: Some(name.into()),
+            violations: Vec::new(),
         }
+    }
+    pub fn validation(violations: impl IntoIterator<Item = Violation>) -> Self {
+        let violations: Vec<_> = violations.into_iter().collect();
+        if violations.is_empty() {
+            return Self::internal("a request was refused and nothing said why");
+        }
+        let message = violations
+            .iter()
+            .map(|v| {
+                if v.field.is_empty() {
+                    v.description.clone()
+                } else {
+                    format!("{}: {}", v.field, v.description)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        Self {
+            code: "invalid_argument".into(),
+            message,
+            field: None,
+            violations,
+        }
+    }
+    pub fn at(self, parent: &str) -> Self {
+        if self.code != "invalid_argument" && self.code != "unknown" {
+            return self;
+        }
+        let mut violations = self.violations;
+        if violations.is_empty() {
+            violations.push(Violation::new(self.field.unwrap_or_default(), self.message))
+        }
+        for v in &mut violations {
+            if !parent.is_empty() {
+                v.field = if v.field.is_empty() {
+                    parent.to_owned()
+                } else if v.field.starts_with('[') {
+                    format!("{parent}{}", v.field)
+                } else {
+                    format!("{parent}.{}", v.field)
+                };
+            }
+        }
+        Self::validation(violations)
     }
     pub fn missing() -> Self {
         Self {
             code: "not_found".into(),
             message: "row not found".into(),
             field: None,
+            violations: Vec::new(),
         }
     }
 }
@@ -88,6 +151,8 @@ pub struct Policy {
 }
 pub type Policies = BTreeMap<String, Policy>;
 pub struct Store {
+    outbox: bool,
+    committed: Option<paydirt::watch::Event>,
     namer: Box<dyn naming::Namer>,
     db: Connection,
     session: Option<session::Session>,
@@ -109,11 +174,20 @@ impl Store {
         })?;
         Ok(Self {
             namer: Box::new(naming::names),
+            outbox: true,
+            committed: None,
             db,
             session: None,
             model,
             policies,
         })
+    }
+    pub fn with_outbox(mut self, enabled: bool) -> Self {
+        self.outbox = enabled;
+        self
+    }
+    pub fn take_committed(&mut self) -> Option<paydirt::watch::Event> {
+        self.committed.take()
     }
     pub fn with_namer(mut self, namer: impl naming::Namer + 'static) -> Self {
         self.namer = Box::new(namer);
@@ -191,8 +265,12 @@ impl Store {
             return Err(Fault::aborted("another request owns this connection"));
         }
         let (model, policies) = (&self.model, &self.policies);
-        self.db.transaction(|db| {
+        let mut changes = Vec::new();
+        self.committed = None;
+        let result = self.db.transaction(|db| {
             let mut tx = Transaction {
+                changes: &mut changes,
+                outbox: self.outbox,
                 namer: &*self.namer,
                 db,
                 model,
@@ -206,10 +284,19 @@ impl Store {
                 Some(err) => Err(err),
                 None => result,
             }
-        })
+        })?;
+        if !changes.is_empty() {
+            self.committed = Some(paydirt::watch::Event {
+                changes,
+                ..Default::default()
+            });
+        }
+        Ok(result)
     }
 }
 pub struct Transaction<'a> {
+    changes: &'a mut Vec<paydirt::watch::Change>,
+    outbox: bool,
     namer: &'a dyn naming::Namer,
     db: &'a mut dyn Driver,
     model: &'a Model,
