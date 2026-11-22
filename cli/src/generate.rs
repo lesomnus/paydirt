@@ -1,4 +1,4 @@
-use crate::Result;
+use crate::{Result, payday};
 use std::{
     collections::BTreeMap,
     fs,
@@ -9,7 +9,7 @@ use std::{
 const MARKER: &str = ".paydirt-generated";
 const STAMP: &[u8] = b"Owned by paydirt gen. Edit the source files in proto/ instead.\n";
 
-fn files(root: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>> {
+pub(crate) fn files(root: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>> {
     let mut out = BTreeMap::new();
     fn visit(root: &Path, dir: &Path, out: &mut BTreeMap<PathBuf, Vec<u8>>) -> Result<()> {
         for entry in fs::read_dir(dir)? {
@@ -30,7 +30,7 @@ fn files(root: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>> {
     Ok(out)
 }
 
-fn write_file(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn write_file(path: &Path, bytes: &[u8]) -> Result<()> {
     fs::create_dir_all(path.parent().unwrap())?;
     fs::write(path, bytes)?;
     Ok(())
@@ -56,16 +56,39 @@ fn build(root: &Path, work: &Path) -> Result<()> {
             fs::copy(src, work.join(name))?;
         }
     }
+    let schema = payday::Schema::read(root)?;
+    let mut overlays = std::collections::BTreeSet::new();
     for (name, bytes) in files(&root.join("proto"))? {
-        if name.extension().is_some_and(|ext| ext == "proto") {
+        if name.extension().is_none_or(|ext| ext != "proto") {
+            continue;
+        }
+        if let Ok(rel) = name.strip_prefix("ext") {
+            if schema.is_none() {
+                return Err("schema overlays require paydirt.schema.json".into());
+            }
+            overlays.insert(rel.to_owned());
+            write_file(&work.join("ext").join(rel), &bytes)?;
+        } else {
             write_file(&work.join("proto").join(name), &bytes)?;
         }
     }
-    buf(work, include_str!("../templates/contracts.yaml"))?;
+    let mut template = include_str!("../templates/contracts.yaml").to_owned();
+    if let Some(schema) = &schema {
+        schema.entities(work, &mut overlays)?;
+        template.push_str("  - local: protoc-gen-pd\n    out: payday-additions\n    strategy: all\n    opt: [stage=proto]\n");
+    }
+    buf(work, &template)?;
+    if schema.is_some() {
+        payday::contracts(work, &mut overlays)?;
+    }
     let contracts = work.join("generated/proto");
     fs::create_dir_all(&contracts)?;
     for (name, bytes) in files(&contracts)? {
         let dest = work.join("proto").join(&name);
+        // The schema pass already installed the owned entities and option definitions.
+        if !name.to_string_lossy().ends_with("_svc.g.proto") {
+            continue;
+        }
         if dest.exists() {
             return Err(format!(
                 "generated contract collides with source: {}",

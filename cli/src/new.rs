@@ -12,6 +12,10 @@ const TEMPLATE: &[(&str, &str)] = &[
         "proto/app/setting.proto",
         include_str!("../templates/app/proto/app/setting.proto"),
     ),
+    (
+        "paydirt.schema.json",
+        include_str!("../templates/app/paydirt.schema.json"),
+    ),
     ("buf.yaml", include_str!("../templates/app/buf.yaml")),
     ("buf.lock", include_str!("../templates/app/buf.lock")),
     ("src/main.rs", include_str!("../templates/app/src/main.rs")),

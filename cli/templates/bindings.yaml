@@ -1,6 +1,7 @@
 version: v2
 plugins:
   - local: protoc-gen-buffa
+    strategy: all
     out: generated/messages
     include_imports: true
     opt: [json=true, views=true]
@@ -9,6 +10,7 @@ plugins:
     include_imports: true
     strategy: all
   - local: protoc-gen-connect-rust
+    strategy: all
     out: generated/services
     opt: [buffa_module=crate::proto, gate_client_feature]
   - local: protoc-gen-buffa-packaging

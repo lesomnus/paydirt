@@ -18,7 +18,7 @@ Install the CLI with `cargo install --path cli --locked`. Generation uses Buf 1.
 
 Create a standalone project with `paydirt new inventory` (or `paydirt new inventory .` in an empty directory). In the project run `cargo run`. Run `node client.mjs` in another terminal to query the service setting over Connect. The initial handler reads the deployment name from `app.json`. The server and its assembly are application-owned Rust code.
 
-Place the app's entity declarations in `proto/` with a v2 `buf.yaml` at the project root and pin the dependencies in `buf.lock`. Run `paydirt gen` there or pass the project directory. The CLI first generates standard ORM service contracts, then compiles messages, services and Rust lookup helpers from those contracts. It stages all outputs before replacing its owned `generated/` tree. Use `paydirt gen --check` in CI. The Robot interoperability fixture below still uses its original Buf template.
+Place the app's entity declarations in `proto/` with a v2 `buf.yaml` at the project root and pin the dependencies in `buf.lock`. Run `paydirt gen` there or pass the project directory. The CLI first generates standard ORM service contracts, then compiles messages, services and Rust lookup helpers from those contracts. It stages all outputs before replacing its owned `generated/` tree. Use `paydirt gen --check` in CI. A Payday app also has `paydirt.schema.json` naming the app's protobuf and Go package. The CLI copies the pinned framework entities into the app package, applies app options and entity overlays, runs Payday's proto plugin for List, Watch and computed resources, and merges service overlays from `proto/ext/`. The Rust runtime implements a subset of these generated contracts. CI compares all 44 app/shared file descriptors of upstream's reference app, including custom field options, with the output generated from the same source declarations.
 
 ## Browser sandbox
 
@@ -52,4 +52,4 @@ npm test
 
 The test runs the same suite against native HTTP and the browser MessagePort. It covers cross-tenant access, duplicate-key rollback, a subscription that follows a renamed robot through erasure, cancellation, and cursor pagination. For SQLite it also reloads the page, recreates both Workers, and reads the same row by ID. The native executable accepts `PAYDIRT_LISTEN`, `DATABASE_URL` and `PAYDIRT_PRINCIPALS` (a JSON map of bearer tokens to hex tenant IDs).
 
-To regenerate Rust bindings, run `buf generate` with `protoc-gen-buffa`, `protoc-gen-buffa-packaging`, `protoc-gen-connect-rust` and `protoc-gen-orm-rust` on the path. The upstream TypeScript fixture can also be extracted from a local Payday checkout with `PAYDAY_CHECKOUT=/path/to/payday scripts/upstream.sh`.
+To regenerate this repository's fixture, run `paydirt gen` at the root. The TypeScript fixture and upstream contract inputs can also be extracted from a local Payday checkout with `PAYDAY_CHECKOUT=/path/to/payday scripts/upstream.sh`.

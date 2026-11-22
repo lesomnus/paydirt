@@ -1,11 +1,11 @@
 #[rustfmt::skip]
-#[path = "generated/messages/mod.rs"]
+#[path = "../../generated/messages/mod.rs"]
 pub mod proto;
 #[rustfmt::skip]
-#[path = "generated/services/mod.rs"]
+#[path = "../../generated/services/mod.rs"]
 pub mod services;
 pub mod orm {
-    include!("generated/orm/app/robot.orm.rs");
+    include!("../../generated/orm/app/robot_svc.g.orm.rs");
 }
 mod backend;
 pub use backend::Backend;
@@ -181,6 +181,11 @@ impl Robots {
         let mut rows = Vec::with_capacity(items.len());
         for item in items {
             supported(&item.__buffa_unknown_fields)?;
+            if item.cell.is_set() || item.date_created.is_set() {
+                return Err(ConnectError::unimplemented(
+                    "unsupported Robot creation field",
+                ));
+            }
             check_tenant(&item.tenant, tenant)?;
             let id = item.id.unwrap_or_else(|| paydirt::mint(7).to_vec());
             if !paydirt::has_domain(&id, 7) {
@@ -281,6 +286,9 @@ impl services::app::RobotService for Robots {
         let selected = req.select.as_option();
         if let Some(s) = selected {
             supported(&s.__buffa_unknown_fields)?;
+            if s.cell.is_set() || s.tenant.is_set() {
+                return Err(ConnectError::unimplemented("nested Robot selection"));
+            }
         }
         let mut rows = query(
             &self.backend,
@@ -291,12 +299,17 @@ impl services::app::RobotService for Robots {
         .rows;
         let mut value = robot(rows.pop().ok_or_else(missing)?, &tenant);
         if let Some(s) = selected {
-            if !s.alias.unwrap_or(false) {
+            let all = s.all.unwrap_or(false);
+            if !all && !s.alias.unwrap_or(false) {
                 value.alias.clear();
             }
             value.tenant = Default::default();
-            value.date_created = Default::default();
-            value.date_updated = Default::default();
+            if !all && !s.date_created.unwrap_or(false) {
+                value.date_created = Default::default();
+            }
+            if !all && !s.date_updated.unwrap_or(false) {
+                value.date_updated = Default::default();
+            }
         }
         Response::ok(value)
     }
@@ -308,6 +321,15 @@ impl services::app::RobotService for Robots {
         let tenant = self.tenant(&ctx)?;
         let req = req.to_owned_message();
         supported(&req.__buffa_unknown_fields)?;
+        if req.cell.is_set()
+            || req.cell_null.is_some()
+            || req.date_updated.is_set()
+            || req.date_updated_force.is_some()
+        {
+            return Err(ConnectError::unimplemented(
+                "only alias patches are supported",
+            ));
+        }
         let alias = req
             .alias
             .ok_or_else(|| ConnectError::invalid_argument("an alias patch is required"))?;
@@ -322,6 +344,22 @@ impl services::app::RobotService for Robots {
         )
         .await?;
         Response::ok(robot(result.rows.pop().ok_or_else(missing)?, &tenant))
+    }
+    async fn apply(
+        &self,
+        _: RequestContext,
+        _: ServiceRequest<'_, RobotApplyRequest>,
+    ) -> ServiceResult<Robot> {
+        Err(ConnectError::unimplemented("patch documents"))
+    }
+    async fn r#move(
+        &self,
+        _: RequestContext,
+        _: ServiceRequest<'_, RobotMoveRequest>,
+    ) -> ServiceResult<Robot> {
+        Err(ConnectError::unimplemented(
+            "Move requires an application layer",
+        ))
     }
     async fn erase(
         &self,
