@@ -836,3 +836,156 @@ fn original_manifest_and_access_rows_use_the_app_declared_domains() {
         assert_eq!(manifest[0].labels["Kind"], "access");
     });
 }
+
+#[test]
+fn original_master_seals_rows_and_departure_destroys_only_that_tenants_key() {
+    use age::x25519;
+    use paydirt_store::{
+        archive_files::Archive,
+        audit_content::{Content, Options},
+        tenant_keys::TenantKeys,
+    };
+    use std::collections::BTreeSet;
+    backends(|fixture, url, _| {
+        let dir = tempfile::tempdir().unwrap();
+        let master = x25519::Identity::generate();
+        let stranger = x25519::Identity::generate();
+        let path = dir.path().join("archive");
+        let keys = dir.path().join("keys");
+        let make = |ids| {
+            Archive::open(&path, &[81; 32])
+                .unwrap()
+                .with_tenant_keys(TenantKeys::new(&keys, vec![master.to_public()], ids).unwrap())
+                .unwrap()
+        };
+        let writer = make(vec![]);
+        let reader = make(vec![master.clone()]);
+        let wrong = make(vec![stranger]);
+        let mut db = fixture
+            .open(url, &fixture.policies, false)
+            .with_trail(
+                Options {
+                    default: Content::Value,
+                    ..Default::default()
+                },
+                &fixture.descriptors,
+                &fixture.schema,
+            )
+            .unwrap();
+        let left = provision(&mut db);
+        let right = paydirt::mint(1);
+        db.seed(vec![(
+            "app.Tenant".into(),
+            json!({"id":STANDARD.encode(right),"alias":"other"}),
+        )])
+        .unwrap();
+        let manage = |db: &mut Store, owner: &[u8; 16], mut arg: Value| {
+            arg["tenant"] = json!(paydirt::format_id(owner).unwrap());
+            db.manage_trail(&writer, None, serde_json::from_value(arg).unwrap())
+        };
+        for (owner, alias) in [(left, "private-left"), (right, "private-right")] {
+            write(
+                &mut db,
+                &owner,
+                "app.Robot",
+                "Add",
+                json!({"tenant":{"id":STANDARD.encode(owner)},"alias":alias,"keeper":alias}),
+            );
+            manage(
+                &mut db,
+                &owner,
+                json!({"action":"policy","policy":{"by":{"robot":{"retain_ms":0}}}}),
+            )
+            .unwrap();
+        }
+        let before = db.read_tenant_trail(&reader, left).unwrap();
+        assert_eq!(before.len(), 1);
+        assert!(!before[0]["value"].as_str().unwrap().is_empty());
+        for owner in [left, right] {
+            assert_eq!(
+                manage(&mut db, &owner, json!({"action":"collect"}))
+                    .unwrap()
+                    .archived
+                    .len(),
+                1
+            );
+        }
+        let opened = db.read_tenant_trail(&reader, left).unwrap();
+        assert_eq!(before, opened);
+        assert!(
+            db.read_tenant_trail(&writer, left)
+                .unwrap_err()
+                .message
+                .contains("sealed")
+        );
+        assert!(db.read_tenant_trail(&wrong, left).is_err());
+        let captured = db
+            .transaction(&Scope::Internal, |tx| {
+                let entries = tx.archive_records()?;
+                let row = entries
+                    .iter()
+                    .find(|e| e.namespace == paydirt::format_id(&left).unwrap())
+                    .unwrap();
+                let wire = writer.read(row.digest.strip_prefix("sha256:").unwrap())?;
+                Ok(serde_json::from_slice::<Value>(&wire).unwrap())
+            })
+            .unwrap();
+        assert!(captured.get("value").is_none() && captured.get("patch").is_none());
+        assert!(
+            STANDARD
+                .decode(captured["sealed"].as_str().unwrap())
+                .unwrap()
+                .starts_with(b"age-encryption.org/v1")
+        );
+        let tenant = paydirt::format_id(&left).unwrap();
+        let owners = BTreeSet::from([tenant.clone()]);
+        let master_reader =
+            || TenantKeys::new(&keys, vec![master.to_public()], vec![master.clone()]).unwrap();
+        assert_eq!(
+            master_reader().open_row(captured.clone(), &owners).unwrap(),
+            before[0]
+        );
+        manage(
+            &mut db,
+            &left,
+            json!({"action":"policy","policy":{"held":["*"]}}),
+        )
+        .unwrap();
+        assert!(manage(&mut db, &left, json!({"action":"purge"})).is_err());
+        assert!(master_reader().open_row(captured.clone(), &owners).is_ok());
+        manage(
+            &mut db,
+            &left,
+            json!({"action":"policy","policy":{"by":{"robot":{"retain_ms":0}}}}),
+        )
+        .unwrap();
+        let preview = manage(&mut db, &left, json!({"action":"purge","dry_run":true})).unwrap();
+        assert_eq!(preview.keys, 1);
+        assert!(keys.join(&tenant).join("recipient.json").exists());
+        assert_eq!(
+            manage(&mut db, &left, json!({"action":"purge"}))
+                .unwrap()
+                .keys,
+            1
+        );
+        assert!(
+            master_reader()
+                .open_row(captured.clone(), &owners)
+                .unwrap_err()
+                .message
+                .contains("gone")
+        );
+        assert!(db.read_tenant_trail(&reader, left).unwrap().is_empty());
+        assert_eq!(db.read_tenant_trail(&reader, right).unwrap().len(), 1);
+        write(
+            &mut db,
+            &left,
+            "app.Robot",
+            "Add",
+            json!({"tenant":{"id":STANDARD.encode(left)},"alias":"later"}),
+        );
+        manage(&mut db, &left, json!({"action":"collect"})).unwrap();
+        assert_eq!(db.read_tenant_trail(&reader, left).unwrap().len(), 1);
+        assert!(master_reader().open_row(captured, &owners).is_err());
+    });
+}

@@ -324,7 +324,7 @@ trail_test.go	906	TestTheManifestIsKeptInTheAppsOwnTable	verified	store/sqlite+p
 trail_test.go	983	TestTheManifestIsSignedAndChainedInTheAppsOwnTable	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L675	-
 trail_test.go	1069	TestADatabaseRestoredFromBeforeTheLatestCheckpointIsAcceptedInTheAppsOwnTable	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L636	-
 trail_test.go	1193	TestTheGeneratedManifestWritesARowWholeWithItsSignature	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L725	-
-trail_test.go	1269	TestWhatTheTrailSaysIsSealedThroughTheAppsOwnStore	tracked			98
+trail_test.go	1269	TestWhatTheTrailSaysIsSealedThroughTheAppsOwnStore	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L913	-
 trail_test.go	1338	TestAnErasureIsOwedInItsTransaction	verified	store/sqlite+postgres	runtime/tests/trail_retention.rs#L352	-
 uuid_contract_test.go	23	TestUUIDTypesReachGeneratedRequestsAndCLI	tracked			103
 uuid_contract_test.go	72	TestUUIDFilterMetadataTravelsTheStack	tracked			103

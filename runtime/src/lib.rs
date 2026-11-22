@@ -37,6 +37,8 @@ pub mod secrets;
 mod seen;
 mod session;
 mod tenancy;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod tenant_keys;
 mod trail;
 pub mod trail_page;
 mod value;
