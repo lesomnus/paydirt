@@ -7,10 +7,10 @@ trap 'rm -rf "$work"' EXIT
 "$bin" new clinic "$work/app"
 cd "$work/app"
 "$bin" entity add --global Invoice
-"$bin" entity list | rg 'app.Invoice[[:space:]]+global'
+"$bin" entity list | grep -E 'app.Invoice[[:space:]]+global'
 "$bin" gen
-"$bin" buf --version | rg '^[0-9]+\.'
-"$bin" buf --directory . ls-files | rg 'app/invoice.proto'
+"$bin" buf --version | grep -E '^[0-9]+\.'
+"$bin" buf --directory . ls-files | grep -E 'app/invoice.proto'
 mkdir ts
 cat >ts/package.json <<'JSON'
 {"name":"clinic-page","dependencies":{"@bufbuild/protobuf":"^2.3.0","special":"1.2.3"}}
@@ -22,24 +22,24 @@ p=Path('Cargo.toml')
 s=re.sub(r'(github.com/lesomnus/paydirt",rev=")[0-9a-f]+',lambda m:m[1]+'a'*40,p.read_text())
 p.write_text(s+'\n# application-owned manifest comment\n')
 PY
-"$bin" versions | rg '@bufbuild/protobuf.*2.12.1'
+"$bin" versions | grep -E '@bufbuild/protobuf.*2.12.1'
 sha256sum src/*.rs >"$work/sources"
 sha256sum Cargo.toml ts/package.json >"$work/manifest"
-"$bin" upgrade --dry-run | rg 'update.*Cargo.toml'
+"$bin" upgrade --dry-run | grep -E 'update.*Cargo.toml'
 sha256sum -c "$work/manifest"
 "$bin" upgrade
-rg -q 'application-owned manifest comment' Cargo.toml
+grep -Eq 'application-owned manifest comment' Cargo.toml
 python3 - <<'PY'
 import json
 v=json.load(open('ts/package.json'))['dependencies']
 assert v=={'@bufbuild/protobuf':'^2.16.0','special':'1.2.3'}, v
 PY
 sha256sum -c "$work/sources"
-"$bin" upgrade --dry-run | rg 'current'
+"$bin" upgrade --dry-run | grep -E 'current'
 # A removed option and an unwired drainer are distinct from ordinary generation drift.
 echo 'message Old { string note = 1 [(payday.field) = {impersonal: true}]; }' >>proto/app/invoice.proto
 if "$bin" doctor >"$work/diag" 2>&1; then exit 1; fi
-rg -q 'obsolete declaration.*personal: false' "$work/diag"
+grep -Eq 'obsolete declaration.*personal: false' "$work/diag"
 sed -i '$d' proto/app/invoice.proto
 python3 - <<'PY'
 import json
@@ -57,5 +57,5 @@ message Visit {
 PROTO
 "$bin" gen
 if "$bin" doctor >"$work/diag" 2>&1; then exit 1; fi
-rg -q 'schema option: app.Visit.purpose' "$work/diag"
-rg -q 'wiring: draining requires' "$work/diag"
+grep -Eq 'schema option: app.Visit.purpose' "$work/diag"
+grep -Eq 'wiring: draining requires' "$work/diag"
