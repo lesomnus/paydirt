@@ -1,5 +1,8 @@
 name: cli
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
 permissions:
   contents: read
 jobs:
@@ -15,6 +18,7 @@ jobs:
       - uses: bufbuild/buf-setup-action@v1
         with:
           version: '1.72.0'
+          github_token: ${{ github.token }}
       - name: Install code generators
         run: |
           scripts/install-codegen-linux.sh "$RUNNER_TEMP/paydirt-tools"
