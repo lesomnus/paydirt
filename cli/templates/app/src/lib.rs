@@ -1,0 +1,32 @@
+mod core;
+#[path = "../generated/messages/mod.rs"]
+pub mod proto;
+#[path = "../generated/services/mod.rs"]
+pub mod services;
+mod sink;
+pub mod transport;
+pub mod storage {
+    include!("../generated/storage/sinks.rs");
+}
+
+pub fn router(database: transport::Database, name: String) -> connectrpc::Router {
+    struct App(String);
+    impl storage::Layers for App {
+        fn app_setting(
+            &self,
+            next: impl services::app::SettingService,
+        ) -> impl services::app::SettingService {
+            let settings = services::app::SettingServiceOverlay {
+                next,
+                layer: sink::Settings {
+                    name: self.0.clone(),
+                },
+            };
+            services::app::SettingServiceOverlay {
+                next: settings,
+                layer: core::Core,
+            }
+        }
+    }
+    storage::mount(connectrpc::Router::new(), database, &App(name))
+}

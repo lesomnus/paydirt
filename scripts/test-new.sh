@@ -10,6 +10,7 @@ cleanup() {
 }
 trap cleanup EXIT
 cd "$work"
+export DATABASE_URL="$work/sample.sqlite3"
 mkdir app
 (cd app && "$bin" new sample-app .)
 cd app
