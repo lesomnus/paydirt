@@ -3,7 +3,9 @@ mod account;
 mod apply;
 mod crud;
 mod driver;
+pub mod entitle;
 mod list;
+pub mod meter;
 mod migrate;
 mod notify;
 mod past;
@@ -97,6 +99,65 @@ impl Store {
             session: None,
             model,
             policies,
+        })
+    }
+    /// Host-only operations used by the application executable and sandbox bootstrap.
+    pub fn operator(&mut self, call: Call) -> Result<Value> {
+        let p = self.policies.get(&call.entity);
+        if p.is_some_and(|p| p.entity["own"] == "OWN_TENANT") && call.method == "Measure" {
+            let tenant = value::bytes(&call.request["id"])?;
+            return serde_json::to_value(self.measure(&tenant)?)
+                .map_err(|e| Fault::internal(e.to_string()));
+        }
+        if p.is_some_and(|p| p.entity["own"] == "OWN_ENTITLEMENT") {
+            match call.method.as_str() {
+                "Follow" => {
+                    let events = call.request["events"]
+                        .as_array()
+                        .ok_or_else(|| Fault::invalid("grant events required"))?;
+                    let mut pages = call.request["pages"].as_array().into_iter().flatten();
+                    self.follow_grants(events.iter().cloned().map(Ok), |_| {
+                        pages
+                            .next()
+                            .cloned()
+                            .ok_or_else(|| Fault::precondition("incomplete grant list"))
+                    })?;
+                    return Ok(Value::Null);
+                }
+                "Sync" => {
+                    let tenant = call.request.get("tenantId").map(value::bytes).transpose()?;
+                    let mut pages = call.request["pages"].as_array().into_iter().flatten();
+                    let report = self.reconcile_grants(tenant.as_deref(), |_| {
+                        pages
+                            .next()
+                            .cloned()
+                            .ok_or_else(|| Fault::precondition("incomplete grant list"))
+                    })?;
+                    return serde_json::to_value(report)
+                        .map_err(|e| Fault::internal(e.to_string()));
+                }
+                _ => {}
+            }
+        }
+        self.call(&Scope::Internal, call)
+    }
+    pub fn seed(&mut self, rows: Vec<(String, Value)>) -> Result<()> {
+        self.transaction(&Scope::Internal, |tx| {
+            for (name, row) in rows {
+                let e = tx.model.entity(&name).map_err(Fault::invalid)?;
+                let key = &e.key().map_err(Fault::invalid)?.json;
+                let id = row
+                    .get(key)
+                    .ok_or_else(|| Fault::invalid("seed requires a stable key"))?;
+                match tx.lookup(e, &serde_json::json!({key:id}), true) {
+                    Ok(_) => {}
+                    Err(f) if f.code == "not_found" => {
+                        tx.insert(e, &row)?;
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            Ok(())
         })
     }
     pub fn call(&mut self, scope: &Scope, call: Call) -> Result<Value> {
