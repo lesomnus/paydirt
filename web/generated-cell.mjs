@@ -86,6 +86,13 @@ try {
         const holder=createClient(createFileRegistry(descriptors).getService("app.HolderService"),createConnectTransport({baseUrl,useBinaryFormat:true}));
         await accountCases(holder,typed,tenantNames);
         await billingCases(app,process.env.CELL_PROJECT,env,typed,primary,other);
+        const {violations} = await sandbox.ssrLoadModule("/upstream/ts/src/pderr/index.ts");
+        await assert.rejects(typed.renamePair({},own),error=>{
+          assert.deepEqual(violations(error).map(v=>[v.field,v.why]),[
+            ["pair.first_alias","first name required"],["pair.second_alias","second name required"],
+          ]);
+          return true;
+        });
         const readings = createFileRegistry(descriptors).getService("app.ComputedReadingService");
         await checkReadings(createClient(readings, createConnectTransport({baseUrl,useBinaryFormat:true})));
         await runPair(typed,own,primary.id);

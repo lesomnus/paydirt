@@ -160,19 +160,27 @@ fn tokens(config: &str) -> Result<HashMap<String, Principal>, String> {
         .collect()
 }
 
-pub fn error(f: Fault) -> ConnectError {
-    if let Some(field) = &f.field {
+pub fn error(mut f: Fault) -> ConnectError {
+    if f.code == "invalid_argument" && (!f.violations.is_empty() || f.field.is_some()) {
         // google.rpc.BadRequest.field_violations with FieldViolation.field and description.
         fn entry(tag: u8, data: &[u8], out: &mut Vec<u8>) {
             out.push(tag);
             buffa::encoding::encode_varint(data.len() as u64, out);
             out.extend_from_slice(data);
         }
-        let mut violation = Vec::new();
-        entry(10, field.as_bytes(), &mut violation);
-        entry(18, f.message.as_bytes(), &mut violation);
+        if f.violations.is_empty() {
+            f.violations.push(paydirt_store::Violation::new(
+                f.field.take().unwrap_or_default(),
+                f.message.clone(),
+            ));
+        }
         let mut bytes = Vec::new();
-        entry(10, &violation, &mut bytes);
+        for violation in f.violations {
+            let mut detail = Vec::new();
+            entry(10, violation.field.as_bytes(), &mut detail);
+            entry(18, violation.description.as_bytes(), &mut detail);
+            entry(10, &detail, &mut bytes);
+        }
         use base64::Engine;
         return ConnectError::invalid_argument(f.message).with_detail(connectrpc::ErrorDetail {
             type_url: "google.rpc.BadRequest".into(),
