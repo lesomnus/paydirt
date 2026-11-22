@@ -14,3 +14,9 @@ The native server creates its tables in `paydirt.sqlite3` by default. Set `DATAB
 Run `paydirt sandbox init`, install Rust's `wasm32-unknown-unknown` target, Clang and `wasm-bindgen-cli` 0.2.130. In `sandbox/`, run `npm ci`, `npm run build:wasm`, and `npm run dev`. The page calls the same app router over a MessagePort. The database Worker owns SQLite and retains rows in OPFS across page reloads.
 
 A web client can import `openSandbox(principals)` from `sandbox/client.js`, pass `box.link.transport` to its generated Connect client, then call `box.close()` on shutdown. Supply a map of opaque bearer tokens to hex tenant IDs to provision the local sandbox. The link implementation and its Apache license come from [Payday](https://github.com/lesomnus/payday/blob/53acc135/ts/src/sandbox/link.ts).
+
+## Entity commands
+
+Run `paydirt entity add --watch Gauge .`, edit the resulting entity, and run `paydirt gen`. The new declaration supplies the service, table and application commands. `paydirt doctor` checks generated files and compiles the application entry points. Two consecutive additions choose different domains even before generation.
+
+Run `cargo run -- gauge --help` for the verbs its schema declares. The lowercase commands connect to `PAYDIRT_URL` and use `PAYDIRT_TOKEN` as their bearer credential. For example, `cargo run -- gauge ls --size 10 -o json` reads one page. Requests can also be JSON arguments or read from stdin with `-`. Use `-o protojson` for wire-format identifiers and `-o name` for an identifier per line. The transport closes general Patch and Apply by default. A deployment that serves them opts in with `"allow_general_writes": true` in app.json.

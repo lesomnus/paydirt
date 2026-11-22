@@ -27,6 +27,10 @@ const TEMPLATE: &[(&str, &str)] = &[
         "src/transport.rs",
         include_str!("../templates/app/src/transport.rs"),
     ),
+    (
+        "src/operator.rs",
+        include_str!("../templates/app/src/operator.rs"),
+    ),
     ("src/main.rs", include_str!("../templates/app/src/main.rs")),
     ("src/sink.rs", include_str!("../templates/app/src/sink.rs")),
     ("src/core.rs", include_str!("../templates/app/src/core.rs")),

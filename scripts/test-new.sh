@@ -87,6 +87,12 @@ const [error, pending] = await call("Pending");
 assert.equal(error, 501);
 assert.equal(pending.code, "unimplemented");
 JS
+"$bin" entity add --watch Gauge .
+"$bin" entity add --global --file gauge.proto Station .
+if "$bin" entity add Gauge .; then exit 1; fi
+if "$bin" doctor .; then exit 1; fi
+"$bin" gen .
+"$bin" doctor .
 cd ..
 if "$bin" new '../outside'; then exit 1; fi
 test ! -e outside

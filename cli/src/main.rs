@@ -1,3 +1,4 @@
+mod entity;
 mod generate;
 mod layers;
 mod new;
@@ -8,10 +9,13 @@ mod sinks;
 use std::{env, path::PathBuf, process::ExitCode};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
-const HELP: &str = "Usage: paydirt new NAME [DIRECTORY]\n       paydirt gen [--check] [DIRECTORY]\n       paydirt sandbox init [DIRECTORY]";
+const HELP: &str = "Usage: paydirt new NAME [DIRECTORY]\n       paydirt gen [--check] [DIRECTORY]\n       paydirt sandbox init [DIRECTORY]\n       paydirt doctor [DIRECTORY]\n       paydirt entity add [--tenanted|--global] [--watch] [--file FILE] NAME [DIRECTORY]";
 
 fn run(args: &[String]) -> Result<()> {
     match args {
+        [cmd, sub, rest @ ..] if cmd == "entity" && sub == "add" => entity::add(rest),
+        [cmd] if cmd == "doctor" => entity::doctor(std::path::Path::new(".")),
+        [cmd, dir] if cmd == "doctor" => entity::doctor(std::path::Path::new(dir)),
         [cmd, action] if cmd == "sandbox" && action == "init" => {
             sandbox::init(std::path::Path::new("."))
         }

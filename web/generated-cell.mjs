@@ -6,6 +6,7 @@ import { createServer } from "vite";
 import { createClient,Code } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 
+import {operatorScenario} from "./generated-operator.mjs";
 import { exerciseTenancy } from "./generated-tenancy.mjs";
 import {queryScenario} from "./generated-query.js";
 import {goReference} from "./compare-queries.mjs";
@@ -68,6 +69,7 @@ try {
         if(reference){assert.deepEqual(report,reference);console.log(engine,"matches the Go reference for List and Watch",report);}
         await exerciseMove(robots,cell,own,foreign,opts("represented"),opts("reader"),primary.id,other.id);
         await exerciseTenancy(services,createConnectTransport({baseUrl,useBinaryFormat:true}),primary,other,allowedSet);
+        await operatorScenario(app,process.env.CELL_PROJECT,{...env,PAYDIRT_URL:baseUrl,PAYDIRT_TOKEN:primary.token},primary);
         console.log(engine,"served the user-written Move and enforced the dispatched method grant");
       }
       console.log(engine,"served Cell CRUD and enforced tenant scope using only the app entity declaration");
