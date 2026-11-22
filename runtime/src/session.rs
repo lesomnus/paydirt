@@ -79,6 +79,12 @@ pub enum Packet {
         id: String,
         commit: bool,
     },
+    ObservedNames {
+        observation: crate::access::Observation,
+        named: crate::access::Subjects,
+        refused: crate::access::Subjects,
+        buffered: bool,
+    },
     RefusedWrites {
         observation: crate::access::Observation,
         subjects: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
@@ -136,6 +142,12 @@ impl Store {
                     Err(fault) => serde_json::json!({"fault":fault,"refused":refused}),
                 })
             }
+            Packet::ObservedNames {
+                observation,
+                named,
+                refused,
+                buffered,
+            } => self.observe_named(observation, buffered, refused, named),
             Packet::RefusedWrites {
                 observation,
                 subjects,
@@ -290,10 +302,14 @@ impl Store {
         if let Some(e) = &session.failed {
             return Err(e.clone());
         }
+        let call_method_children = call.method == "$event_children";
         let beginning = call.method == "$begin_event";
         let reference = match call.method.as_str() {
             "$begin_event" | "$event" => call.request["cause"].as_str(),
-            "$event_facts" => call.request["event"].as_str(),
+            "$event_facts" | "$event_children" | "$correct_fact" | "$correct_event" => {
+                Some(call.request["event"].as_str().unwrap_or(""))
+            }
+
             _ => None,
         };
         if reference.is_some_and(|key| !session.operations.contains(key)) {
@@ -419,6 +435,18 @@ impl Store {
             && let Some(id) = row["id"].as_str()
         {
             session.operations.insert(id.into());
+        }
+        if call_method_children && let Ok(children) = &result {
+            for child in children
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|r| r["done"] != true)
+            {
+                if let Some(id) = child["id"].as_str() {
+                    session.operations.insert(id.to_owned());
+                }
+            }
         }
         session.failed = result.as_ref().err().cloned().or(tx.failed);
         result

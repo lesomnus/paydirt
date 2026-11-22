@@ -122,7 +122,18 @@ try {
         const report=await queryScenario(robots,primary.id,own);
         const owned=name=>createClient(createFileRegistry(descriptors).getService("app."+name+"Service"),createConnectTransport({baseUrl,useBinaryFormat:true}));
         await notificationCases(owned("Notification"),owned("NotificationAccount"),primary.id,actor,opts);
-        await operationCases(typed,owned("Event"),own,foreign,primary.id);
+        const bytesSql=id=>engine==="postgres" ? `decode('${Buffer.from(id).toString("hex")}','hex')` : `X'${Buffer.from(id).toString("hex")}'`;
+        const legacySql=sql=>engine==="postgres"?execFileSync("psql",[url,"-Xq","-v","ON_ERROR_STOP=1","-c",sql]):execFileSync("python3",["-c","import sqlite3,sys;db=sqlite3.connect(sys.argv[1]); db.executescript(sys.argv[2]); db.commit()",url,sql]);
+        const alice=Buffer.from(membership.seeds[0].row.id,"base64");
+        const legacy={
+          load(source,withWords,withoutWords){
+            for(const [key,words] of [[withWords,"{actor} oiled arm-01"],[withoutWords,""]]){
+              legacySql(`INSERT INTO "pd_app__Event"(f1,f2,f8,f9,f10,f11,f13,f15,f16,f17) SELECT ${bytesSql(key)},f2,'robot.oil',${bytesSql(alice)},f10,'',f13,f15,f16,'${words}' FROM "pd_app__Event" WHERE f1=${bytesSql(source)}`);
+            }
+          },
+          rename(label){legacySql(`UPDATE "pd_app__Holder" SET f4='${label}' WHERE f1=${bytesSql(alice)}`)},
+        };
+        await operationCases(typed,owned("Event"),owned("Fact"),owned("Access"),own,foreign,primary.id,legacy);
         report.past=await pastScenario({robot:typed,cell,event:owned("Event"),fact:owned("Fact")},primary.id,own);
         if(reference){assert.deepEqual(report,reference);console.log(engine,"matches the Go reference for List and Watch",report);}
         await exerciseMove(robots,cell,own,foreign,opts("represented"),opts("reader"),primary.id,other.id);

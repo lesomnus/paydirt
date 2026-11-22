@@ -8,7 +8,7 @@ repo = Path(__file__).resolve().parents[1]
 app = Path(sys.argv[1])
 proto = repo / "web/upstream/internal/apptest/proto"
 (app / "proto/app/cell.proto").unlink(missing_ok=True)
-for rel in ["app/computed_reading.proto", "ext/app/computed_reading_svc.ext.proto", "shared/thing.proto", "app/robot.proto", "ext/app/robot_svc.ext.proto"]:
+for rel in ["app/computed_reading.proto", "ext/app/computed_reading_svc.ext.proto", "shared/thing.proto", "ext/payday/event.ext.proto", "app/robot.proto", "ext/app/robot_svc.ext.proto"]:
     dest = app / "proto" / rel
     dest.parent.mkdir(exist_ok=True, parents=True)
     copyfile(proto / rel, dest)

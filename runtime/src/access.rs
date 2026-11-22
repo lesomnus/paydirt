@@ -167,13 +167,18 @@ impl Recorder {
         policies: &crate::Policies,
         domain: &Value,
         o: &Observation,
+        named: Subjects,
     ) -> Result<Vec<Value>> {
         let tenant = value::encoded(if o.frame.tenant.is_empty() {
             &[0; 16]
         } else {
             &o.frame.tenant
         });
-        let mut groups = Subjects::new();
+        let mut groups = if o.result == "ok" {
+            named
+        } else {
+            Subjects::new()
+        };
         let (ty, doc, refs) = match &o.answer {
             Some(v) => (&o.output, v, false),
             None => (&o.input, &o.request, true),
@@ -328,9 +333,18 @@ impl crate::Store {
     }
     pub(crate) fn observe_with_writes(
         &mut self,
+        o: Observation,
+        buffer: bool,
+        subjects: Subjects,
+    ) -> Result<Value> {
+        self.observe_named(o, buffer, subjects, Default::default())
+    }
+    pub(crate) fn observe_named(
+        &mut self,
         mut o: Observation,
         buffer: bool,
         subjects: Subjects,
+        named: Subjects,
     ) -> Result<Value> {
         let Some(rec) = self.trail.as_ref().filter(|r| r.options.access) else {
             return Ok(Value::Null);
@@ -343,7 +357,7 @@ impl crate::Store {
             .1
             .entity["domain"];
         o.written.extend(subjects.values().flatten().cloned());
-        let mut rows = rec.observation(&self.policies, domain, &o)?;
+        let mut rows = rec.observation(&self.policies, domain, &o, named)?;
         if !subjects.is_empty() {
             if o.result == "ok" {
                 return Err(Fault::invalid("expected a failed call"));

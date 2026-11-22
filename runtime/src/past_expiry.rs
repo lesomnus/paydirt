@@ -1,5 +1,5 @@
 //! Tenant-local expiration preserves the baseline required for bitemporal reads.
-use crate::{Call, Fault, Frame, Packet, Result, Store, Transaction, driver::Query, value};
+use crate::{Fault, Result, Scope, Store, Transaction, driver::Query, value};
 use chrono::{DateTime, TimeDelta, Utc};
 use paydirt_model::quote;
 use serde::{Deserialize, Serialize};
@@ -27,6 +27,7 @@ pub struct Expired {
     pub facts: Vec<String>,
     pub events: Vec<String>,
     pub date_before: Option<DateTime<Utc>>,
+    pub stints: usize,
 }
 fn time(v: &Value) -> Result<DateTime<Utc>> {
     v.as_str()
@@ -38,33 +39,69 @@ fn text(v: &Value) -> &str {
 }
 impl Store {
     pub fn expire_past(&mut self, tenant: [u8; 16], window: &Window, dry: bool) -> Result<Expired> {
-        let frame: Frame =
-            serde_json::from_value(json!({"tenant":tenant,"action":"payday.past.expire"}))
-                .map_err(|e| Fault::internal(e.to_string()))?;
-        let event = self
-            .policies
-            .iter()
-            .find(|(_, v)| v.entity["own"] == "OWN_EVENT")
-            .map(|(n, _)| n.clone())
-            .ok_or_else(|| Fault::precondition("application has no past"))?;
-        let session = hex::encode(paydirt::mint(0));
-        self.handle(Packet::Begin {
-            id: session.clone(),
-            frame,
-        })?;
-        let result = self.handle(Packet::Call {
-            id: session.clone(),
-            call: Call {
-                entity: event,
-                method: "$expire_past".into(),
-                request: json!({"window":window,"dry":dry}),
-            },
+        self.expire_past_with(tenant, window, dry, |_, _| Ok(0))
+    }
+    /// Clean application-owned rows in the same transaction, before scanning event pointers.
+    pub fn expire_past_with(
+        &mut self,
+        tenant: [u8; 16],
+        window: &Window,
+        dry: bool,
+        before: impl FnOnce(&mut Transaction<'_>, DateTime<Utc>) -> Result<usize>,
+    ) -> Result<Expired> {
+        if !paydirt::has_domain(&tenant, 1) {
+            return Err(Fault::invalid("expected a tenant identifier"));
+        }
+        let frame = crate::entitle::deployment(tenant.to_vec(), "payday.past.expire");
+        let mut preview = None;
+        let result = self.transaction_as(&Scope::Tenant(tenant.to_vec()), Some(&frame), |tx| {
+            let owner = tx.owned_entity("OWN_TENANT")?.clone();
+            tx.lookup(&owner, &json!({"id":value::encoded(&tenant)}), false)?;
+            let result = tx.expire_plan(window, before, dry)?;
+            if dry {
+                preview = Some(result);
+                Err(Fault::aborted("expiry preview"))
+            } else {
+                Ok(result)
+            }
         });
-        self.handle(Packet::Finish {
-            id: session,
-            commit: result.is_ok() && !dry,
+        if let Some(plan) = preview {
+            return Ok(plan);
+        }
+        result
+    }
+    /// Visit only tenants with a past. A failed window or cleanup leaves that tenant intact.
+    pub fn expire_all_past(
+        &mut self,
+        mut window: impl FnMut([u8; 16]) -> Result<Window>,
+    ) -> Result<Vec<([u8; 16], Result<Expired>)>> {
+        let owners = self.transaction(&Scope::Internal, |tx| {
+            let event = tx.owned_entity("OWN_EVENT")?;
+            let column = quote(&event.field("tenant").map_err(Fault::internal)?.column());
+            let encoded = if tx.db.dialect() == paydirt_model::Dialect::Postgres {
+                format!("encode({column},'hex')")
+            } else {
+                format!("hex({column})")
+            };
+            let query = Query::new(format!(
+                "SELECT DISTINCT {encoded} AS value FROM {} ORDER BY value",
+                quote(&event.table())
+            ));
+            tx.db
+                .rows(query)?
+                .into_iter()
+                .map(|v| {
+                    hex::decode(v)
+                        .ok()
+                        .and_then(|v| v.try_into().ok())
+                        .ok_or_else(|| Fault::internal("invalid event tenant"))
+                })
+                .collect::<Result<Vec<[u8; 16]>>>()
         })?;
-        serde_json::from_value(result?).map_err(|e| Fault::internal(e.to_string()))
+        Ok(owners
+            .into_iter()
+            .map(|id| (id, window(id).and_then(|w| self.expire_past(id, &w, false))))
+            .collect())
     }
 }
 impl Transaction<'_> {
@@ -72,14 +109,27 @@ impl Transaction<'_> {
         let frame = self
             .frame
             .ok_or_else(|| Fault::precondition("expiry requires a transaction"))?;
-        if frame.action != "payday.past.expire" {
+        if frame.action != "payday.past.expire" || frame.tenant.is_empty() || frame.actor.is_some()
+        {
             return Err(Fault::denied("host expiry required"));
         }
         let window: Window = serde_json::from_value(req["window"].clone())
             .map_err(|e| Fault::invalid(e.to_string()))?;
+        let out = self.expire_plan(&window, |_, _| Ok(0), req["dry"] == true)?;
+        Ok(json!(out))
+    }
+    fn expire_plan(
+        &mut self,
+        window: &Window,
+        before: impl FnOnce(&mut Self, DateTime<Utc>) -> Result<usize>,
+        preview: bool,
+    ) -> Result<Expired> {
+        let frame = self
+            .frame
+            .ok_or_else(|| Fault::precondition("expiry requires a transaction"))?;
         let mut out = Expired::default();
         if window.keep_ms == 0 || !window.holds.is_empty() {
-            return Ok(json!(out));
+            return Ok(out);
         }
         for rule in &window.keep_facts {
             for v in &rule.values {
@@ -102,6 +152,7 @@ impl Transaction<'_> {
             .checked_sub_signed(delta)
             .ok_or_else(|| Fault::invalid("invalid history cutoff"))?;
         out.date_before = Some(cut);
+        out.stints = before(self, cut)?;
         let fact = self.owned_entity("OWN_FACT")?.clone();
         let event = self.owned_entity("OWN_EVENT")?.clone();
         let tenant = json!({"id":value::encoded(&frame.tenant)});
@@ -209,7 +260,7 @@ impl Transaction<'_> {
             }
             out.events.push(id);
         }
-        if req["dry"] != true {
+        if !preview {
             for id in &out.facts {
                 self.erase(&fact, &json!({"id":id}))?;
             }
@@ -217,6 +268,16 @@ impl Transaction<'_> {
                 self.erase(&event, &json!({"id":id}))?;
             }
         }
-        Ok(json!(out))
+        if !preview && (!out.events.is_empty() || !out.facts.is_empty() || out.stints > 0) {
+            if let Some(message) = self
+                .policies
+                .values()
+                .find_map(|p| p.application["eventTypes"]["past.expire"].as_str())
+            {
+                let payload = json!({"@type":format!("type.googleapis.com/{message}"),"dateBefore":cut,"facts":out.facts.len(),"events":out.events.len(),"stints":out.stints});
+                self.begin_event(&event, &json!({"kind":"past.expire","value":payload}))?;
+            }
+        }
+        Ok(out)
     }
 }

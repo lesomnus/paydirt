@@ -92,6 +92,9 @@ impl Transaction<'_> {
         request: &Value,
         many: bool,
     ) -> Result<Value> {
+        if self.policies[&e.name].past_write("Add") {
+            return Err(Fault::denied("a past is written by the past package"));
+        }
         if !matches!(self.scope, Scope::Internal) && self.policies[&e.name].deployment_method("Add")
         {
             return Err(Fault::unsupported("the deployment owns this operation"));

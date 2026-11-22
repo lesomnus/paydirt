@@ -2235,3 +2235,6 @@ mod events;
 
 #[path = "reference_cases/queries.rs"]
 mod queries;
+
+#[path = "reference_cases/history.rs"]
+mod history;

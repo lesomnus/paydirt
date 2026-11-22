@@ -185,47 +185,47 @@ page_test.go	54	TestAllPagesYieldAPartialFailureWithoutRetrying	tracked	unit	tes
 page_test.go	85	TestAllPagesStopOnFailureAndCancellation	verified	unit	tests/page.rs#L33	-
 page_test.go	133	TestAllPagesWalkTheRealServerAndClient	tracked			106
 past_test.go	54	TestThePastIsWrittenAndReadBack	verified	connect/sqlite+postgres;drpc/opfs	web/generated-past.js#L17	-
-past_test.go	234	TestAnEventIsReadBackByItsKind	tracked			105
+past_test.go	234	TestAnEventIsReadBackByItsKind	verified	store/sqlite+postgres	runtime/tests/reference_cases/history.rs#L376	-
 pastexpire_test.go	499	TestAnExpiryIsWhatItsDryRunSays	verified	store/sqlite+postgres	runtime/tests/past_expiry.rs#L127	-
 pastexpire_test.go	528	TestTheStateTheWindowBeginsInStays	verified	store/sqlite+postgres	runtime/tests/past_expiry.rs#L129	-
 pastexpire_test.go	574	TestASecondPassTakesNothing	verified	store/sqlite+postgres	runtime/tests/past_expiry.rs#L132	-
-pastexpire_test.go	631	TestTheReceiptSaysHowManyAndNoMore	tracked			105
+pastexpire_test.go	631	TestTheReceiptSaysHowManyAndNoMore	verified	store/sqlite+postgres	runtime/tests/reference_cases/history.rs#L532	-
 pastexpire_test.go	685	TestAHoldKeepsEverything	verified	store/sqlite+postgres	runtime/tests/past_expiry.rs#L103	-
 pastexpire_test.go	721	TestAnExceptionOutlivesTheWindow	verified	store/sqlite+postgres	runtime/tests/past_expiry.rs#L118	-
-pastexpire_test.go	754	TestAnEventARowStillNamesStays	tracked	store/sqlite+postgres	runtime/tests/past_expiry.rs#L127	105
-pastexpire_test.go	785	TestWhatAnExpiryTookIsOnTheTrail	tracked			105
-pastexpire_test.go	823	TestAnExpiryIsOfOneTenantAndInATransaction	tracked			105
-pastexpire_test.go	849	TestTwoExpiriesOfATenantTakeTurns	tracked			105
-pastexpire_test.go	904	TestTheExpirerExpiresEveryTenantWithAPast	tracked			105
-pastfact_test.go	68	TestEveryKindOfValueIsAFact	tracked			105
-pastfact_test.go	128	TestAStatementIsReadBackAsWritten	tracked			105
-pastfact_test.go	241	TestAWholeEventIsCorrected	tracked			105
-pastfact_test.go	332	TestAStateIsWhatWasKnownThen	verified	unit	runtime/src/past.rs#L396	-
-pastfact_test.go	445	TestAPersonalValueIsNotWrittenDown	verified	unit	runtime/src/past.rs#L365	-
-pastfact_test.go	506	TestThePastIsReadBehindTheWall	tracked			105
-pastfact_test.go	562	TestAReasonReadIsOnTheAccessRecord	tracked			105
-pastfact_test.go	595	TestAValueSaidAgainForAMomentReplacesIt	tracked			105
-pastfact_test.go	641	TestASupersededFactIsNotSupersededAgain	tracked			105
+pastexpire_test.go	754	TestAnEventARowStillNamesStays	verified	store/sqlite+postgres	runtime/tests/reference_cases/history.rs#L498	-
+pastexpire_test.go	785	TestWhatAnExpiryTookIsOnTheTrail	verified	store/sqlite+postgres	runtime/tests/reference_cases/history.rs#L541	-
+pastexpire_test.go	823	TestAnExpiryIsOfOneTenantAndInATransaction	verified	store/sqlite+postgres	runtime/tests/reference_cases/history.rs#L513	-
+pastexpire_test.go	849	TestTwoExpiriesOfATenantTakeTurns	verified	store/postgres	runtime/tests/reference_cases/history.rs#L598	-
+pastexpire_test.go	904	TestTheExpirerExpiresEveryTenantWithAPast	verified	store/sqlite+postgres	runtime/tests/reference_cases/history.rs#L578	-
+pastfact_test.go	68	TestEveryKindOfValueIsAFact	verified	store/sqlite+postgres	runtime/tests/reference_cases/history.rs#L147	-
+pastfact_test.go	128	TestAStatementIsReadBackAsWritten	verified	store/sqlite+postgres	runtime/tests/reference_cases/history.rs#L277	-
+pastfact_test.go	241	TestAWholeEventIsCorrected	verified	store/sqlite+postgres	runtime/tests/reference_cases/history.rs#L313	-
+pastfact_test.go	332	TestAStateIsWhatWasKnownThen	verified	unit	runtime/src/past.rs#L408	-
+pastfact_test.go	445	TestAPersonalValueIsNotWrittenDown	verified	unit	runtime/src/past.rs#L377	-
+pastfact_test.go	506	TestThePastIsReadBehindTheWall	verified	store/sqlite+postgres	runtime/tests/reference_cases/history.rs#L209	-
+pastfact_test.go	562	TestAReasonReadIsOnTheAccessRecord	verified	connect/sqlite+postgres	web/generated-past-ops.js#L47	-
+pastfact_test.go	595	TestAValueSaidAgainForAMomentReplacesIt	verified	store/sqlite+postgres	runtime/tests/reference_cases/history.rs#L357	-
+pastfact_test.go	641	TestASupersededFactIsNotSupersededAgain	verified	store/sqlite+postgres	runtime/tests/reference_cases/history.rs#L282	-
 pastop_test.go	90	TestAnEventAndWhatItIsAboutCommitTogether	verified	connect/sqlite+postgres;drpc/opfs	web/generated-past-ops.js#L9	-
-pastop_test.go	183	TestAnEventSaysWhatItIs	tracked			105
-pastop_test.go	263	TestAnEventOfAMessageOfSeveralKindsSaysWhichItIs	tracked			105
+pastop_test.go	183	TestAnEventSaysWhatItIs	verified	store/sqlite+postgres	runtime/tests/reference_cases/history.rs#L109	-
+pastop_test.go	263	TestAnEventOfAMessageOfSeveralKindsSaysWhichItIs	verified	store/sqlite+postgres	runtime/tests/reference_cases/history.rs#L386	-
 pastop_test.go	369	TestAnOperationCalledInsideAnotherIsPartOfIt	verified	connect/sqlite+postgres;drpc/opfs	web/generated-past-ops.js#L14	-
 pastop_test.go	427	TestAnOperationSentTwiceHappensOnce	verified	connect/sqlite+postgres;drpc/opfs	web/generated-past-ops.js#L11	-
-pastop_test.go	494	TestManyChildrenAreWrittenInPages	tracked			105
+pastop_test.go	494	TestManyChildrenAreWrittenInPages	verified	store/sqlite+postgres	runtime/tests/reference_cases/history.rs#L443	-
 pastop_test.go	602	TestASubjectIsOfTheOperationsTenant	verified	connect/sqlite+postgres;drpc/opfs	web/generated-past-ops.js#L16	-
 pastop_test.go	712	TestMoveRecordsItsEventAndItsFact	verified	connect/sqlite+postgres;drpc/opfs	web/generated-past.js#L17	-
-pastop_test.go	774	TestThePastIsOnTheTrail	tracked			105
-pastop_test.go	823	TestAReasonIsTakenOut	verified	connect/sqlite+postgres;drpc/opfs	web/generated-past-ops.js#L22	-
+pastop_test.go	774	TestThePastIsOnTheTrail	verified	store/sqlite+postgres	runtime/tests/reference_cases/history.rs#L184	-
+pastop_test.go	823	TestAReasonIsTakenOut	verified	connect/sqlite+postgres;drpc/opfs	web/generated-past-ops.js#L58	-
 pastsay_test.go	93	TestAnEventNamesPeopleAsTheyAreCalledNow	verified	connect/sqlite+postgres;drpc/opfs	web/generated-past-ops.js#L20	-
-pastsay_test.go	144	TestAnEventIsSaidInItsDescAndKeepsNone	tracked			105
-pastsay_test.go	176	TestWhomASentenceNamesIsOnTheAccessRecord	tracked			105
+pastsay_test.go	144	TestAnEventIsSaidInItsDescAndKeepsNone	verified	connect/sqlite+postgres	web/generated-past-ops.js#L22	-
+pastsay_test.go	176	TestWhomASentenceNamesIsOnTheAccessRecord	verified	connect/sqlite+postgres	web/generated-past-ops.js#L48	-
 pastsay_test.go	236	TestAnEventIsSaidInTheLanguageNearestTheReaders	verified	connect/sqlite+postgres;drpc/opfs	web/generated-past-ops.js#L18	-
-pastsay_test.go	291	TestEveryKindIsSaidInEveryLanguage	tracked			105
-pastsay_test.go	308	TestEachKindOfAMessageIsSaidInItsOwnWords	tracked			105
-pastsay_test.go	367	TestAnEventFromBeforeThePastIsSaidAsItWasWritten	tracked			105
-pastwriter_test.go	168	TestThePastIsWrittenByThePackageAlone	tracked			105
-pastwriter_test.go	259	TestThePastIsWrittenWhereverItsWriterIs	tracked			105
-pastwriter_test.go	347	TestNothingThePastIsWrittenWithWritesItByHand	tracked			105
+pastsay_test.go	291	TestEveryKindIsSaidInEveryLanguage	verified	cli/native	tests/fleet/pair.rs#L500	-
+pastsay_test.go	308	TestEachKindOfAMessageIsSaidInItsOwnWords	verified	cli/native	tests/fleet/pair.rs#L489	-
+pastsay_test.go	367	TestAnEventFromBeforeThePastIsSaidAsItWasWritten	verified	connect/sqlite+postgres	web/generated-past-ops.js#L52	-
+pastwriter_test.go	168	TestThePastIsWrittenByThePackageAlone	verified	connect/sqlite+postgres	web/generated-past-ops.js#L25	-
+pastwriter_test.go	259	TestThePastIsWrittenWhereverItsWriterIs	verified	connect/sqlite+postgres	web/generated-past-ops.js#L14	-
+pastwriter_test.go	347	TestNothingThePastIsWrittenWithWritesItByHand	verified	store/sqlite+postgres	runtime/tests/reference_cases/history.rs#L194	-
 pdcmd_test.go	65	TestTheTreeIsWhatTheSchemaDeclared	tracked	connect/sqlite+postgres	web/generated-operator.mjs#L13	106
 pdcmd_test.go	114	TestACommandTravelsTheWholeStack	verified	connect/sqlite+postgres	web/generated-operator.mjs#L39	-
 pdcmd_test.go	139	TestTheDefaultFormatIsReadable	tracked			106
