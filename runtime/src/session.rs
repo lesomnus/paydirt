@@ -42,6 +42,11 @@ pub enum Packet {
         id: String,
         frame: Frame,
     },
+    AccountCall {
+        id: String,
+        call: Call,
+        reads: crate::AccountReads,
+    },
     Call {
         id: String,
         call: Call,
@@ -106,87 +111,8 @@ impl Store {
                 });
                 Ok(Value::Null)
             }
-            Packet::Call { id, call } => {
-                let session = self
-                    .session
-                    .as_mut()
-                    .filter(|s| s.id == id)
-                    .ok_or_else(|| Fault::denied("unknown request transaction"))?;
-                if let Some(e) = &session.failed {
-                    return Err(e.clone());
-                }
-                let scope = Scope::Granted {
-                    tenants: session
-                        .frame
-                        .tenants
-                        .clone()
-                        .unwrap_or_else(|| vec![session.frame.tenant.clone()]),
-                    sets: session.frame.sets.clone(),
-                };
-                let mut tx = Transaction {
-                    admission: self.admission.as_ref(),
-                    origin: session.origin.clone(),
-                    seen: (!session.frame.tenant.is_empty()).then_some(&mut session.seen),
-                    changes: &mut session.changes,
-                    outbox: self.outbox,
-                    namer: &*self.namer,
-                    db: self.db.driver()?,
-                    policies: &self.policies,
-                    model: &self.model,
-                    scope: &scope,
-                    frame: Some(&session.frame),
-                    failed: None,
-                };
-                let result = if session.frame.tenant.is_empty() {
-                    let declared = self.policies.get(&call.entity).is_some_and(|p| {
-                        p.entity["own"] == "OWN_HOLDER"
-                            && p.methods.get("Memberships").unwrap_or(&Value::Null)["policy"]
-                                .get("account")
-                                .is_some()
-                    });
-                    if self
-                        .policies
-                        .get(&call.entity)
-                        .is_some_and(|p| p.notification)
-                        && call.entity.ends_with(".NotificationAccount")
-                        && session
-                            .frame
-                            .action
-                            .starts_with(&format!("/{}Service/", call.entity))
-                    {
-                        tx.notify(&call.entity, &call.method, &call.request)
-                    } else if declared
-                        && session.frame.action == format!("/{}Service/Memberships", call.entity)
-                        && call.method == "Memberships"
-                    {
-                        let mut reader = Transaction {
-                            admission: None,
-                            origin: None,
-                            seen: None,
-                            changes: tx.changes,
-                            outbox: tx.outbox,
-                            namer: tx.namer,
-                            db: tx.db,
-                            model: tx.model,
-                            policies: tx.policies,
-                            scope: &Scope::Internal,
-                            frame: tx.frame,
-                            failed: None,
-                        };
-                        reader
-                            .memberships(session.frame.account.as_ref().unwrap(), None, "", false)
-                            .map(|rows| serde_json::json!({"items":rows}))
-                    } else {
-                        Err(Fault::denied(
-                            "account method has no declared read of this entity",
-                        ))
-                    }
-                } else {
-                    tx.call(call)
-                };
-                session.failed = result.as_ref().err().cloned().or(tx.failed);
-                result
-            }
+            Packet::Call { id, call } => self.session_call(id, call, None),
+            Packet::AccountCall { id, call, reads } => self.session_call(id, call, Some(reads)),
             Packet::Finish { id, commit } => {
                 if !self.session.as_ref().is_some_and(|s| s.id == id) {
                     return Err(Fault::denied("unknown request transaction"));
@@ -226,5 +152,100 @@ impl Store {
                 serde_json::to_value(event).map_err(|e| Fault::internal(e.to_string()))
             }
         }
+    }
+    fn session_call(
+        &mut self,
+        id: String,
+        call: Call,
+        reads: Option<crate::AccountReads>,
+    ) -> Result<Value> {
+        let session = self
+            .session
+            .as_mut()
+            .filter(|s| s.id == id)
+            .ok_or_else(|| Fault::denied("unknown request transaction"))?;
+        if let Some(e) = &session.failed {
+            return Err(e.clone());
+        }
+        let scope = if session.frame.tenant.is_empty() {
+            Scope::Account {
+                id: session.frame.account.clone().unwrap(),
+                reads: reads.unwrap_or_default(),
+            }
+        } else {
+            Scope::Granted {
+                tenants: session
+                    .frame
+                    .tenants
+                    .clone()
+                    .unwrap_or_else(|| vec![session.frame.tenant.clone()]),
+                sets: session.frame.sets.clone(),
+            }
+        };
+        let mut tx = Transaction {
+            admission: self.admission.as_ref(),
+            origin: session.origin.clone(),
+            seen: (!session.frame.tenant.is_empty()).then_some(&mut session.seen),
+            changes: &mut session.changes,
+            outbox: self.outbox,
+            namer: &*self.namer,
+            db: self.db.driver()?,
+            policies: &self.policies,
+            model: &self.model,
+            scope: &scope,
+            frame: Some(&session.frame),
+            failed: None,
+        };
+        let result = if session.frame.tenant.is_empty() {
+            let declared = self.policies.get(&call.entity).is_some_and(|p| {
+                p.entity["own"] == "OWN_HOLDER"
+                    && p.methods.get("Memberships").unwrap_or(&Value::Null)["policy"]
+                        .get("account")
+                        .is_some()
+            });
+            if self
+                .policies
+                .get(&call.entity)
+                .is_some_and(|p| p.notification)
+                && call.entity.ends_with(".NotificationAccount")
+                && session
+                    .frame
+                    .action
+                    .starts_with(&format!("/{}Service/", call.entity))
+            {
+                tx.notify(&call.entity, &call.method, &call.request)
+            } else if declared
+                && session.frame.action == format!("/{}Service/Memberships", call.entity)
+                && call.method == "Memberships"
+            {
+                let mut reader = Transaction {
+                    admission: None,
+                    origin: None,
+                    seen: None,
+                    changes: tx.changes,
+                    outbox: tx.outbox,
+                    namer: tx.namer,
+                    db: tx.db,
+                    model: tx.model,
+                    policies: tx.policies,
+                    scope: &Scope::Internal,
+                    frame: tx.frame,
+                    failed: None,
+                };
+                reader
+                    .memberships(session.frame.account.as_ref().unwrap(), None, "", false)
+                    .map(|rows| serde_json::json!({"items":rows}))
+            } else if matches!(call.method.as_str(), "Get" | "List") {
+                tx.call(call)
+            } else {
+                Err(Fault::denied(
+                    "account method has no declared read of this entity",
+                ))
+            }
+        } else {
+            tx.call(call)
+        };
+        session.failed = result.as_ref().err().cloned().or(tx.failed);
+        result
     }
 }

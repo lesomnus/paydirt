@@ -1,0 +1,12 @@
+edition = "2023";
+package app;
+import "orm.proto";
+import "payday.proto";
+option go_package = "example.org/app";
+option features.field_presence = IMPLICIT;
+message Invitation {
+  option (orm.message) = {rpc:{crud:true}};
+  option (payday.entity) = {domain:81 global:{} erase:{hard:{}} trail:{off:{why:"Synthetic account-scope fixture"}}};
+  bytes id = 1 [(orm.field)={type:TYPE_UUID,key:true}];
+  bytes recipient = 4 [(orm.field)={type:TYPE_UUID}];
+}

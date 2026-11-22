@@ -104,6 +104,7 @@ impl Scope {
     pub(crate) fn tenants(&self) -> Option<&[Vec<u8>]> {
         match self {
             Self::Internal => None,
+            Self::Account { .. } => Some(&[]),
             Self::Tenant(id) => Some(std::slice::from_ref(id)),
             Self::Granted { tenants, .. } => Some(tenants),
         }

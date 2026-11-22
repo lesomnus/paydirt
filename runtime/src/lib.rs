@@ -1,5 +1,6 @@
 //! Transactional entity storage for generated Payday applications.
 mod account;
+pub use account::{AccountReads, ReadFilter};
 pub mod admission;
 mod apply;
 pub mod auth;
@@ -130,6 +131,10 @@ impl Fault {
 pub enum Scope {
     Internal,
     Tenant(Vec<u8>),
+    Account {
+        id: Vec<u8>,
+        reads: AccountReads,
+    },
     Granted {
         tenants: Vec<Vec<u8>>,
         sets: Option<Vec<Vec<u8>>>,
@@ -338,6 +343,11 @@ pub struct Transaction<'a> {
 }
 impl Transaction<'_> {
     pub fn call(&mut self, call: Call) -> Result<Value> {
+        if matches!(self.scope, Scope::Account { .. })
+            && !matches!(call.method.as_str(), "Get" | "List")
+        {
+            return Err(Fault::denied("account read scopes permit Get and List"));
+        }
         if let Some(failure) = &self.failed {
             return Err(failure.clone());
         }

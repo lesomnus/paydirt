@@ -302,6 +302,7 @@ pub fn schema_advice(root: &Path) -> Result<()> {
     let model = paydirt_model::Model::parse(&fs::read(root.join("generated/storage/model.json"))?)?;
     let policies: Value =
         serde_json::from_slice(&fs::read(root.join("generated/storage/policies.json"))?)?;
+    account_advice(root, &policies)?;
     for e in &model.entities {
         let p = &policies[&e.name];
         let opts = &p["fields"];
@@ -417,6 +418,49 @@ pub fn legacy_diagnostics(root: &Path) -> Result<()> {
                     .is_some_and(|s| s.trim_start().starts_with(':'))
             {
                 return Err(format!("obsolete declaration in proto/{}:{}: replace impersonal: true with personal: false",file.display(),n+1).into());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn account_advice(root: &Path, policies: &Value) -> Result<()> {
+    use syn::visit::Visit;
+    #[derive(Default)]
+    struct Reads(std::collections::BTreeSet<String>);
+    impl<'ast> Visit<'ast> for Reads {
+        fn visit_expr_method_call(&mut self, expr: &'ast syn::ExprMethodCall) {
+            if expr.method == "account_reads"
+                && let Some(syn::Expr::Lit(method)) = expr.args.iter().nth(1)
+                && let syn::Lit::Str(method) = &method.lit
+            {
+                self.0.insert(method.value());
+            }
+            syn::visit::visit_expr_method_call(self, expr);
+        }
+    }
+    let mut reads = Reads::default();
+    if root.join("src").is_dir() {
+        for (path, bytes) in generate::files(&root.join("src"))? {
+            if path.extension().is_some_and(|x| x == "rs") {
+                reads.visit_file(&syn::parse_file(std::str::from_utf8(&bytes)?)?);
+            }
+        }
+    }
+    for (entity, policy) in policies.as_object().into_iter().flatten() {
+        for (name, method) in policy["methods"].as_object().into_iter().flatten() {
+            if method["policy"].get("account").is_none() {
+                continue;
+            }
+            // The built-in memberships sink declares its own account-to-holder relation.
+            if policy["entity"]["own"] == "OWN_HOLDER" && name == "Memberships" {
+                continue;
+            }
+            let path = format!("/{entity}Service/{name}");
+            if !reads.0.contains(&path) {
+                println!(
+                    "account scope: {path} has no account_reads declaration. Pass the method path and AccountReads::default() to declare an intentionally empty scope."
+                );
             }
         }
     }

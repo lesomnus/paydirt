@@ -579,6 +579,45 @@ impl Database {
         ctx.extensions_mut().insert(Session(id));
         Ok(Some(guard))
     }
+    /// Set the entities and predicates an app-owned account method reads on this context.
+    pub fn account_reads(
+        &self,
+        mut ctx: RequestContext,
+        method: &str,
+        reads: paydirt_store::AccountReads,
+    ) -> Result<RequestContext, ConnectError> {
+        static OPTIONS: std::sync::LazyLock<paydirt_store::Policies> =
+            std::sync::LazyLock::new(|| {
+                serde_json::from_str(POLICIES).expect("generated method policy")
+            });
+        let (service, rpc) = method
+            .strip_prefix('/')
+            .and_then(|s| s.rsplit_once('/'))
+            .ok_or_else(|| ConnectError::internal("invalid account method"))?;
+        let declared = service
+            .strip_suffix("Service")
+            .and_then(|n| OPTIONS.get(n))
+            .and_then(|p| p.methods.get(rpc))
+            .is_some_and(|m| m["policy"].get("account").is_some());
+        if !declared {
+            return Err(ConnectError::internal(
+                "method is not declared account-only",
+            ));
+        }
+        let frame = ctx
+            .extensions()
+            .get::<Frame>()
+            .ok_or_else(|| ConnectError::unauthenticated("no caller frame"))?;
+        if frame.tenant.is_empty() {
+            if frame.account.is_none() || frame.action != method {
+                return Err(ConnectError::permission_denied(
+                    "account declaration is for another call",
+                ));
+            }
+            ctx.extensions_mut().insert(reads);
+        }
+        Ok(ctx)
+    }
     pub async fn rpc<I: Serialize, O: DeserializeOwned>(
         &self,
         ctx: &RequestContext,
@@ -597,12 +636,18 @@ impl Database {
             request: serde_json::to_value(request)
                 .map_err(|_| ConnectError::invalid_argument("invalid request"))?,
         };
-        let out = self
-            .send(Packet::Call {
+        let packet = match ctx.extensions().get::<paydirt_store::AccountReads>() {
+            Some(reads) => Packet::AccountCall {
                 id: id.clone(),
                 call,
-            })
-            .await?;
+                reads: reads.clone(),
+            },
+            None => Packet::Call {
+                id: id.clone(),
+                call,
+            },
+        };
+        let out = self.send(packet).await?;
         serde_json::from_value(out)
             .map_err(|_| ConnectError::internal("invalid response from storage"))
     }
