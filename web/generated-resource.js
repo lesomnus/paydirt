@@ -1,12 +1,12 @@
 import {fromBinary} from "@bufbuild/protobuf";
 import {Code} from "@connectrpc/connect";
 const ref=id=>({key:{case:"id",value:id}});
-export async function resourceCases(registry,resources,cell,robot,opts,foreign,tenant,other,cel){
+export async function resourceCases(registry,resources,cell,robot,opts,foreign,tenant,other,cel,earlyHeaders){
   const capture=async (filter,act)=>{
     const controller=new AbortController();
     let signalReady;
     const ready=new Promise(resolve=>signalReady=resolve);
-    const reader=resources.watch({filter},{...opts,onHeader:signalReady,signal:controller.signal,timeoutMs:8000})[Symbol.asyncIterator]();
+    const reader=resources.watch({filter},{...opts,onHeader:signalReady,...earlyHeaders?.(signalReady),signal:controller.signal,timeoutMs:8000})[Symbol.asyncIterator]();
     const first=reader.next();first.catch(()=>{});
     try{
       await Promise.race([ready,first.then(()=>{throw Error("resource sent data before a write")})]);

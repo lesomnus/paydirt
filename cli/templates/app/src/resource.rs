@@ -95,6 +95,6 @@ impl ResourceService for Resources {
             }
             Err(ConnectError::resource_exhausted("resource subscription ended; reconcile with List"))?;
         };
-        Response::ok(Box::pin(stream))
+        Ok(Response::new(Box::pin(stream) as ServiceStream<WatchEvent>).with_header("paydirt-watch-ready","1"))
     }
 }
