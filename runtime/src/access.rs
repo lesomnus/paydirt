@@ -279,6 +279,9 @@ impl crate::Store {
         );
         frame.actor = Some(actor.to_vec());
         frame.address = Some(address);
+        self.operator_framed(call, frame)
+    }
+    pub(crate) fn operator_framed(&mut self, call: crate::Call, frame: Frame) -> Result<Value> {
         let method = self
             .policies
             .get(&call.entity)

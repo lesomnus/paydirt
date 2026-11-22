@@ -49,7 +49,7 @@ pub use notify::TopicGrants;
 use paydirt_model::Model;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-pub use session::{Frame, Packet};
+pub use session::{Frame, Packet, PrincipalRow};
 use std::collections::BTreeMap;
 
 pub type Result<T> = std::result::Result<T, Fault>;
@@ -203,7 +203,11 @@ impl Default for Inputs {
         Self::new(chrono::Utc::now, paydirt::mint)
     }
 }
+/// A host hook can narrow an entity's existing visibility with typed equality predicates.
+pub type ScopeRule =
+    std::sync::Arc<dyn Fn(&str, Option<&Frame>) -> Result<Vec<(String, Value)>> + Send + Sync>;
 pub struct Store {
+    scope_rules: Option<Vec<ScopeRule>>,
     pending_reads: Vec<Value>,
     trail: Option<audit_content::Recorder>,
     resources: Option<resource::Recorder>,
@@ -243,9 +247,19 @@ impl Store {
             db,
             session: None,
             pending_reads: vec![],
+            scope_rules: None,
             model,
             policies,
         })
+    }
+    pub fn with_scopes(mut self, rules: Vec<ScopeRule>) -> Result<Self> {
+        if self.scope_rules.is_some() {
+            return Err(Fault::invalid(
+                "provide all scope rules together in with_scopes",
+            ));
+        }
+        self.scope_rules = Some(rules);
+        Ok(self)
     }
     pub fn with_inputs(mut self, inputs: Inputs) -> Self {
         self.inputs = inputs;
@@ -318,7 +332,13 @@ impl Store {
                 _ => {}
             }
         }
-        self.call(&Scope::Internal, call)
+        if self.trail.is_some() && p.and_then(|p| p.methods.get(&call.method)).is_some() {
+            let frame =
+                entitle::deployment(vec![], &format!("/{}Service/{}", call.entity, call.method));
+            self.operator_framed(call, frame)
+        } else {
+            self.call(&Scope::Internal, call)
+        }
     }
     pub fn seed(&mut self, rows: Vec<(String, Value)>) -> Result<()> {
         self.transaction(&Scope::Internal, |tx| {
@@ -365,6 +385,7 @@ impl Store {
         let result = self.db.transaction(|db| {
             let mut seen = seen::Seen::default();
             let mut tx = Transaction {
+                scope_rules: self.scope_rules.as_deref().unwrap_or_default(),
                 pending_access: frame.map(|_| &mut written),
                 admission: self.admission.as_ref(),
                 origin: None,
@@ -409,6 +430,7 @@ impl Store {
     }
 }
 pub struct Transaction<'a> {
+    scope_rules: &'a [ScopeRule],
     pending_access: Option<&'a mut access::Subjects>,
     trail: Option<&'a audit_content::Recorder>,
     resources: Option<&'a resource::Recorder>,
@@ -427,8 +449,29 @@ pub struct Transaction<'a> {
     frame: Option<&'a Frame>,
     failed: Option<Fault>,
 }
+impl Policy {
+    fn deployment_method(&self, method: &str) -> bool {
+        match self.entity["own"].as_str() {
+            Some("OWN_TENANT") => matches!(method, "Add" | "AddMany" | "Erase"),
+            Some("OWN_AUDIT" | "OWN_ACCESS" | "OWN_EVENT" | "OWN_FACT") => {
+                matches!(method, "Add" | "AddMany" | "Patch" | "Apply" | "Erase")
+            }
+            _ => false,
+        }
+    }
+}
 impl Transaction<'_> {
     pub fn call(&mut self, call: Call) -> Result<Value> {
+        if !matches!(self.scope, Scope::Internal)
+            && self
+                .policies
+                .get(&call.entity)
+                .is_some_and(|p| p.deployment_method(&call.method))
+        {
+            let err = Fault::unsupported("the deployment owns this operation");
+            self.failed = Some(err.clone());
+            return Err(err);
+        }
         if self.frame.is_some_and(|frame| frame.caller.is_some())
             && self
                 .policies

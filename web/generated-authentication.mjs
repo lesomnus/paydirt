@@ -43,6 +43,12 @@ try{
  const ok=async(r,n)=>{assert.equal(r.status,200,await r.clone().text());assert.equal((await r.json()).value,n)};
  const denied=async(r,code)=>assert.equal((await r.json()).code,code);
  await ok(await call("Who",jwt()),2);
+ // The signed credential must resolve consistently when independent requests overlap.
+ const concurrentToken=jwt();
+ for(const n of [2,4,16]){
+   const results=await Promise.all(Array.from({length:n},()=>call("List",concurrentToken)));
+   for(const result of results) assert.equal(result.status,200,await result.text());
+ }
  await presenceCases({address,call,jwt,tenant,person,device,revocation,url:env.DATABASE_URL});
  await denied(await call("Who",jwt({aud:"wrong"})),"unauthenticated");
  await denied(await call("Who",jwt({exp:5})),"unauthenticated");

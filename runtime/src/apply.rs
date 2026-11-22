@@ -301,6 +301,12 @@ impl Plan<'_> {
         Ok(())
     }
     fn mutable(&mut self, e: &Entity, f: &Field, tx: &Transaction<'_>) -> Result<()> {
+        if tx.membership_field(e) == Some(&f.name) {
+            return Err(Fault::field(
+                &f.name,
+                "membership accounts are established by the deployment",
+            ));
+        }
         if f.immutable
             || f.version
             || f.erased

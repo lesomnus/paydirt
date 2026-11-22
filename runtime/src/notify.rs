@@ -226,6 +226,7 @@ impl Transaction<'_> {
         };
         let scope = Scope::Tenant(tenant);
         let mut db = Transaction {
+            scope_rules: self.scope_rules,
             pending_access: self.pending_access.as_deref_mut(),
             admission: None,
             origin: None,
@@ -456,6 +457,7 @@ impl Transaction<'_> {
         if self.outbox {
             let e = self.owned_entity("OWN_OUTBOX")?.clone();
             let mut queue = Transaction {
+                scope_rules: self.scope_rules,
                 pending_access: self.pending_access.as_deref_mut(),
                 admission: None,
                 origin: None,
@@ -774,7 +776,7 @@ impl crate::Store {
                 let tenant=value::bytes(&row["tenantId"])?;
                 let ref_id=json!({"id":row["id"]});
                 let frame=crate::entitle::deployment(tenant,"payday.notify.expire");
-                let mut writer=Transaction{pending_access:None,inputs:tx.inputs,trail:tx.trail,resources:tx.resources,topic_policy:None,admission:None,origin:None,seen:None,changes:tx.changes,outbox:tx.outbox,namer:tx.namer,db:tx.db,model:tx.model,policies:tx.policies,scope:&Scope::Internal,frame:Some(&frame),failed:None};
+                let mut writer=Transaction{scope_rules:tx.scope_rules,pending_access:None,inputs:tx.inputs,trail:tx.trail,resources:tx.resources,topic_policy:None,admission:None,origin:None,seen:None,changes:tx.changes,outbox:tx.outbox,namer:tx.namer,db:tx.db,model:tx.model,policies:tx.policies,scope:&Scope::Internal,frame:Some(&frame),failed:None};
                 let mut del=Query::new("");
                 let k=del.param(Bind::Bytes(value::bytes(&row["id"])?),d);
                 del.sql=format!("DELETE FROM {} WHERE {}={k}",quote(&r.table()),quote(&r.field("notification_id").map_err(Fault::internal)?.column()));

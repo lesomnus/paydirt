@@ -1790,6 +1790,42 @@ mod sink_app_holder {
     impl<
         N: crate::services::r#app::HolderService,
     > crate::services::r#app::HolderServiceLayer<N> for Sink {
+        async fn add(
+            &self,
+            _: &N,
+            ctx: RequestContext,
+            request: ServiceRequest<'_, crate::proto::r#app::r#HolderAddRequest>,
+        ) -> ServiceResult<crate::proto::r#app::r#Holder> {
+            Response::ok(
+                self.0.rpc(&ctx, "app.Holder", "Add", &request.to_owned_message()).await?,
+            )
+        }
+        async fn apply(
+            &self,
+            _: &N,
+            ctx: RequestContext,
+            request: ServiceRequest<'_, crate::proto::r#app::r#HolderApplyRequest>,
+        ) -> ServiceResult<crate::proto::r#app::r#Holder> {
+            Response::ok(
+                self
+                    .0
+                    .rpc(&ctx, "app.Holder", "Apply", &request.to_owned_message())
+                    .await?,
+            )
+        }
+        async fn erase(
+            &self,
+            _: &N,
+            ctx: RequestContext,
+            request: ServiceRequest<'_, crate::proto::r#app::r#HolderRef>,
+        ) -> ServiceResult<crate::proto::r#app::r#HolderEraseResponse> {
+            Response::ok(
+                self
+                    .0
+                    .rpc(&ctx, "app.Holder", "Erase", &request.to_owned_message())
+                    .await?,
+            )
+        }
         async fn get(
             &self,
             _: &N,
@@ -1813,6 +1849,29 @@ mod sink_app_holder {
                     .await?,
             )
         }
+        async fn patch(
+            &self,
+            _: &N,
+            ctx: RequestContext,
+            request: ServiceRequest<'_, crate::proto::r#app::r#HolderPatchRequest>,
+        ) -> ServiceResult<crate::proto::r#app::r#Holder> {
+            Response::ok(
+                self
+                    .0
+                    .rpc(&ctx, "app.Holder", "Patch", &request.to_owned_message())
+                    .await?,
+            )
+        }
+        async fn watch(
+            &self,
+            _: &N,
+            ctx: RequestContext,
+            request: ServiceRequest<'_, crate::proto::r#app::r#HolderWatchRequest>,
+        ) -> ServiceResult<
+            ::connectrpc::ServiceStream<crate::proto::r#app::r#HolderWatchResponse>,
+        > {
+            self.0.watch(ctx, "app.Holder", &request.to_owned_message()).await
+        }
     }
     impl<
         N: crate::services::r#app::HolderService,
@@ -1832,12 +1891,49 @@ mod sink_app_holder {
                 > + Send + use<'a, N>,
             >,
         > + Send {
-            let _ = next;
-            crate::services::r#app::HolderService::add(
-                &crate::services::r#app::HolderServiceUnimplemented,
-                ctx,
-                request,
-            )
+            async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.HolderAddRequest",
+                    "app.Holder",
+                    "/app.HolderService/Add",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
+                    .db
+                    .authorize(
+                        ctx,
+                        "app.Holder",
+                        "Add",
+                        self.public.contains(&"/app.HolderService/Add"),
+                        false,
+                        false,
+                    )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.add(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<crate::proto::r#app::r#Holder, _>(&self.db, &response.body)
+                    .await?;
+                Ok(response)
+            }
         }
         fn get<'a>(
             &'a self,
@@ -1913,12 +2009,49 @@ mod sink_app_holder {
                 > + Send + use<'a, N>,
             >,
         > + Send {
-            let _ = next;
-            crate::services::r#app::HolderService::patch(
-                &crate::services::r#app::HolderServiceUnimplemented,
-                ctx,
-                request,
-            )
+            async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.HolderPatchRequest",
+                    "app.Holder",
+                    "/app.HolderService/Patch",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
+                    .db
+                    .authorize(
+                        ctx,
+                        "app.Holder",
+                        "Patch",
+                        self.public.contains(&"/app.HolderService/Patch"),
+                        false,
+                        false,
+                    )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.patch(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<crate::proto::r#app::r#Holder, _>(&self.db, &response.body)
+                    .await?;
+                Ok(response)
+            }
         }
         fn apply<'a>(
             &'a self,
@@ -1935,12 +2068,49 @@ mod sink_app_holder {
                 > + Send + use<'a, N>,
             >,
         > + Send {
-            let _ = next;
-            crate::services::r#app::HolderService::apply(
-                &crate::services::r#app::HolderServiceUnimplemented,
-                ctx,
-                request,
-            )
+            async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.HolderApplyRequest",
+                    "app.Holder",
+                    "/app.HolderService/Apply",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
+                    .db
+                    .authorize(
+                        ctx,
+                        "app.Holder",
+                        "Apply",
+                        self.public.contains(&"/app.HolderService/Apply"),
+                        false,
+                        false,
+                    )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.apply(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<crate::proto::r#app::r#Holder, _>(&self.db, &response.body)
+                    .await?;
+                Ok(response)
+            }
         }
         fn erase<'a>(
             &'a self,
@@ -1954,12 +2124,52 @@ mod sink_app_holder {
                 > + Send + use<'a, N>,
             >,
         > + Send {
-            let _ = next;
-            crate::services::r#app::HolderService::erase(
-                &crate::services::r#app::HolderServiceUnimplemented,
-                ctx,
-                request,
-            )
+            async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.HolderRef",
+                    "app.HolderEraseResponse",
+                    "/app.HolderService/Erase",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
+                    .db
+                    .authorize(
+                        ctx,
+                        "app.Holder",
+                        "Erase",
+                        self.public.contains(&"/app.HolderService/Erase"),
+                        false,
+                        false,
+                    )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.erase(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<
+                        crate::proto::r#app::r#HolderEraseResponse,
+                        _,
+                    >(&self.db, &response.body)
+                    .await?;
+                Ok(response)
+            }
         }
         fn list<'a>(
             &'a self,
@@ -2040,17 +2250,93 @@ mod sink_app_holder {
                 >,
             >,
         > + Send {
-            let _ = next;
-            crate::services::r#app::HolderService::watch(
-                &crate::services::r#app::HolderServiceUnimplemented,
-                ctx,
-                request,
-            )
+            async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.HolderWatchRequest",
+                    "app.HolderWatchResponse",
+                    "/app.HolderService/Watch",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
+                    .db
+                    .authorize(
+                        ctx,
+                        "app.Holder",
+                        "Watch",
+                        self.public.contains(&"/app.HolderService/Watch"),
+                        false,
+                        false,
+                    )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.watch(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                Ok(
+                    response
+                        .map_body(|body| {
+                            attempt
+                                .stream::<
+                                    crate::proto::r#app::r#HolderWatchResponse,
+                                    _,
+                                >(self.db.clone(), Database::enforce_presence(&ctx, body))
+                        }),
+                )
+            }
         }
     }
     impl<
         N: crate::services::r#app::HolderService,
     > crate::services::r#app::HolderServiceLayer<N> for Audit {
+        fn add<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::HolderAddRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::Holder,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            async move {
+                let mut ctx = ctx;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Holder",
+                        "Add",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
+                let result = next.add(ctx, request).await;
+                if let Some(guard) = guard {
+                    guard.finish(result.is_ok()).await?;
+                }
+                result
+            }
+        }
         fn get<'a>(
             &'a self,
             next: &'a N,
@@ -2078,6 +2364,102 @@ mod sink_app_holder {
                     )
                     .await?;
                 let result = next.get(ctx, request).await;
+                if let Some(guard) = guard {
+                    guard.finish(result.is_ok()).await?;
+                }
+                result
+            }
+        }
+        fn patch<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::HolderPatchRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::Holder,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            async move {
+                let mut ctx = ctx;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Holder",
+                        "Patch",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
+                let result = next.patch(ctx, request).await;
+                if let Some(guard) = guard {
+                    guard.finish(result.is_ok()).await?;
+                }
+                result
+            }
+        }
+        fn apply<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::HolderApplyRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::Holder,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            async move {
+                let mut ctx = ctx;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Holder",
+                        "Apply",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
+                let result = next.apply(ctx, request).await;
+                if let Some(guard) = guard {
+                    guard.finish(result.is_ok()).await?;
+                }
+                result
+            }
+        }
+        fn erase<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<'_, crate::proto::app::HolderRef>,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::HolderEraseResponse,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            async move {
+                let mut ctx = ctx;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Holder",
+                        "Erase",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
+                let result = next.erase(ctx, request).await;
                 if let Some(guard) = guard {
                     guard.finish(result.is_ok()).await?;
                 }
@@ -3030,6 +3412,19 @@ mod sink_app_tenant {
     impl<
         N: crate::services::r#app::TenantService,
     > crate::services::r#app::TenantServiceLayer<N> for Sink {
+        async fn apply(
+            &self,
+            _: &N,
+            ctx: RequestContext,
+            request: ServiceRequest<'_, crate::proto::r#app::r#TenantApplyRequest>,
+        ) -> ServiceResult<crate::proto::r#app::r#Tenant> {
+            Response::ok(
+                self
+                    .0
+                    .rpc(&ctx, "app.Tenant", "Apply", &request.to_owned_message())
+                    .await?,
+            )
+        }
         async fn get(
             &self,
             _: &N,
@@ -3050,6 +3445,19 @@ mod sink_app_tenant {
                 self
                     .0
                     .rpc(&ctx, "app.Tenant", "List", &request.to_owned_message())
+                    .await?,
+            )
+        }
+        async fn patch(
+            &self,
+            _: &N,
+            ctx: RequestContext,
+            request: ServiceRequest<'_, crate::proto::r#app::r#TenantPatchRequest>,
+        ) -> ServiceResult<crate::proto::r#app::r#Tenant> {
+            Response::ok(
+                self
+                    .0
+                    .rpc(&ctx, "app.Tenant", "Patch", &request.to_owned_message())
                     .await?,
             )
         }
@@ -3153,12 +3561,49 @@ mod sink_app_tenant {
                 > + Send + use<'a, N>,
             >,
         > + Send {
-            let _ = next;
-            crate::services::r#app::TenantService::patch(
-                &crate::services::r#app::TenantServiceUnimplemented,
-                ctx,
-                request,
-            )
+            async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.TenantPatchRequest",
+                    "app.Tenant",
+                    "/app.TenantService/Patch",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
+                    .db
+                    .authorize(
+                        ctx,
+                        "app.Tenant",
+                        "Patch",
+                        self.public.contains(&"/app.TenantService/Patch"),
+                        false,
+                        false,
+                    )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.patch(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<crate::proto::r#app::r#Tenant, _>(&self.db, &response.body)
+                    .await?;
+                Ok(response)
+            }
         }
         fn apply<'a>(
             &'a self,
@@ -3175,12 +3620,49 @@ mod sink_app_tenant {
                 > + Send + use<'a, N>,
             >,
         > + Send {
-            let _ = next;
-            crate::services::r#app::TenantService::apply(
-                &crate::services::r#app::TenantServiceUnimplemented,
-                ctx,
-                request,
-            )
+            async move {
+                let ctx = Database::presence_request(
+                    ctx,
+                    || request.to_owned_message(),
+                )?;
+                let mut ctx = ctx;
+                let attempt = crate::transport::access::Attempt::start(
+                    &mut ctx,
+                    "app.TenantApplyRequest",
+                    "app.Tenant",
+                    "/app.TenantService/Apply",
+                    false,
+                    || {
+                        serde_json::to_value(request.to_owned_message())
+                            .map_err(|_| connectrpc::ConnectError::invalid_argument(
+                                "invalid access request",
+                            ))
+                    },
+                )?;
+                let ctx = match self
+                    .db
+                    .authorize(
+                        ctx,
+                        "app.Tenant",
+                        "Apply",
+                        self.public.contains(&"/app.TenantService/Apply"),
+                        false,
+                        false,
+                    )
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                let response = match next.apply(ctx.clone(), request).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(attempt.failed(&self.db, e).await),
+                };
+                attempt
+                    .output::<crate::proto::r#app::r#Tenant, _>(&self.db, &response.body)
+                    .await?;
+                Ok(response)
+            }
         }
         fn erase<'a>(
             &'a self,
@@ -3294,6 +3776,72 @@ mod sink_app_tenant {
                     )
                     .await?;
                 let result = next.get(ctx, request).await;
+                if let Some(guard) = guard {
+                    guard.finish(result.is_ok()).await?;
+                }
+                result
+            }
+        }
+        fn patch<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::TenantPatchRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::Tenant,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            async move {
+                let mut ctx = ctx;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Tenant",
+                        "Patch",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
+                let result = next.patch(ctx, request).await;
+                if let Some(guard) = guard {
+                    guard.finish(result.is_ok()).await?;
+                }
+                result
+            }
+        }
+        fn apply<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::TenantApplyRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::Tenant,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            async move {
+                let mut ctx = ctx;
+                let guard = self
+                    .0
+                    .begin_request(
+                        &mut ctx,
+                        "app.Tenant",
+                        "Apply",
+                        || request.to_owned_message(),
+                    )
+                    .await?;
+                let result = next.apply(ctx, request).await;
                 if let Some(guard) = guard {
                     guard.finish(result.is_ok()).await?;
                 }
@@ -3617,6 +4165,27 @@ pub trait CellCalls: crate::services::r#app::CellService {
 impl<N: crate::services::r#app::CellService> CellCalls for N {}
 #[allow(async_fn_in_trait)]
 pub trait HolderCalls: crate::services::r#app::HolderService {
+    async fn add_owned(
+        &self,
+        ctx: &RequestContext,
+        req: crate::proto::r#app::r#HolderAddRequest,
+    ) -> Result<crate::proto::r#app::r#Holder, ::connectrpc::ConnectError> {
+        use buffa::{Message, HasMessageView};
+        use connectrpc::Encodable;
+        let bytes = req.encode_to_bytes();
+        let view = crate::proto::r#app::r#HolderAddRequest::decode_view(&bytes)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream request",
+            ))?;
+        let reply = self
+            .add(ctx.clone(), ServiceRequest::from_parts(&view, &bytes))
+            .await?;
+        let wire = reply.body.encode(connectrpc::CodecFormat::Proto)?;
+        crate::proto::r#app::r#Holder::decode_from_slice(&wire)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream response",
+            ))
+    }
     async fn get_owned(
         &self,
         ctx: &RequestContext,
@@ -3634,6 +4203,69 @@ pub trait HolderCalls: crate::services::r#app::HolderService {
             .await?;
         let wire = reply.body.encode(connectrpc::CodecFormat::Proto)?;
         crate::proto::r#app::r#Holder::decode_from_slice(&wire)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream response",
+            ))
+    }
+    async fn patch_owned(
+        &self,
+        ctx: &RequestContext,
+        req: crate::proto::r#app::r#HolderPatchRequest,
+    ) -> Result<crate::proto::r#app::r#Holder, ::connectrpc::ConnectError> {
+        use buffa::{Message, HasMessageView};
+        use connectrpc::Encodable;
+        let bytes = req.encode_to_bytes();
+        let view = crate::proto::r#app::r#HolderPatchRequest::decode_view(&bytes)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream request",
+            ))?;
+        let reply = self
+            .patch(ctx.clone(), ServiceRequest::from_parts(&view, &bytes))
+            .await?;
+        let wire = reply.body.encode(connectrpc::CodecFormat::Proto)?;
+        crate::proto::r#app::r#Holder::decode_from_slice(&wire)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream response",
+            ))
+    }
+    async fn apply_owned(
+        &self,
+        ctx: &RequestContext,
+        req: crate::proto::r#app::r#HolderApplyRequest,
+    ) -> Result<crate::proto::r#app::r#Holder, ::connectrpc::ConnectError> {
+        use buffa::{Message, HasMessageView};
+        use connectrpc::Encodable;
+        let bytes = req.encode_to_bytes();
+        let view = crate::proto::r#app::r#HolderApplyRequest::decode_view(&bytes)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream request",
+            ))?;
+        let reply = self
+            .apply(ctx.clone(), ServiceRequest::from_parts(&view, &bytes))
+            .await?;
+        let wire = reply.body.encode(connectrpc::CodecFormat::Proto)?;
+        crate::proto::r#app::r#Holder::decode_from_slice(&wire)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream response",
+            ))
+    }
+    async fn erase_owned(
+        &self,
+        ctx: &RequestContext,
+        req: crate::proto::r#app::r#HolderRef,
+    ) -> Result<crate::proto::r#app::r#HolderEraseResponse, ::connectrpc::ConnectError> {
+        use buffa::{Message, HasMessageView};
+        use connectrpc::Encodable;
+        let bytes = req.encode_to_bytes();
+        let view = crate::proto::r#app::r#HolderRef::decode_view(&bytes)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream request",
+            ))?;
+        let reply = self
+            .erase(ctx.clone(), ServiceRequest::from_parts(&view, &bytes))
+            .await?;
+        let wire = reply.body.encode(connectrpc::CodecFormat::Proto)?;
+        crate::proto::r#app::r#HolderEraseResponse::decode_from_slice(&wire)
             .map_err(|_| connectrpc::ConnectError::internal(
                 "invalid downstream response",
             ))
@@ -3886,6 +4518,48 @@ pub trait TenantCalls: crate::services::r#app::TenantService {
             ))?;
         let reply = self
             .get(ctx.clone(), ServiceRequest::from_parts(&view, &bytes))
+            .await?;
+        let wire = reply.body.encode(connectrpc::CodecFormat::Proto)?;
+        crate::proto::r#app::r#Tenant::decode_from_slice(&wire)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream response",
+            ))
+    }
+    async fn patch_owned(
+        &self,
+        ctx: &RequestContext,
+        req: crate::proto::r#app::r#TenantPatchRequest,
+    ) -> Result<crate::proto::r#app::r#Tenant, ::connectrpc::ConnectError> {
+        use buffa::{Message, HasMessageView};
+        use connectrpc::Encodable;
+        let bytes = req.encode_to_bytes();
+        let view = crate::proto::r#app::r#TenantPatchRequest::decode_view(&bytes)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream request",
+            ))?;
+        let reply = self
+            .patch(ctx.clone(), ServiceRequest::from_parts(&view, &bytes))
+            .await?;
+        let wire = reply.body.encode(connectrpc::CodecFormat::Proto)?;
+        crate::proto::r#app::r#Tenant::decode_from_slice(&wire)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream response",
+            ))
+    }
+    async fn apply_owned(
+        &self,
+        ctx: &RequestContext,
+        req: crate::proto::r#app::r#TenantApplyRequest,
+    ) -> Result<crate::proto::r#app::r#Tenant, ::connectrpc::ConnectError> {
+        use buffa::{Message, HasMessageView};
+        use connectrpc::Encodable;
+        let bytes = req.encode_to_bytes();
+        let view = crate::proto::r#app::r#TenantApplyRequest::decode_view(&bytes)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream request",
+            ))?;
+        let reply = self
+            .apply(ctx.clone(), ServiceRequest::from_parts(&view, &bytes))
             .await?;
         let wire = reply.body.encode(connectrpc::CodecFormat::Proto)?;
         crate::proto::r#app::r#Tenant::decode_from_slice(&wire)

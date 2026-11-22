@@ -3,6 +3,13 @@ use paydirt_model::Dialect;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// A protobuf JSON row resolved for an authenticated principal by the host.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PrincipalRow {
+    pub entity: String,
+    pub value: Value,
+}
+
 /// Established by the host's credential resolver before calling the application.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Frame {
@@ -13,6 +20,10 @@ pub struct Frame {
     pub topics: crate::TopicGrants,
     #[serde(default)]
     pub actor: Option<Vec<u8>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub row: Option<PrincipalRow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller_row: Option<PrincipalRow>,
     #[serde(default)]
     pub tenants: Option<Vec<Vec<u8>>>,
     #[serde(default)]
@@ -27,6 +38,8 @@ pub struct Frame {
     pub trace: Vec<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub address: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub counterpart: Option<Vec<u8>>,
     pub action: String,
 }
 
@@ -58,6 +71,10 @@ pub enum Packet {
         id: String,
         call: Call,
     },
+    Concerning {
+        id: String,
+        tenant: Option<Vec<u8>>,
+    },
     Settle {
         id: String,
         commit: bool,
@@ -88,6 +105,18 @@ impl Store {
     /// Only a session opened on this connection can issue operations or finish it.
     pub fn handle(&mut self, packet: Packet) -> Result<Value> {
         match packet {
+            Packet::Concerning { id, tenant } => {
+                if tenant.as_ref().is_some_and(|v| !paydirt::has_domain(v, 1)) {
+                    return Err(Fault::invalid("expected a tenant identifier"));
+                }
+                let session = self
+                    .session
+                    .as_mut()
+                    .filter(|s| s.id == id)
+                    .ok_or_else(|| Fault::denied("unknown request transaction"))?;
+                session.frame.counterpart = tenant;
+                Ok(Value::Null)
+            }
             Packet::Settle { id, commit } => {
                 let groups = self
                     .session
@@ -191,6 +220,7 @@ impl Store {
                 let written: Vec<_> = session.written.values().flatten().cloned().collect();
                 if commit && failed.is_none() {
                     let mut tx = Transaction {
+                        scope_rules: self.scope_rules.as_deref().unwrap_or_default(),
                         pending_access: None,
                         admission: None,
                         origin: None,
@@ -287,6 +317,7 @@ impl Store {
             }
         };
         let mut tx = Transaction {
+            scope_rules: self.scope_rules.as_deref().unwrap_or_default(),
             pending_access: Some(&mut session.written),
             admission: self.admission.as_ref(),
             origin: session.origin.clone(),
@@ -317,7 +348,23 @@ impl Store {
                         .get("account")
                         .is_some()
             });
-            if self
+            let selected = session
+                .frame
+                .action
+                .strip_prefix('/')
+                .and_then(|s| s.rsplit_once("Service/"))
+                .and_then(|(e, m)| self.policies.get(e)?.methods.get(m))
+                .is_some_and(|m| m["policy"].get("account").is_some());
+            let direct = self
+                .policies
+                .get(&call.entity)
+                .and_then(|p| p.methods.get(&call.method))
+                .is_some_and(|m| m["policy"].get("account").is_some());
+            if !selected && !direct {
+                Err(Fault::denied(
+                    "account credential requires an account method",
+                ))
+            } else if self
                 .policies
                 .get(&call.entity)
                 .is_some_and(|p| p.notification)
@@ -329,10 +376,12 @@ impl Store {
             {
                 tx.notify(&call.entity, &call.method, &call.request)
             } else if declared
-                && session.frame.action == format!("/{}Service/Memberships", call.entity)
+                && (session.frame.action.is_empty()
+                    || session.frame.action == format!("/{}Service/Memberships", call.entity))
                 && call.method == "Memberships"
             {
                 let mut reader = Transaction {
+                    scope_rules: tx.scope_rules,
                     pending_access: tx.pending_access.as_deref_mut(),
                     admission: None,
                     origin: None,

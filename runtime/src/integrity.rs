@@ -349,14 +349,25 @@ fn id(v: &Value) -> Result<[u8; 16]> {
 }
 impl Transaction<'_> {
     /// The integrity image includes a soft-erased row until it is physically removed.
-    fn stored_object(
+    pub(crate) fn stored_object(
         &mut self,
         entity: &Entity,
         object: &[u8; 16],
         lock: bool,
     ) -> Result<Option<Value>> {
+        self.stored_row(entity, &value::encoded(object), lock)
+    }
+    pub(crate) fn stored_row(
+        &mut self,
+        entity: &Entity,
+        key: &Value,
+        lock: bool,
+    ) -> Result<Option<Value>> {
         let mut q = Query::new("");
-        let id = q.param(Bind::Bytes(object.to_vec()), self.db.dialect());
+        let id = q.param(
+            value::bind(entity.key().map_err(Fault::internal)?, key)?,
+            self.db.dialect(),
+        );
         q.sql = format!(
             "SELECT {} AS value FROM {} r WHERE r.{}={id}",
             self.project_sql(entity)?,

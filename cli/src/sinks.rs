@@ -246,7 +246,11 @@ pub fn generate(work: &Path) -> Result<()> {
             "mod {local} {{\nuse super::*;\npub struct Sink(pub Database);\n#[allow(refining_impl_trait)]\nimpl<N: {svc}> {svc}Layer<N> for Sink {{"
         )?;
         for rpc in methods.keys() {
-            if own.is_some() && !matches!(rpc.as_str(), "Get" | "List" | "Memberships") {
+            if own.is_some_and(|owner| match owner {
+                "OWN_HOLDER" => false,
+                "OWN_TENANT" => matches!(rpc.as_str(), "Add" | "AddMany" | "Erase"),
+                _ => !matches!(rpc.as_str(), "Get" | "List" | "Memberships"),
+            }) {
                 continue;
             }
             if !notification
@@ -308,10 +312,15 @@ pub fn generate(work: &Path) -> Result<()> {
                 Some(syn::FnArg::Typed(arg)) => arg.pat.to_token_stream(),
                 _ => return Err("missing request".into()),
             };
-            if own.is_some()
-                && !matches!(rpc.as_str(), "Get" | "List")
-                && method["policy"].get("account").is_none()
-            {
+            let deployment_only = match own {
+                Some("OWN_HOLDER") | None => false,
+                Some("OWN_TENANT") => matches!(rpc.as_str(), "Add" | "AddMany" | "Erase"),
+                Some(_) => {
+                    !matches!(rpc.as_str(), "Get" | "List")
+                        && method["policy"].get("account").is_none()
+                }
+            };
+            if deployment_only {
                 writeln!(
                     gate,
                     "{sig} {{let _=next;{svc}::{fun}(&{svc}Unimplemented,ctx,{arg})}}"
