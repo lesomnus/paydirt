@@ -7,6 +7,7 @@ import { chromium } from "playwright";
 
 const root=join(process.env.CELL_PROJECT,"sandbox");
 await cp(resolve("upstream/internal/apptest/ts/gen"),join(root,"test-client"),{recursive:true});
+await cp(resolve("generated-notify.js"),join(root,"notify.js"));
 await cp(resolve("generated-past.js"),join(root,"past.js"));
 await cp(resolve("generated-account.js"),join(root,"account.js"));
 await cp(resolve("generated-pair.js"),join(root,"pair.js"));
@@ -24,7 +25,7 @@ export async function open(principals,withAccounts=false,restricted=false){
   const sandbox=await openSandbox(withAccounts?{...principals,...membership.principals}:principals,"paydirt",{allowGeneralWrites:true,seeds:withAccounts?membership.seeds:[],policy:restricted?membership.policy:undefined});
   const bytes=new Uint8Array(await (await fetch("./pkg/descriptors.binpb")).arrayBuffer());
   const registry=createFileRegistry(fromBinary(FileDescriptorSetSchema,bytes));const robot=registry.getService("app.RobotService");const holder=registry.getService("app.HolderService");
-  const owned=name=>{const svc=registry.getService("app."+name+"Service");return svc && createClient(svc,sandbox.link.transport)};return {event:owned("Event"),fact:owned("Fact"),holder:holder && createClient(holder,sandbox.link.transport),typed:robot && createClient(robot,sandbox.link.transport),robots:createClient(RobotService,sandbox.link.transport),client:createClient(CellService,sandbox.link.transport),close:()=>sandbox.close()};
+  const owned=name=>{const svc=registry.getService("app."+name+"Service");return svc && createClient(svc,sandbox.link.transport)};return {notification:owned("Notification"),accountNotification:owned("NotificationAccount"),event:owned("Event"),fact:owned("Fact"),holder:holder && createClient(holder,sandbox.link.transport),typed:robot && createClient(robot,sandbox.link.transport),robots:createClient(RobotService,sandbox.link.transport),client:createClient(CellService,sandbox.link.transport),close:()=>sandbox.close()};
 }
 `);
 const server=await createServer({root,optimizeDeps:{entries:["index.html","harness.js"]},server:{hmr:false,host:"127.0.0.1",port:0},logLevel:"error"});
@@ -72,6 +73,8 @@ try{
         const {exerciseMove}=await import("/moves.js");
         const {queryScenario}=await import("/query.js");
         const report=await queryScenario(app.robots,bytes,opts(a));
+        const {notificationCases}=await import("/notify.js");const actor=bytes.slice();actor[9]=2;
+        await notificationCases(app.notification,app.accountNotification,bytes,actor,opts);
         const {pastScenario}=await import("/past.js"); report.past=await pastScenario({robot:app.robots,cell:app.client,event:app.event,fact:app.fact},bytes,opts(a));
         const otherBytes=Uint8Array.from(other.match(/../g),s=>parseInt(s,16));
         return {report,cell:Array.from(cell.id),...await exerciseMove(app.robots,app.client,opts(a),opts(b),opts("represented"),opts("reader"),bytes,otherBytes)};

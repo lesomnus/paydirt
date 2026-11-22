@@ -12,6 +12,7 @@ import {queryScenario} from "./generated-query.js";
 import {goReference} from "./compare-queries.mjs";
 import {filePolicy} from "./generated-file-policy.mjs";
 import {accounts,accountCases} from "./generated-account.js";
+import {notificationCases} from "./generated-notify.js";
 import {pastScenario} from "./generated-past.js";
 import {runPair} from "./generated-pair.js";
 import {fromBinary,createFileRegistry} from "@bufbuild/protobuf";
@@ -91,6 +92,7 @@ try {
         }
         const report=await queryScenario(robots,primary.id,own);
         const owned=name=>createClient(createFileRegistry(descriptors).getService("app."+name+"Service"),createConnectTransport({baseUrl,useBinaryFormat:true}));
+        await notificationCases(owned("Notification"),owned("NotificationAccount"),primary.id,actor,opts);
         report.past=await pastScenario({robot:typed,cell,event:owned("Event"),fact:owned("Fact")},primary.id,own);
         if(reference){assert.deepEqual(report,reference);console.log(engine,"matches the Go reference for List and Watch",report);}
         await exerciseMove(robots,cell,own,foreign,opts("represented"),opts("reader"),primary.id,other.id);
