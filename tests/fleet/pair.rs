@@ -5,10 +5,33 @@ use crate::{
 };
 use connectrpc::{RequestContext, Response, ServiceRequest, ServiceResult};
 
-pub struct Pair;
+pub struct Pair(pub crate::storage::Next);
 
 #[allow(refining_impl_trait)]
 impl<N: RobotService> RobotServiceLayer<N> for Pair {
+    async fn allowance(
+        &self,
+        _: &N,
+        ctx: RequestContext,
+        request: ServiceRequest<'_, RobotAllowanceRequest>,
+    ) -> ServiceResult<RobotAllowanceResponse> {
+        let req = request.to_owned_message();
+        let value = self
+            .0
+            .0
+            .entitlement(
+                &ctx,
+                "app.Robot",
+                req.key.as_deref().unwrap_or_default(),
+                req.lock.unwrap_or_default(),
+            )
+            .await?;
+        Response::ok(RobotAllowanceResponse {
+            enabled: Some(value.has()),
+            allows_two: Some(value.allows(2)),
+            ..Default::default()
+        })
+    }
     async fn rename_pair(
         &self,
         next: &N,

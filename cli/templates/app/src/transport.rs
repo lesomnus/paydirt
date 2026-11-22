@@ -427,6 +427,21 @@ impl Database {
         )
         .await
     }
+    pub async fn entitlement(
+        &self,
+        ctx: &RequestContext,
+        entity: &str,
+        key: &str,
+        lock: bool,
+    ) -> Result<paydirt_store::entitle::Allowance, ConnectError> {
+        self.rpc(
+            ctx,
+            entity,
+            "$entitlement",
+            &serde_json::json!({"key":key,"lock":lock}),
+        )
+        .await
+    }
     pub async fn state(
         &self,
         ctx: &RequestContext,

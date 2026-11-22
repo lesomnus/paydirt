@@ -22,7 +22,7 @@ import {createClient} from "@connectrpc/connect";
 import {accounts} from "./account.js";
 export async function open(principals,withAccounts=false,restricted=false){
   const membership=accounts(Object.values(principals).slice(0,2));
-  const sandbox=await openSandbox(withAccounts?{...principals,...membership.principals}:principals,"paydirt",{allowGeneralWrites:true,seeds:withAccounts?membership.seeds:[],policy:restricted?membership.policy:undefined});
+  const sandbox=await openSandbox(withAccounts?{...principals,...membership.principals}:principals,"paydirt",{allowGeneralWrites:true,seeds:withAccounts?[...membership.seeds,membership.grant]:[],policy:restricted?membership.policy:undefined});
   const bytes=new Uint8Array(await (await fetch("./pkg/descriptors.binpb")).arrayBuffer());
   const registry=createFileRegistry(fromBinary(FileDescriptorSetSchema,bytes));const robot=registry.getService("app.RobotService");const holder=registry.getService("app.HolderService");
   const owned=name=>{const svc=registry.getService("app."+name+"Service");return svc && createClient(svc,sandbox.link.transport)};return {notification:owned("Notification"),accountNotification:owned("NotificationAccount"),event:owned("Event"),fact:owned("Fact"),holder:holder && createClient(holder,sandbox.link.transport),typed:robot && createClient(robot,sandbox.link.transport),robots:createClient(RobotService,sandbox.link.transport),client:createClient(CellService,sandbox.link.transport),close:()=>sandbox.close()};
@@ -70,6 +70,7 @@ try{
         const {accountCases}=await import("/account.js");await accountCases(app.holder,app.typed,[tenant,other]);
         const {runPair}=await import("/pair.js");
         await runPair(app.typed,opts(a),bytes);
+        if(!(await app.typed.allowance({key:"fleet.browser",lock:true},opts(a))).allowsTwo || (await app.typed.allowance({key:"fleet.browser",lock:true},opts(b))).enabled)throw Error("entitlement tenant or limit mismatch");
         const {exerciseMove}=await import("/moves.js");
         const {queryScenario}=await import("/query.js");
         const report=await queryScenario(app.robots,bytes,opts(a));

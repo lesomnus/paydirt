@@ -10,6 +10,7 @@ import {operatorScenario} from "./generated-operator.mjs";
 import { exerciseTenancy } from "./generated-tenancy.mjs";
 import {queryScenario} from "./generated-query.js";
 import {goReference} from "./compare-queries.mjs";
+import {billingCases} from "./generated-billing.mjs";
 import {filePolicy} from "./generated-file-policy.mjs";
 import {accounts,accountCases} from "./generated-account.js";
 import {notificationCases} from "./generated-notify.js";
@@ -83,6 +84,7 @@ try {
         const typed=createClient(robotType,createConnectTransport({baseUrl,useBinaryFormat:true}));
         const holder=createClient(createFileRegistry(descriptors).getService("app.HolderService"),createConnectTransport({baseUrl,useBinaryFormat:true}));
         await accountCases(holder,typed,tenantNames);
+        await billingCases(app,process.env.CELL_PROJECT,env,typed,primary,other);
         await runPair(typed,own,primary.id);
         for(const [table,column] of [["Audit","f10"],["Outbox","f9"]]){
           const sql='SELECT count(*) FROM "pd_app__'+table+'" WHERE '+column+"='/app.RobotService/RenamePair'";
