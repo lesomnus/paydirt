@@ -22,7 +22,11 @@ fn exercise(url: &str) {
     };
     db.call(
         &Scope::Internal,
-        call("Tenant", "Add", json!({"id":t,"alias":hex::encode(tenant)})),
+        call(
+            "Tenant",
+            "Add",
+            json!({"id":t,"alias":format!("tenant-{}",hex::encode(tenant))}),
+        ),
     )
     .unwrap();
     let frame = Frame {

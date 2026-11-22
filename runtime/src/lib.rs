@@ -8,6 +8,7 @@ pub mod entitle;
 mod list;
 pub mod meter;
 mod migrate;
+pub mod naming;
 mod notify;
 mod past;
 mod relations;
@@ -87,6 +88,7 @@ pub struct Policy {
 }
 pub type Policies = BTreeMap<String, Policy>;
 pub struct Store {
+    namer: Box<dyn naming::Namer>,
     db: Connection,
     session: Option<session::Session>,
     model: Model,
@@ -106,12 +108,18 @@ impl Store {
             watch::install(tx)
         })?;
         Ok(Self {
+            namer: Box::new(naming::names),
             db,
             session: None,
             model,
             policies,
         })
     }
+    pub fn with_namer(mut self, namer: impl naming::Namer + 'static) -> Self {
+        self.namer = Box::new(namer);
+        self
+    }
+
     /// Host-only operations used by the application executable and sandbox bootstrap.
     pub fn operator(&mut self, call: Call) -> Result<Value> {
         let p = self.policies.get(&call.entity);
@@ -185,6 +193,7 @@ impl Store {
         let (model, policies) = (&self.model, &self.policies);
         self.db.transaction(|db| {
             let mut tx = Transaction {
+                namer: &*self.namer,
                 db,
                 model,
                 policies,
@@ -201,6 +210,7 @@ impl Store {
     }
 }
 pub struct Transaction<'a> {
+    namer: &'a dyn naming::Namer,
     db: &'a mut dyn Driver,
     model: &'a Model,
     policies: &'a Policies,

@@ -108,6 +108,7 @@ impl Store {
                     sets: session.frame.sets.clone(),
                 };
                 let mut tx = Transaction {
+                    namer: &*self.namer,
                     db: self.db.driver()?,
                     policies: &self.policies,
                     model: &self.model,
@@ -138,6 +139,7 @@ impl Store {
                         && call.method == "Memberships"
                     {
                         let mut reader = Transaction {
+                            namer: tx.namer,
                             db: tx.db,
                             model: tx.model,
                             policies: tx.policies,

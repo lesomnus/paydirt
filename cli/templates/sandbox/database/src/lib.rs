@@ -42,7 +42,12 @@ impl AppDatabase {
             match db.call(&Scope::Internal, call("Get", json!({"ref":{"id":id}}))) {
                 Ok(_) => {}
                 Err(f) if f.code == "not_found" => {
-                    db.call(&Scope::Internal, call("Add", json!({"id":id,"alias":hex})))?;
+                    let alias = if hex.starts_with(|c: char| c.is_ascii_digit()) {
+                        format!("tenant-{hex}")
+                    } else {
+                        hex
+                    };
+                    db.call(&Scope::Internal, call("Add", json!({"id":id,"alias":alias})))?;
                 }
                 Err(e) => return Err(e.into()),
             }

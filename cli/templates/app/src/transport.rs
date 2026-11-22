@@ -218,9 +218,12 @@ struct ResolvedKey(String);
 impl Database {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn open(url: &str, config: &str) -> Result<Self, String> {
+        let store = paydirt_store::Store::open(url, MODEL, POLICIES).map_err(|e| e.to_string())?;
+        Self::from_store(store, config)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn from_store(mut store: paydirt_store::Store, config: &str) -> Result<Self, String> {
         let principals = Arc::new(tokens(config)?);
-        let mut store =
-            paydirt_store::Store::open(url, MODEL, POLICIES).map_err(|e| e.to_string())?;
         let (queue, events) = std::sync::mpsc::channel::<(
             Packet,
             futures_channel::oneshot::Sender<Result<Value, Fault>>,
