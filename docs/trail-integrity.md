@@ -12,7 +12,9 @@ The pinned Go fixture uses upstream Payday to emit row MACs, seals, a signed man
 | AWS KMS and Vault Transit | A Rust signer or separate signing process can keep the key with the provider. Dedicated AWS SDK and Vault HTTP clients and live-provider verification remain open. |
 | PKCS#11 and TPM | The same signer API supports deployment-managed devices. Direct module and TPM device drivers require separate integrations and hardware verification. |
 | Directory witness | Publishes immutable numbered receipts outside the primary archive. Requires atomic hard links and directory sync. |
-| Log, remote object store, Rekor | A deployment can implement the Rust Witness trait. Dedicated remote adapters and Rekor inclusion-proof verification remain open. |
+| Log | Publishes the checkpoint number and digest to stderr and records a local receipt. |
+| Rekor v1 and v2 | Submits the digest of the checkpoint statement, proves inclusion in the configured log’s signed Merkle tree, and checks consistency against its current signed head. V1 also searches the deployment’s keys for checkpoints missing from the archive. |
+| Other remote object stores | A deployment can implement the Rust Witness trait. |
 
 For a process signer set `PAYDIRT_SIGNER_PROGRAM`, a JSON argument vector in `PAYDIRT_SIGNER_ARGS` and a PKIX DER public key in `PAYDIRT_SIGNER_PUBLIC_KEY`. The process reads the statement on stdin and returns its raw signature on stdout. The framework verifies each signature before publishing. `PAYDIRT_TRUST_KEYS` accepts a JSON list of trusted DER public key paths for rotation.
 
@@ -26,3 +28,8 @@ Configure the archive directory to include it in `trail-scan` and `trail-row`. N
 Set `PAYDIRT_AUDIT_PREVIOUS_KEYS` to a JSON list of hexadecimal verification keys after rotation. `PAYDIRT_AUDIT_RETIRED` accepts released eight-byte fingerprints in the same format. `PAYDIRT_AUDIT_SINCE` marks the RFC 3339 start of digesting. A scan rejects a start time later than an authenticated digest. Reports distinguish retired keys, unavailable keys, forgotten seals and rows written before sealing started.
 
 When maintenance destroys the last evidence of a live row, it carries the authenticated digest into a new audit entry before deleting the old evidence. A carry preserves the evidence of the original state, including a forgotten seal. A subsequent business write records the new state.
+
+
+`PAYDIRT_WITNESSES` accepts a JSON list. Entries may be `log:`, `store:/path/to/independent-store`, or `rekor:https://log.example?key=/etc/paydirt/log.pem&v=2`. Supply the log's PEM or DER public key and optionally its signed-note origin. The local Ed25519 checkpoint signer signs a SHA-512 digest using Ed25519ph for Rekor. Entry bodies contain the digest, signature and deployment public key. The archive keeps the inclusion receipt for each checkpoint. V2 uses authenticated tiles to verify tree consistency. Detecting a v2 checkpoint removed with all its receipts requires an independent witness or log monitor.
+
+`python3 scripts/test-rekor.py /path/to/payday` exercises both upstream log implementations, checks a tile boundary, and covers receipt corruption, a rewritten log, temporary unavailability and v1 truncation.

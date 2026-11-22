@@ -30,6 +30,11 @@ serde_json = {version="1",features=["raw_value"]}
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ring="0.17"
+ed25519-dalek={version="2.2",features=["pkcs8","digest"]}
+ureq={version="2.12",features=["json"]}
+url="2.5"
+pem="3"
+pkcs1="0.7"
 flate2="1"
 spki={version="0.7",features=["std"]}
 cel={version="0.16",optional=true,default-features=false}

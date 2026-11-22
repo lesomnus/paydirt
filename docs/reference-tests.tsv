@@ -259,7 +259,7 @@ ref_test.go	71	TestAReferenceFoldsTheWayTheDatabaseFolded	tracked			103
 ref_test.go	86	TestTheKindIsCheckedOnEveryVerbThatTakesOne	tracked			103
 ref_test.go	112	TestTheKindReachesACommandTheAppWiredItself	tracked			103
 ref_test.go	134	TestUniqueKeysAndNestedReferencesTravelTheStack	tracked			103
-rekor_test.go	29	TestTheHeadOfTheChainIsLoggedToRekor	tracked			100
+rekor_test.go	29	TestTheHeadOfTheChainIsLoggedToRekor	verified	native/rekor-v1+v2	runtime/tests/rekor.rs#L62	-
 representation_test.go	19	TestRepresentedWriteRecordsBothPartiesAndDirectCallsRemainNull	tracked	connect/sqlite	web/generated-presence.mjs#L28	101
 representation_test.go	52	TestDirectMethodRefusesRepresentationAtTransportAndInsideTheProcess	tracked			101
 resource_test.go	38	TestResourceWatchImages	verified	connect/sqlite+postgres;drpc/opfs	web/generated-resource.js#L41	-
@@ -352,7 +352,7 @@ web_test.go	257	TestAnOriginNobodyNamedIsNotAnsweredFor	verified	connect/tls-sql
 web_test.go	292	TestTheAppsOwnRoutesGetTheSameAnswer	tracked			106
 web_test.go	329	TestAnAddressWithNothingConfiguredIsStillAMux	tracked			106
 web_test.go	359	TestTheBrowserPortCarriesGrpcToo	tracked			106
-witness_test.go	29	TestTheHeadOfTheChainIsHeardOutsideTheDatabase	tracked			100
+witness_test.go	29	TestTheHeadOfTheChainIsHeardOutsideTheDatabase	verified	native/witness-store+log	runtime/tests/rekor.rs#L103	-
 wordscmd_test.go	52	TestLsStillRunsTheList	verified	connect/sqlite+postgres	web/generated-operator.mjs#L37	-
 wordscmd_test.go	89	TestAnAppGivesACommandWordsOfItsOwn	verified	connect/sqlite+postgres	web/generated-operator.mjs#L15	-
 wordscmd_test.go	141	TestAWordThatWouldRunTwoCommandsIsRefused	tracked			106

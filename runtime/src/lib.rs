@@ -15,6 +15,8 @@ pub mod domain;
 pub mod header;
 pub mod integrity;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod rekor;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod retention;
 pub use paydirt_model;
 mod driver;
