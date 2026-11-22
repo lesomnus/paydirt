@@ -42,7 +42,18 @@ jobs:
       - run: scripts/test-gen.sh && scripts/test-new.sh
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/app-target
-      - run: npm ci --prefix web && scripts/test-generated-cell.sh
+      - name: Install browser and Worker build tools
+        run: |
+          rustup target add wasm32-unknown-unknown
+          archive=wasm-bindgen-0.2.130-x86_64-unknown-linux-musl
+          curl -fsSLo "$RUNNER_TEMP/$archive.tgz" "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.130/$archive.tar.gz"
+          echo "9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f  $RUNNER_TEMP/$archive.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$archive.tgz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/$archive" >> "$GITHUB_PATH"
+          npm ci --prefix web
+          (cd web && npx playwright install --with-deps chromium)
+      - run: scripts/test-generated-cell.sh
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/app-target
+          PAYDIRT_TEST_WASM: "1"
           DATABASE_URL: postgres://postgres:paydirt@127.0.0.1:5432/paydirt

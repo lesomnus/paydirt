@@ -22,3 +22,10 @@ CELL_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)
 export CELL_PORT
 cd "$repo/web"
 node generated-cell.mjs
+
+if [[ "${PAYDIRT_TEST_WASM:-0}" == 1 ]]; then
+  "${PAYDIRT_BIN:-$repo/target/debug/paydirt}" sandbox init "$CELL_PROJECT"
+  "${PAYDIRT_BIN:-$repo/target/debug/paydirt}" sandbox init "$CELL_PROJECT"
+  (cd "$CELL_PROJECT/sandbox" && bash build.sh && npm ci --no-audit --no-fund)
+  node generated-browser.mjs
+fi

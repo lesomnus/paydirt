@@ -3,14 +3,21 @@ mod layers;
 mod new;
 mod payday;
 mod policy;
+mod sandbox;
 mod sinks;
 use std::{env, path::PathBuf, process::ExitCode};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
-const HELP: &str = "Usage: paydirt new NAME [DIRECTORY]\n       paydirt gen [--check] [DIRECTORY]";
+const HELP: &str = "Usage: paydirt new NAME [DIRECTORY]\n       paydirt gen [--check] [DIRECTORY]\n       paydirt sandbox init [DIRECTORY]";
 
 fn run(args: &[String]) -> Result<()> {
     match args {
+        [cmd, action] if cmd == "sandbox" && action == "init" => {
+            sandbox::init(std::path::Path::new("."))
+        }
+        [cmd, action, dir] if cmd == "sandbox" && action == "init" => {
+            sandbox::init(std::path::Path::new(dir))
+        }
         [cmd, name] if cmd == "new" => new::run(name, std::path::Path::new(name)),
         [cmd, name, dir] if cmd == "new" => new::run(name, std::path::Path::new(dir)),
         [help] if help == "--help" || help == "-h" => {

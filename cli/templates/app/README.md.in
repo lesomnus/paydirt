@@ -8,3 +8,9 @@ Edit the entity in `proto/app/setting.proto` and run `paydirt gen` to regenerate
 The native server creates its tables in `paydirt.sqlite3` by default. Set `DATABASE_URL` to a PostgreSQL URL to use that backend. For a tenanted entity, provision a tenant using the local app binary and put its hex ID in the `PAYDIRT_PRINCIPALS` token-to-tenant JSON map. Only the operator with database access can invoke the binary's internal commands. The public Connect services resolve their caller from the bearer token.
 
 `cargo run -- app.Tenant Add '{"alias":"my-team"}'` prints the new tenant with its protobuf JSON (base64) ID. App-owned entities declared in `proto/` receive a generated Diesel sink and registration in the app router. Customize a service by wrapping its typed next service in the app's `storage::Layers` implementation.
+
+## Browser sandbox
+
+Run `paydirt sandbox init`, install Rust's `wasm32-unknown-unknown` target, Clang and `wasm-bindgen-cli` 0.2.130. In `sandbox/`, run `npm ci`, `npm run build:wasm`, and `npm run dev`. The page calls the same app router over a MessagePort. The database Worker owns SQLite and retains rows in OPFS across page reloads.
+
+A web client can import `openSandbox(principals)` from `sandbox/client.js`, pass `box.link.transport` to its generated Connect client, then call `box.close()` on shutdown. Supply a map of opaque bearer tokens to hex tenant IDs to provision the local sandbox. The link implementation and its Apache license come from [Payday](https://github.com/lesomnus/payday/blob/53acc135/ts/src/sandbox/link.ts).

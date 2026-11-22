@@ -30,3 +30,10 @@ wasm-bindgen = "=0.2.130"
 js-sys = "0.3"
 wasm-bindgen-futures = "0.4"
 send_wrapper = {version="0.6",features=["futures"]}
+drpc-rs = { git = "https://github.com/lesomnus/drpc-rs", rev = "2e9d63e2c21a908b88c3569c9c8d785b3b33893c" }
+web-sys = { version = "0.3", features = ["MessagePort"] }
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = "debuginfo"
