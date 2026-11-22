@@ -116,6 +116,63 @@ pub(crate) fn build(root: &Path, work: &Path) -> Result<()> {
     Ok(())
 }
 
+// protobuf-es emits descriptors for Connect clients, while Payday emits the
+// domain, entity and event tables from the very same resolved descriptors.
+fn typescript(root: &Path, work: &Path) -> Result<()> {
+    let plugin = [
+        "ts/node_modules/.bin/protoc-gen-es",
+        "node_modules/.bin/protoc-gen-es",
+    ]
+    .into_iter()
+    .map(|p| root.join(p))
+    .find(|p| p.is_file())
+    .unwrap_or_else(|| PathBuf::from("protoc-gen-es"));
+    let template = format!(
+        r#"version: v2
+plugins:
+  - local: {}
+    out: generated/ts
+    include_imports: true
+    strategy: all
+    opt: [target=ts, import_extension=js]
+  - local: protoc-gen-pd
+    out: generated/ts
+    include_imports: true
+    strategy: all
+    opt: [stage=ts]
+"#,
+        serde_json::to_string(&plugin)?
+    );
+    buf(work, &template).map_err(|e| {
+        format!("generating TypeScript (install @bufbuild/protoc-gen-es in ts/ or the app): {e}")
+    })?;
+    let output = work.join("generated/ts");
+    for (path, bytes) in files(&output)? {
+        let source = String::from_utf8(bytes)?;
+        let imports = source.replace("_svc.g_pb.js\"", "_svc_pb.js\"");
+        let name = path
+            .file_name()
+            .unwrap()
+            .to_str()
+            .ok_or("non-UTF-8 generated filename")?;
+        if let Some(stem) = name.strip_suffix("_svc.g_pb.ts") {
+            let dest = output.join(path.with_file_name(format!("{stem}_svc_pb.ts")));
+            if dest.exists() {
+                return Err(format!(
+                    "generated TypeScript filename collision: {}",
+                    dest.display()
+                )
+                .into());
+            }
+            fs::rename(output.join(&path), &dest)?;
+            fs::write(dest, imports)?;
+        } else if imports != source {
+            fs::write(output.join(path), imports)?;
+        }
+    }
+    Ok(())
+}
+
 fn owned(dir: &Path) -> Result<bool> {
     match dir.symlink_metadata() {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
@@ -132,6 +189,10 @@ fn owned(dir: &Path) -> Result<bool> {
 }
 
 pub fn run(root: &Path, check: bool) -> Result<()> {
+    run_with_ts(root, check, false)
+}
+
+pub fn run_with_ts(root: &Path, check: bool, ts: bool) -> Result<()> {
     let root = root.canonicalize()?;
     let config = root.join("buf.yaml");
     let lock = fs::File::open(&config).map_err(|e| format!("{}: {e}", config.display()))?;
@@ -160,6 +221,9 @@ pub fn run(root: &Path, check: bool) -> Result<()> {
         tempfile::tempdir_in(&root)?
     };
     build(&root, work.path())?;
+    if ts || output.join("ts").is_dir() {
+        typescript(&root, work.path())?;
+    }
     let fresh = work.path().join("generated");
     let current = if exists {
         files(&output)?

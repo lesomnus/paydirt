@@ -10,7 +10,7 @@ mod sinks;
 use std::{env, path::PathBuf, process::ExitCode};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
-const HELP: &str = "Usage: paydirt new NAME [DIRECTORY]\n       paydirt gen [--check] [DIRECTORY]\n       paydirt sandbox init [DIRECTORY]\n       paydirt doctor [DIRECTORY]\n       paydirt versions [DIRECTORY]\n       paydirt upgrade [--dry-run] [DIRECTORY]\n       paydirt buf [--directory DIRECTORY] [BUF OPTIONS]\n       paydirt entity list [DIRECTORY]\n       paydirt entity add [--tenanted|--global] [--watch] [--file FILE] NAME [DIRECTORY]";
+const HELP: &str = "Usage: paydirt new NAME [DIRECTORY]\n       paydirt gen [--ts] [--check] [DIRECTORY]\n       paydirt sandbox init [DIRECTORY]\n       paydirt doctor [DIRECTORY]\n       paydirt versions [DIRECTORY]\n       paydirt upgrade [--dry-run] [DIRECTORY]\n       paydirt buf [--directory DIRECTORY] [BUF OPTIONS]\n       paydirt entity list [DIRECTORY]\n       paydirt entity add [--tenanted|--global] [--watch] [--file FILE] NAME [DIRECTORY]";
 
 fn directory(args: &[String]) -> Result<&std::path::Path> {
     match args {
@@ -58,16 +58,18 @@ fn run(args: &[String]) -> Result<()> {
         [command, rest @ ..] if command == "gen" => {
             let mut dir = None;
             let mut check = false;
+            let mut ts = false;
             for arg in rest {
                 match arg.as_str() {
                     "--check" if !check => check = true,
+                    "--ts" if !ts => ts = true,
                     path if !path.starts_with('-') && dir.is_none() => {
                         dir = Some(PathBuf::from(path))
                     }
                     _ => return Err(HELP.into()),
                 }
             }
-            generate::run(&dir.unwrap_or_else(|| ".".into()), check)
+            generate::run_with_ts(&dir.unwrap_or_else(|| ".".into()), check, ts)
         }
         _ => Err(HELP.into()),
     }

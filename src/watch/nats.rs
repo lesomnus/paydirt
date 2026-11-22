@@ -51,6 +51,25 @@ impl Nats {
             generation,
         })
     }
+    // async-nats flush completes when bytes reach the socket. A Watch has to
+    // wait until the server actually installs its SUBs, including after a reconnect.
+    async fn registered(&self) -> Result<()> {
+        let subject = format!("{}.sync.{}", self.prefix, Uuid::now_v7());
+        let mut probe = self
+            .client
+            .subscribe(subject.clone())
+            .await
+            .map_err(|e| e.to_string())?;
+        self.client
+            .publish(subject, bytes::Bytes::new())
+            .await
+            .map_err(|e| e.to_string())?;
+        tokio::time::timeout(std::time::Duration::from_secs(5), probe.next())
+            .await
+            .map_err(|_| "NATS subscription confirmation timed out".to_string())?
+            .ok_or_else(|| "NATS connection lost during registration".to_string())?;
+        Ok(())
+    }
     fn patterns(&self, i: &Interest) -> Result<Vec<String>> {
         let services = if i.service.is_empty() {
             vec!["*".into()]
@@ -105,7 +124,7 @@ impl Broker for Nats {
             for s in self.patterns(&interest)? {
                 streams.push(self.client.subscribe(s).await.map_err(|e| e.to_string())?)
             }
-            self.client.flush().await.map_err(|e| e.to_string())?;
+            self.registered().await?;
             if generation.has_changed().unwrap_or(true) {
                 return Err("NATS registration interrupted".into());
             }

@@ -353,7 +353,8 @@ impl Transaction<'_> {
                 if let Some(domain) = self.domain(e)
                     && !paydirt::has_domain(&value::bytes(&v)?, domain)
                 {
-                    return Err(Fault::invalid("incorrect Payday ID domain"));
+                    crate::domain::Domains::from_policies(self.policies)?
+                        .check_id(&value::bytes(&v)?, domain)?;
                 }
                 id = v.clone();
             }

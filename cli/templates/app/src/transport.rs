@@ -8,6 +8,27 @@ use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 
 pub const MODEL: &str = include_str!("../generated/storage/model.json");
 pub const POLICIES: &str = include_str!("../generated/storage/policies.json");
+/// The current and former names from this application's schema.
+pub fn domains() -> &'static paydirt_store::domain::Domains {
+    static DOMAINS: std::sync::LazyLock<paydirt_store::domain::Domains> =
+        std::sync::LazyLock::new(|| {
+            let policies = serde_json::from_str(POLICIES).expect("generated policies");
+            paydirt_store::domain::Domains::from_policies(&policies).expect("generated domains")
+        });
+    &DOMAINS
+}
+
+pub fn header<M: buffa::MessageName + serde::Serialize>(
+    row: &M,
+) -> Result<paydirt_store::header::Header, Fault> {
+    static SCHEMA: std::sync::LazyLock<paydirt_store::paydirt_model::Model> =
+        std::sync::LazyLock::new(|| {
+            paydirt_store::paydirt_model::Model::parse(MODEL.as_bytes())
+                .expect("generated storage model")
+        });
+    let entity = SCHEMA.entity(M::FULL_NAME).map_err(Fault::invalid)?;
+    paydirt_store::header::Header::read(&SCHEMA, entity, row)
+}
 
 #[derive(Deserialize)]
 #[serde(untagged, deny_unknown_fields)]
@@ -160,19 +181,27 @@ fn tokens(config: &str) -> Result<HashMap<String, Principal>, String> {
         .collect()
 }
 
-pub fn error(f: Fault) -> ConnectError {
-    if let Some(field) = &f.field {
+pub fn error(mut f: Fault) -> ConnectError {
+    if f.code == "invalid_argument" && (!f.violations.is_empty() || f.field.is_some()) {
         // google.rpc.BadRequest.field_violations with FieldViolation.field and description.
         fn entry(tag: u8, data: &[u8], out: &mut Vec<u8>) {
             out.push(tag);
             buffa::encoding::encode_varint(data.len() as u64, out);
             out.extend_from_slice(data);
         }
-        let mut violation = Vec::new();
-        entry(10, field.as_bytes(), &mut violation);
-        entry(18, f.message.as_bytes(), &mut violation);
+        if f.violations.is_empty() {
+            f.violations.push(paydirt_store::Violation::new(
+                f.field.take().unwrap_or_default(),
+                f.message.clone(),
+            ));
+        }
         let mut bytes = Vec::new();
-        entry(10, &violation, &mut bytes);
+        for violation in f.violations {
+            let mut detail = Vec::new();
+            entry(10, violation.field.as_bytes(), &mut detail);
+            entry(18, violation.description.as_bytes(), &mut detail);
+            entry(10, &detail, &mut bytes);
+        }
         use base64::Engine;
         return ConnectError::invalid_argument(f.message).with_detail(connectrpc::ErrorDetail {
             type_url: "google.rpc.BadRequest".into(),

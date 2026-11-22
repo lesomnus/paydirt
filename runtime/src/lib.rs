@@ -3,6 +3,9 @@ mod account;
 mod apply;
 pub mod auth;
 mod crud;
+pub mod domain;
+pub mod header;
+pub use paydirt_model;
 mod driver;
 pub mod entitle;
 mod list;
@@ -29,11 +32,27 @@ use std::collections::BTreeMap;
 
 pub type Result<T> = std::result::Result<T, Fault>;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Violation {
+    pub field: String,
+    pub description: String,
+}
+impl Violation {
+    pub fn new(field: impl Into<String>, description: impl Into<String>) -> Self {
+        Self {
+            field: field.into(),
+            description: description.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Fault {
     pub code: String,
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub field: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub violations: Vec<Violation>,
 }
 impl std::fmt::Display for Fault {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -41,7 +60,7 @@ impl std::fmt::Display for Fault {
     }
 }
 impl std::error::Error for Fault {}
-macro_rules! faults {($($f:ident=>$code:literal),*)=>{$(pub fn $f(msg:impl Into<String>)->Self{Self{code:$code.into(),message:msg.into(),field:None}})*};}
+macro_rules! faults {($($f:ident=>$code:literal),*)=>{$(pub fn $f(msg:impl Into<String>)->Self{Self{code:$code.into(),message:msg.into(),field:None,violations:Vec::new()}})*};}
 impl Fault {
     faults!(invalid=>"invalid_argument", conflict=>"already_exists",precondition=>"failed_precondition",aborted=>"aborted",internal=>"internal",unsupported=>"unimplemented",denied=>"permission_denied",unauthenticated=>"unauthenticated");
     pub fn field(name: &str, message: &str) -> Self {
@@ -49,13 +68,59 @@ impl Fault {
             code: "invalid_argument".into(),
             message: message.into(),
             field: Some(name.into()),
+            violations: Vec::new(),
         }
+    }
+    pub fn validation(violations: impl IntoIterator<Item = Violation>) -> Self {
+        let violations: Vec<_> = violations.into_iter().collect();
+        if violations.is_empty() {
+            return Self::internal("a request was refused and nothing said why");
+        }
+        let message = violations
+            .iter()
+            .map(|v| {
+                if v.field.is_empty() {
+                    v.description.clone()
+                } else {
+                    format!("{}: {}", v.field, v.description)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        Self {
+            code: "invalid_argument".into(),
+            message,
+            field: None,
+            violations,
+        }
+    }
+    pub fn at(self, parent: &str) -> Self {
+        if self.code != "invalid_argument" && self.code != "unknown" {
+            return self;
+        }
+        let mut violations = self.violations;
+        if violations.is_empty() {
+            violations.push(Violation::new(self.field.unwrap_or_default(), self.message))
+        }
+        for v in &mut violations {
+            if !parent.is_empty() {
+                v.field = if v.field.is_empty() {
+                    parent.to_owned()
+                } else if v.field.starts_with('[') {
+                    format!("{parent}{}", v.field)
+                } else {
+                    format!("{parent}.{}", v.field)
+                };
+            }
+        }
+        Self::validation(violations)
     }
     pub fn missing() -> Self {
         Self {
             code: "not_found".into(),
             message: "row not found".into(),
             field: None,
+            violations: Vec::new(),
         }
     }
 }
