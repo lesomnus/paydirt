@@ -441,6 +441,12 @@ impl Transaction<'_> {
     }
     pub(crate) fn dispatch(&mut self, e: &Entity, method: &str, req: &Value) -> Result<Value> {
         match method {
+            "$entitlement" => serde_json::to_value(self.entitlement(
+                req["key"].as_str().unwrap_or(""),
+                req["lock"] == true,
+                chrono::Utc::now(),
+            )?)
+            .map_err(|e| Fault::internal(e.to_string())),
             "$event" => self.say(e, req),
             "$state" => self.past_state(e, req),
             "Add" => self.insert(e, req),

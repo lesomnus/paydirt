@@ -4,3 +4,6 @@ message RobotRenamePairRequest {
   RobotRef second = 3;
   string second_alias = 4;
 }
+
+message RobotAllowanceRequest { string key=1; bool lock=2; }
+message RobotAllowanceResponse { bool enabled=1; bool allows_two=2; }

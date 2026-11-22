@@ -43,25 +43,7 @@ impl AppDatabase {
                 row: Value,
             }
             let seeds: Vec<Seed> = serde_json::from_str(&seeds)?;
-            db.transaction(&Scope::Internal, |tx| {
-                for seed in seeds {
-                    let id = seed
-                        .row
-                        .get("id")
-                        .ok_or_else(|| paydirt_store::Fault::invalid("seed requires stable id"))?;
-                    let call = |method: &str, request| Call {
-                        entity: seed.entity.clone(),
-                        method: method.into(),
-                        request,
-                    };
-                    // List returns no rows for a new key, keeping the enclosing transaction healthy.
-                    let found = tx.call(call("List", json!({"filters":[{"ref":{"id":id}}]})))?;
-                    if found["items"].as_array().is_none_or(|rows| rows.is_empty()) {
-                        tx.call(call("Add", seed.row))?;
-                    }
-                }
-                Ok(())
-            })?;
+            db.seed(seeds.into_iter().map(|s| (s.entity, s.row)).collect())?;
         }
         Ok(Self(db))
     }

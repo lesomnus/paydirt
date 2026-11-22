@@ -34,7 +34,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             method: method.clone(),
             request: serde_json::from_str(argument)?,
         };
-        println!("{}", store.call(&paydirt_store::Scope::Internal, call)?);
+        println!("{}", store.operator(call)?);
         return Ok(());
     }
     let config: Config = serde_json::from_slice(&fs::read("app.json")?)?;

@@ -17,7 +17,7 @@ robot = app / "proto/app/robot.proto"
 source = robot.read_text()
 header = source.split("// This package", 1)[0]
 entities = [re.search(rf"^message {name} \{{.*?^\}}", source, re.M | re.S).group() for name in ["Cell", "Robot", "Pairing", "Reading","RobotMoved"]]
-robot.write_text(header + "option (payday.app) = {accounts: {field: {name: \"account\", number: 12}} past: {event:17, fact:18} notify:{notification:40 receipt:41 accounts:{} keep:{days:90 retry_days:1}}};\n" + "\n\n".join(entities) + "\n")
+robot.write_text(header + "option (payday.app) = {accounts: {field: {name: \"account\", number: 12}} past: {event:17, fact:18} entitlements:{domain:43} meters:[{key:\"apptest.robots\" unit:\"{robot}\" count:{of:\"Robot\"}},{key:\"apptest.seats\" unit:\"{seat}\" count:{of:\"Holder\"}},{key:\"apptest.robots.attested\" unit:\"{robot}\" count:{of:\"Robot\" where:[{field:{name:\"date_attested\" number:31} set:true}]}}] notify:{notification:40 receipt:41 accounts:{} keep:{days:90 retry_days:1}}};\n" + "\n\n".join(entities) + "\n")
 for rel in ["ext/app/payday/holder_svc.ext.proto", "ext/payday/holder.ext.proto","app/profile.proto"]:
     dest=app / "proto" / rel
     dest.parent.mkdir(exist_ok=True,parents=True)
@@ -34,7 +34,7 @@ source = source.replace("database, &App(name)", "database.clone(), &App(name, st
 # Test the transaction boundary with a second independent user layer.
 copyfile(repo / "tests/fleet/pair.rs", app / "src/pair.rs")
 overlay = app / "proto/ext/app/robot_svc.ext.proto"
-overlay.write_text(overlay.read_text().replace("service RobotService {", "service RobotService {\n  rpc RenamePair(RobotRenamePairRequest) returns (Robot);") + "\n" + (repo / "tests/fleet/pair.proto").read_text())
+overlay.write_text(overlay.read_text().replace("service RobotService {", "service RobotService {\n  rpc RenamePair(RobotRenamePairRequest) returns (Robot);\n  rpc Allowance(RobotAllowanceRequest) returns (RobotAllowanceResponse);") + "\n" + (repo / "tests/fleet/pair.proto").read_text())
 source = "mod pair;\n" + source.replace("services::app::RobotServiceOverlay { next, layer: robot::Fleet(self.1.clone()) }", """let core=services::app::RobotServiceOverlay { next, layer: robot::Fleet(self.1.clone()) };
-            services::app::RobotServiceOverlay { next:core, layer:pair::Pair }""")
+            services::app::RobotServiceOverlay { next:core, layer:pair::Pair(self.1.clone()) }""")
 lib.write_text(source)

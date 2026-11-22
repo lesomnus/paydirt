@@ -10,12 +10,13 @@ export function accounts(tenants) {
   const seeds=[[a,"alice",account,1],[b,"alice",account,2],[a,"bob",one,3]].map(([t,alias,acct,tag])=>({
     entity:"app.Holder",row:{id:b64(id(t,tag)),alias,tenant:{id:b64(t)},account:b64(acct)}
   }));
+  const grant=id(a,7);const entry={entity:"app.Entitlement",row:{id:b64(grant.slice(0,18)+"2b"+grant.slice(20)),tenant:{id:b64(a)},key:"fleet.browser",value:3,amount:"3",grantId:"WA==",grantVersion:"1",dateExpires:"2099-01-01T00:00:00Z"}};
   const principals={member:{account},single:{account:one},noMember:{account:none,topics:{read:["n:jobs"]}},bound:{account,tenant:a},
     notices:{tenant:a,actor:id(a,1),topics:{read:["n:jobs"]}},publisher:{tenant:a,actor:id(a,1),topics:{publish:["*"],producer:"worker"}},
     attenuated:{account,methods:["/app.RobotService/Get"]}};
   const policy={roles:{["@"+a+"/reader"]:{methods:["/app.RobotService/List","/app.RobotService/Watch"]}},
     groups:{["@"+a+"/office"]:{members:["@"+a+"/alice"]}},bindings:[{role:"@"+a+"/reader",group:"@"+a+"/office"}]};
-  return {principals,seeds,policy};
+  return {principals,seeds,policy,grant:entry};
 }
 function check(yes, message){if(!yes)throw Error(message)}
 async function code(call,want){try{await call}catch(e){check(e.code===want,"expected "+want+", received "+e);return}throw Error("expected RPC failure "+want)}
