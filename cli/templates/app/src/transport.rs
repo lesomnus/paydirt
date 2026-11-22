@@ -340,7 +340,7 @@ impl Database {
         let broker = self
             .broker
             .as_ref()
-            .ok_or_else(|| ConnectError::failed_precondition("watch broker is disabled"))?;
+            .ok_or_else(|| ConnectError::unimplemented("nothing to watch: watch.broker is none"))?;
         let mut changes = broker
             .subscribe(interest)
             .await
@@ -369,6 +369,7 @@ impl Database {
         &self,
         ctx: &RequestContext,
         stream: &mut Subscription,
+        reconcile_topics: bool,
     ) -> Result<(), ConnectError> {
         loop {
             let read = stream.next().fuse();
@@ -377,12 +378,12 @@ impl Database {
             let external = ctx.extensions().get::<providers::Verified>().is_some();
             #[cfg(target_arch = "wasm32")]
             let external = false;
-            if external || self.resolve.is_some() || self.policy.is_some() {
-                let tick = futures_timer::Delay::new(std::time::Duration::from_millis(100)).fuse();
+            if reconcile_topics || external || self.resolve.is_some() || self.policy.is_some() {
+                let tick = futures_timer::Delay::new(std::time::Duration::from_millis(if reconcile_topics {1_000} else {100})).fuse();
                 futures_util::pin_mut!(tick);
                 futures_util::select_biased! {
                     event=read=>return event.ok_or_else(||ConnectError::unavailable("watch ended"))?.map(|_|()).map_err(ConnectError::unavailable),
-                    _=tick=>self.check_credential(ctx).await?,
+                    _=tick=>{self.check_credential(ctx).await?; if reconcile_topics { return Ok(()); }},
                 }
             } else {
                 return read
@@ -898,7 +899,7 @@ impl Database {
             let mut old=start["revisions"].clone();
             yield serde_json::from_value(serde_json::json!({"ready":{"readerId":start["readerId"]}})).map_err(|_|ConnectError::internal("invalid listen reply"))?;
             loop{
-                db.next_change(&ctx,&mut changes).await?;
+                db.next_change(&ctx,&mut changes,true).await?;
                 let batch=db.read(&ctx,entity,"$listen",&request).await?;
                 let changed:Vec<_>=batch["topics"].as_array().into_iter().flatten().enumerate().filter(|(i,_)|old[*i]!=batch["revisions"][*i]).map(|(_,v)|v).collect();
                 if !changed.is_empty(){yield serde_json::from_value(serde_json::json!({"invalidated":{"topics":changed}})).map_err(|_|ConnectError::internal("invalid listen change"))?;}
@@ -950,7 +951,7 @@ impl Database {
             }
             let mut poll=serde_json::json!({"ids":start["ids"],"revision":start["revision"]});
             loop {
-                db.next_change(&ctx,&mut changes).await?;
+                db.next_change(&ctx,&mut changes,false).await?;
                 let batch=db.read(&ctx,entity,"$watch_poll",&poll).await?;
                 poll["revision"]=batch["revision"].clone();
                 let mut items=Vec::new();

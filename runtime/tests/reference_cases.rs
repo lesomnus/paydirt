@@ -2229,3 +2229,6 @@ fn bulk_requests_validate_before_core_and_write_every_named_stamped_item_once() 
 
 #[path = "reference_cases/walls.rs"]
 mod walls;
+
+#[path = "reference_cases/events.rs"]
+mod events;

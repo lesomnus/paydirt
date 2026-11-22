@@ -1,17 +1,21 @@
 use super::*;
 
-fn frame(owner: [u8; 16], actor: [u8; 16], tenants: &[[u8; 16]], action: &str) -> Frame {
+pub(super) fn frame(owner: [u8; 16], actor: [u8; 16], tenants: &[[u8; 16]], action: &str) -> Frame {
     serde_json::from_value(json!({"tenant":owner,"actor":actor,"tenants":tenants,"action":action}))
         .unwrap()
 }
-fn call(kind: &str, method: &str, request: Value) -> Call {
+pub(super) fn call(kind: &str, method: &str, request: Value) -> Call {
     Call {
         entity: format!("app.{kind}"),
         method: method.into(),
         request,
     }
 }
-fn invoke(store: &mut Store, who: &Frame, operation: Call) -> paydirt_store::Result<Value> {
+pub(super) fn invoke(
+    store: &mut Store,
+    who: &Frame,
+    operation: Call,
+) -> paydirt_store::Result<Value> {
     let mut f = who.clone();
     if f.action.is_empty() {
         f.action = format!("/{}Service/{}", operation.entity, operation.method);
@@ -31,7 +35,7 @@ fn invoke(store: &mut Store, who: &Frame, operation: Call) -> paydirt_store::Res
     })?;
     answer
 }
-fn world(db: &mut Store) -> ([u8; 16], [u8; 16]) {
+pub(super) fn world(db: &mut Store) -> ([u8; 16], [u8; 16]) {
     let a = provision(db);
     let b = paydirt::mint(1);
     db.seed(vec![(
@@ -41,10 +45,10 @@ fn world(db: &mut Store) -> ([u8; 16], [u8; 16]) {
     .unwrap();
     (a, b)
 }
-fn key(row: &Value) -> Value {
+pub(super) fn key(row: &Value) -> Value {
     json!({"id":row["id"]})
 }
-fn owner(id: [u8; 16]) -> Value {
+pub(super) fn owner(id: [u8; 16]) -> Value {
     json!({"id":STANDARD.encode(id)})
 }
 
