@@ -253,13 +253,13 @@ impl Listener {
                 _=stop.cancelled()=>break,
                 Some(_)=connections.join_next()=>{},
                 accepted=self.socket.accept()=>{
-                    let (socket,_)=accepted?;let tls=self.tls.clone();let routes=self.routes.clone();let stop=stop.clone();
+                    let (socket,remote)=accepted?;let tls=self.tls.clone();let routes=self.routes.clone();let stop=stop.clone();
                     connections.spawn(async move{
                         if let Some(tls)=tls{
                             let stream=tokio::select!{_=stop.cancelled()=>return,v=tokio::time::timeout(Duration::from_secs(10),tls.accept(socket))=>match v{Ok(Ok(s))=>s,_=>return}};
                             let peer=stream.get_ref().1.peer_certificates().and_then(|c|c.first()).map(|c|PeerCertificate(hex::encode(Sha256::digest(c.as_ref()))));
-                            serve_connection(stream,routes,stop,peer).await;
-                        }else{serve_connection(socket,routes,stop,None).await;}
+                            serve_connection(stream,routes,stop,peer,remote).await;
+                        }else{serve_connection(socket,routes,stop,None,remote).await;}
                     });
                 }
             }
@@ -273,8 +273,10 @@ async fn serve_connection(
     routes: Router,
     stop: Stop,
     peer: Option<PeerCertificate>,
+    remote: SocketAddr,
 ) {
     let http = hyper::service::service_fn(move |mut request: Request<hyper::body::Incoming>| {
+        request.extensions_mut().insert(remote);
         if let Some(peer) = &peer {
             request.extensions_mut().insert(peer.clone());
         }

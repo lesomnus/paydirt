@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Default, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Content {
     Fields,
@@ -14,16 +14,51 @@ pub enum Content {
     Patch,
     Value,
 }
+impl<'de> Deserialize<'de> for Content {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let text = String::deserialize(d)?;
+        match text.trim().to_ascii_lowercase().as_str() {
+            "fields" => Ok(Self::Fields),
+            "patch" => Ok(Self::Patch),
+            "value" => Ok(Self::Value),
+            _ => Err(serde::de::Error::custom(format!(
+                "unknown trail content {text}"
+            ))),
+        }
+    }
+}
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Options {
     pub default: Content,
+    #[serde(deserialize_with = "content_by")]
     pub by: BTreeMap<String, Content>,
     pub access: bool,
+    pub access_flush_ms: Option<u64>,
     pub downloads: BTreeSet<String>,
     pub reads: bool,
 }
+fn content_by<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> std::result::Result<BTreeMap<String, Content>, D::Error> {
+    let raw = BTreeMap::<String, Value>::deserialize(d)?;
+    raw.into_iter()
+        .map(|(kind, v)| {
+            let level = serde_json::from_value(v)
+                .map_err(|e| serde::de::Error::custom(format!("by.{kind}: {e}")))?;
+            Ok((kind, level))
+        })
+        .collect()
+}
+pub struct Write<'a> {
+    pub entity: &'a str,
+    pub method: &'a str,
+    pub previous: Option<&'a Value>,
+    pub value: Option<&'a Value>,
+}
+type WriteObserver = dyn Fn(&Write<'_>) -> Result<()> + Send + Sync;
 pub struct Recorder {
+    pub(crate) observers: Vec<std::sync::Arc<WriteObserver>>,
     pub(crate) keys: Option<crate::integrity::Keys>,
     pub(crate) options: Options,
     pub(crate) pool: DescriptorPool,
@@ -31,14 +66,45 @@ pub struct Recorder {
 }
 
 impl Store {
+    /// Installs a host-side observer. It sees immutable database postimages and
+    /// preimages inside the writing transaction. Returning an error aborts the write.
+    pub fn with_write_observer(
+        mut self,
+        observer: impl Fn(&Write<'_>) -> Result<()> + Send + Sync + 'static,
+    ) -> Result<Self> {
+        self.trail
+            .as_mut()
+            .ok_or_else(|| Fault::precondition("configure the trail before adding an observer"))?
+            .observers
+            .push(std::sync::Arc::new(observer));
+        Ok(self)
+    }
     pub fn with_trail(
         mut self,
-        options: Options,
+        mut options: Options,
         descriptors: &[u8],
         schema: &str,
     ) -> Result<Self> {
-        for name in options.by.keys() {
-            self.model.entity(name).map_err(Fault::invalid)?;
+        let domains = crate::domain::Domains::from_policies(&self.policies)?;
+        for (name, level) in std::mem::take(&mut options.by) {
+            let kind = if self.model.entity(&name).is_ok() {
+                name.clone()
+            } else {
+                let n = domains
+                    .lookup(&name)
+                    .or_else(|| domains.domain_of(&name))
+                    .ok_or_else(|| Fault::invalid(format!("unknown trail content kind {name}")))?;
+                self.policies
+                    .iter()
+                    .find(|(_, p)| p.entity["domain"].as_u64() == Some(n as u64))
+                    .map(|(k, _)| k.clone())
+                    .ok_or_else(|| Fault::invalid(format!("unknown trail content kind {name}")))?
+            };
+            if options.by.insert(kind, level).is_some() {
+                return Err(Fault::invalid(format!(
+                    "duplicate trail content kind {name}"
+                )));
+            }
         }
         let pool =
             DescriptorPool::decode(descriptors).map_err(|e| Fault::invalid(e.to_string()))?;
@@ -58,6 +124,7 @@ impl Store {
             })
             .collect();
         self.trail = Some(Recorder {
+            observers: vec![],
             keys: None,
             options,
             pool,

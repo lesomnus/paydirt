@@ -69,6 +69,16 @@ impl Transaction<'_> {
                 ..Default::default()
             });
         }
+        if let Some(rec) = self.trail {
+            for observer in &rec.observers {
+                observer(&crate::audit_content::Write {
+                    entity: &e.name,
+                    method,
+                    previous: before,
+                    value: after,
+                })?;
+            }
+        }
         let Some(frame) = self.frame else {
             return Ok(());
         };
@@ -109,7 +119,47 @@ impl Transaction<'_> {
         if p["trail"].get("off").is_none() {
             self.sign_write(e, after, &mut audit)?;
         }
+        if let Some(rec) = self.trail.filter(|r| r.options.access)
+            && let Some(groups) = self.pending_access.as_deref_mut()
+        {
+            let mut written = crate::access::Subjects::new();
+            let owner = object_tenant.as_str().unwrap_or_default();
+            if let Some(image) = after.or(before) {
+                rec.subjects(
+                    self.policies,
+                    &e.name,
+                    image,
+                    false,
+                    owner,
+                    &mut written,
+                    false,
+                    0,
+                )?;
+            }
+            // Clearing a personal field writes the subject even when its postimage is empty.
+            if written.is_empty()
+                && e.fields.iter().any(|f| {
+                    self.policies[&e.name]
+                        .fields
+                        .get(&f.name)
+                        .is_some_and(|p| p["personal"] == true)
+                        && (request.get(&f.json).is_some()
+                            || request.get(format!("{}Null", f.json)).is_some())
+                })
+            {
+                if let Some(subject) = object.as_str() {
+                    written
+                        .entry(owner.into())
+                        .or_default()
+                        .insert(subject.into());
+                }
+            }
+            for (owner, ids) in written {
+                groups.entry(owner).or_default().extend(ids);
+            }
+        }
         let mut recorder = Transaction {
+            pending_access: None,
             admission: None,
             origin: None,
             seen: None,
@@ -127,14 +177,6 @@ impl Transaction<'_> {
             frame: None,
             failed: None,
         };
-        if recorder.trail.is_some_and(|r| r.options.access)
-            && self.policies[&e.name]
-                .fields
-                .values()
-                .any(|v| v["personal"] == true)
-        {
-            recorder.access_write(frame, &object_tenant, object)?;
-        }
         for (own, data) in [("OWN_AUDIT", audit), ("OWN_OUTBOX", outbox)] {
             if (own == "OWN_AUDIT" && p["trail"].get("off").is_some())
                 || (own == "OWN_OUTBOX" && !recorder.outbox)

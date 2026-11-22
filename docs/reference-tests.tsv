@@ -1,13 +1,13 @@
 file	line	go_test	status	environment	evidence	issue
-access_test.go	93	TestAReadIsRecordedOfWhoseDataItCarried	tracked			101
-access_test.go	174	TestAWriteIsRecordedInItsOwnTransaction	tracked			101
-access_test.go	391	TestARefusedCallIsRecordedWithWhatItNamed	verified	connect/sqlite+postgres	web/generated-access.mjs#L41	-
-access_test.go	449	TestARowKeepsWhatAReadAskedForAndNoMore	tracked			101
-access_test.go	497	TestAnAnyIsReadOnlyWherePaydayPackedOne	tracked			101
+access_test.go	93	TestAReadIsRecordedOfWhoseDataItCarried	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1319	-
+access_test.go	174	TestAWriteIsRecordedInItsOwnTransaction	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1484	-
+access_test.go	391	TestARefusedCallIsRecordedWithWhatItNamed	verified	connect/sqlite+postgres	web/generated-access.mjs#L47	-
+access_test.go	449	TestARowKeepsWhatAReadAskedForAndNoMore	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1319	-
+access_test.go	497	TestAnAnyIsReadOnlyWherePaydayPackedOne	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1319	-
 access_test.go	523	TestADownloadSaysWhatItIsFor	verified	connect/sqlite+postgres	web/generated-access.mjs#L43	-
-access_test.go	601	TestAStreamIsRecordedAsItSends	verified	connect/sqlite+postgres	web/generated-access.mjs#L40	-
-access_test.go	640	TestTheAccessRecordIsKeptAsAKindOfItsOwn	tracked			101
-access_test.go	769	TestACallAtAShellIsRecordedAsItsOperatorsAtOnce	tracked			101
+access_test.go	601	TestAStreamIsRecordedAsItSends	verified	connect/sqlite+postgres	web/generated-access.mjs#L46	-
+access_test.go	640	TestTheAccessRecordIsKeptAsAKindOfItsOwn	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1319	-
+access_test.go	769	TestACallAtAShellIsRecordedAsItsOperatorsAtOnce	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1484	-
 account_test.go	167	TestAnAccountIsServedAsTheMembershipItNames	verified	connect/sqlite+postgres;drpc/opfs	web/generated-account.js#L52	-
 account_test.go	213	TestATenantTheAccountIsNotInIsRefusedAndNotRepointed	verified	connect/sqlite+postgres;drpc/opfs	web/generated-account.js#L49	-
 account_test.go	239	TestACallThatNamesNoTenantIsTheAccountsOnlyOne	verified	connect/sqlite+postgres;drpc/opfs	web/generated-account.js#L46	-
@@ -43,10 +43,10 @@ content_test.go	108	TestTheTrailKeepsWhatAWriteSaid	verified	connect/sqlite+post
 content_test.go	140	TestTheTrailKeepsTheRowWhereItIsAskedTo	verified	connect/sqlite+postgres	web/generated-access.mjs#L23	-
 content_test.go	161	TestTheTrailKeepsWhichFieldsAndNothingElseWhereItIsToldTo	verified	connect/sqlite+postgres	web/generated-access.mjs#L30	-
 content_test.go	176	TestEachKindKeepsWhatItsKindIsTold	verified	connect/sqlite+postgres	web/generated-access.mjs#L30	-
-content_test.go	207	TestAHolderIsSomebody	tracked			101
-content_test.go	231	TestATenantIsNobody	tracked			101
-content_test.go	261	TestADocumentThatNamesAFieldByNameIsWithheldAllTheSame	tracked			101
-content_test.go	305	TestAContentLevelIsAWordTheTrailKnows	tracked			101
+content_test.go	207	TestAHolderIsSomebody	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1660	-
+content_test.go	231	TestATenantIsNobody	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1660	-
+content_test.go	261	TestADocumentThatNamesAFieldByNameIsWithheldAllTheSame	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1660	-
+content_test.go	305	TestAContentLevelIsAWordTheTrailKnows	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1660	-
 cost_test.go	57	TestAnAddManyCostsItsItems	verified	connect/tls-sqlite	web/generated-serving.mjs#L69	-
 cursor_test.go	325	TestACheckOfTheRowsReadsTheTrailFromWhereItLeftOff	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L448	-
 cursor_test.go	361	TestAPassReadsTheTrailFromWhereItLeftOff	verified	store/postgres	runtime/src/trail_page.rs#L400	-
@@ -84,7 +84,7 @@ entitle_test.go	444	TestTheCopyGoesWithItsTenant	verified	connect/sqlite+postgre
 entitle_test.go	477	TestTheServerFollowsTheSourceItIsNamed	verified	connect/grant-source	web/generated-grant-follower.mjs#L74	-
 forgetturn_test.go	39	TestTwoErasuresInATransactionBesideAPassFinish	verified	store/postgres	runtime/tests/reference_cases.rs#L522	-
 formerly_earlier_test.go	301	TestAStoreOfARenamedEntityIsMovedWhole	verified	store/sqlite+postgres	runtime/tests/upgrade.rs#L162	-
-handed_test.go	95	TestTheTrailIsTheRowTheWriteRead	tracked			101
+handed_test.go	95	TestTheTrailIsTheRowTheWriteRead	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1898	-
 header_test.go	25	TestTheTrailCanSayWhatTheThingWasCalled	tracked			103
 header_test.go	58	TestOneReadWorksOnEveryEntity	tracked			103
 header_test.go	89	TestAnEntityThatHasNoneOfItSaysSo	tracked			103
@@ -95,8 +95,8 @@ http_listener_test.go	33	TestHTTPListenerUsesConfiguredTLS	verified	connect/tls-
 http_listener_test.go	142	TestHTTPListenerRejectsBrokenTLSBeforeListening	verified	connect/tls-sqlite	web/generated-serving.mjs#L78	-
 intercept_test.go	46	TestAnInterceptorRunsBetweenLayers	tracked			106
 intercept_test.go	188	TestAStreamInterceptorMayPutItselfInTheWay	tracked			106
-kept_trail_test.go	89	TestATransactionWritesItsTrailTogether	verified	store/sqlite+postgres	runtime/src/session_test.rs#L105	-
-labels_test.go	47	TestListByLabels	verified	store/sqlite+postgres	runtime/src/session_test.rs#L184	-
+kept_trail_test.go	89	TestATransactionWritesItsTrailTogether	verified	store/sqlite+postgres	runtime/src/session_test.rs#L106	-
+labels_test.go	47	TestListByLabels	verified	store/sqlite+postgres	runtime/src/session_test.rs#L185	-
 layers_test.go	183	TestTenantIsNotPutUpFromInsideOne	tracked			102
 layers_test.go	206	TestAHolderIsAddedToATenantYouCanSee	tracked			102
 layers_test.go	242	TestARowIsAddedToATenantYouCanSee	verified	connect/sqlite+postgres	web/generated-cell.mjs#L81	-
@@ -156,7 +156,7 @@ names_test.go	437	TestANameTheCallerGaveIsNotSwappedForAnother	verified	store/sq
 notify_account_test.go	110	TestNotifyAnAccountReadsItsOwnAsItself	tracked			104
 notify_account_test.go	185	TestNotifyTheAccountNamespaceAndATenantsAreApart	verified	connect/sqlite+postgres;drpc/opfs	web/generated-notify.js#L38	-
 notify_account_test.go	236	TestNotifyTheAccountNamespaceExpiresAsTheRestDoes	tracked			104
-notify_expire_test.go	54	TestNotifyExpiresWhatItKeepsNoLonger	verified	store/sqlite+postgres	runtime/tests/notify_policy.rs#L160	-
+notify_expire_test.go	54	TestNotifyExpiresWhatItKeepsNoLonger	verified	store/sqlite+postgres	runtime/tests/notify_policy.rs#L161	-
 notify_expire_test.go	166	TestNotifyAnExpiryWaitsForTheMarkOfWhatItErases	tracked			104
 notify_nats_test.go	18	TestNotifyNATSCrossReplicaListen	tracked			104
 notify_nats_test.go	27	TestBuiltServerReleasesNATSOnCloseAndConstructionFailure	tracked			104
@@ -167,14 +167,14 @@ notify_test.go	157	TestNotifyStoresOnePublicationAndLazyIndependentReceipts	trac
 notify_test.go	266	TestNotifyReceiptsAreKeptOffTheTrail	tracked			104
 notify_test.go	287	TestNotifyPagesExplicitTopicsAndBindsCursors	verified	connect/sqlite+postgres;drpc/opfs	web/generated-notify.js#L24	-
 notify_test.go	336	TestNotifyPolicyCannotBeBypassedByOtherRoutes	verified	connect/sqlite+postgres;drpc/opfs	web/generated-notify.js#L16	-
-notify_test.go	387	TestNotifySharesTheBusinessTransaction	tracked	store/sqlite+postgres	runtime/tests/notify_policy.rs#L118	104
+notify_test.go	387	TestNotifySharesTheBusinessTransaction	tracked	store/sqlite+postgres	runtime/tests/notify_policy.rs#L119	104
 notify_test.go	439	TestNotifyListenReconcilesCreationReceiptsAndPolicyRevocation	tracked			104
 notify_test.go	497	TestNotifyCrossReplicaListen	tracked			104
-notify_test.go	563	TestNotifyPolicyReadsTheBusinessTransaction	tracked	store/sqlite+postgres	runtime/tests/notify_policy.rs#L135	104
+notify_test.go	563	TestNotifyPolicyReadsTheBusinessTransaction	tracked	store/sqlite+postgres	runtime/tests/notify_policy.rs#L136	104
 outbox_test.go	70	TestABrokerIsNamedAndNotDefaulted	tracked			104
-outbox_test.go	95	TestAnEventIsWrittenWithTheWriteItIsAbout	verified	store/sqlite	runtime/tests/outbox.rs#L92	-
-outbox_test.go	119	TestAQueuedEventIsPublishedAfterwards	verified	store/sqlite	runtime/tests/outbox.rs#L114	-
-outbox_test.go	161	TestPublishingComesBeforeDeleting	verified	store/sqlite	runtime/tests/outbox.rs#L119	-
+outbox_test.go	95	TestAnEventIsWrittenWithTheWriteItIsAbout	verified	store/sqlite	runtime/tests/outbox.rs#L93	-
+outbox_test.go	119	TestAQueuedEventIsPublishedAfterwards	verified	store/sqlite	runtime/tests/outbox.rs#L115	-
+outbox_test.go	161	TestPublishingComesBeforeDeleting	verified	store/sqlite	runtime/tests/outbox.rs#L120	-
 outbox_test.go	185	TestTheQueueIsDrainedOldestFirst	tracked			104
 outbox_test.go	217	TestNoOutboxMeansNoRows	tracked			104
 outbox_test.go	242	TestTheLoopIsFoundAndNotDeclared	tracked			104
@@ -260,8 +260,8 @@ ref_test.go	86	TestTheKindIsCheckedOnEveryVerbThatTakesOne	tracked			103
 ref_test.go	112	TestTheKindReachesACommandTheAppWiredItself	tracked			103
 ref_test.go	134	TestUniqueKeysAndNestedReferencesTravelTheStack	tracked			103
 rekor_test.go	29	TestTheHeadOfTheChainIsLoggedToRekor	verified	native/rekor-v1+v2	runtime/tests/rekor.rs#L62	-
-representation_test.go	19	TestRepresentedWriteRecordsBothPartiesAndDirectCallsRemainNull	tracked	connect/sqlite	web/generated-presence.mjs#L28	101
-representation_test.go	52	TestDirectMethodRefusesRepresentationAtTransportAndInsideTheProcess	tracked			101
+representation_test.go	19	TestRepresentedWriteRecordsBothPartiesAndDirectCallsRemainNull	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1808	-
+representation_test.go	52	TestDirectMethodRefusesRepresentationAtTransportAndInsideTheProcess	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1808	-
 resource_test.go	38	TestResourceWatchImages	verified	connect/sqlite+postgres;drpc/opfs	web/generated-resource.js#L41	-
 resource_test.go	106	TestResourceWatchPreviousOptIn	tracked			104
 resource_test.go	174	TestResourceCELAndTenantScope	verified	connect/sqlite+postgres	web/generated-resource.js#L48	-
@@ -280,8 +280,8 @@ rowseal_test.go	125	TestARowWrittenBeforeItsKindWasSealedIsListedAndARecordSeals
 rowseal_test.go	164	TestForgettingLeavesASealThatSaysSo	verified	store/sqlite+postgres	runtime/tests/trail_integrity.rs#L512	-
 sealrace_test.go	45	TestASealBlankedStaysBlankedBesideACarry	verified	store/postgres	runtime/tests/trail_integrity.rs#L497	-
 secret_test.go	22	TestASecretIsNotAnsweredWith	verified	connect/sqlite+postgres	web/generated-cell.mjs#L98	-
-secret_test.go	63	TestASecretThatIsNotBytesIsNotAnsweredWith	tracked			101
-secret_test.go	102	TestTheWriteHalfStillWorks	tracked			101
+secret_test.go	63	TestASecretThatIsNotBytesIsNotAnsweredWith	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1660	-
+secret_test.go	102	TestTheWriteHalfStillWorks	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L1660	-
 secret_test.go	129	TestASecretIsNotInTheTrail	verified	connect/sqlite+postgres	web/generated-access.mjs#L26	-
 secret_test.go	219	TestASecretIsNotStreamed	verified	connect/sqlite+postgres	web/generated-cell.mjs#L101	-
 seen_test.go	74	TestATransactionAsksAboutARowOnce	verified	store/sqlite+postgres	runtime/src/seen.rs#L109	-

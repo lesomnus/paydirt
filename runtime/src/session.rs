@@ -25,12 +25,16 @@ pub struct Frame {
     pub presence: Option<String>,
     #[serde(default)]
     pub trace: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<String>,
     pub action: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Packet {
     Observe(crate::access::Observation),
+    BufferObservation(crate::access::Observation),
+    FlushAccess,
     BeginOrigin {
         id: String,
         frame: Frame,
@@ -54,12 +58,22 @@ pub enum Packet {
         id: String,
         call: Call,
     },
+    Settle {
+        id: String,
+        commit: bool,
+    },
+    RefusedWrites {
+        observation: crate::access::Observation,
+        subjects: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+        buffered: bool,
+    },
     Finish {
         id: String,
         commit: bool,
     },
 }
 pub(crate) struct Session {
+    written: crate::access::Subjects,
     operations: std::collections::BTreeSet<String>,
     origin: Option<Call>,
     pub seen: crate::seen::Seen,
@@ -74,7 +88,33 @@ impl Store {
     /// Only a session opened on this connection can issue operations or finish it.
     pub fn handle(&mut self, packet: Packet) -> Result<Value> {
         match packet {
-            Packet::Observe(o) => self.observe(o),
+            Packet::Settle { id, commit } => {
+                let groups = self
+                    .session
+                    .as_ref()
+                    .filter(|s| s.id == id)
+                    .ok_or_else(|| Fault::denied("unknown request transaction"))?
+                    .written
+                    .clone();
+                let result = self.handle(Packet::Finish { id, commit });
+                let refused = if !commit || result.is_err() {
+                    groups
+                } else {
+                    Default::default()
+                };
+                Ok(match result {
+                    Ok(receipt) => serde_json::json!({"receipt":receipt,"refused":refused}),
+                    Err(fault) => serde_json::json!({"fault":fault,"refused":refused}),
+                })
+            }
+            Packet::RefusedWrites {
+                observation,
+                subjects,
+                buffered,
+            } => self.observe_with_writes(observation, buffered, subjects),
+            Packet::Observe(o) => self.observe(o, false),
+            Packet::BufferObservation(o) => self.observe(o, true),
+            Packet::FlushAccess => self.flush_access().map(|n| serde_json::json!(n)),
             Packet::ResolveAccount {
                 account,
                 bound,
@@ -108,6 +148,7 @@ impl Store {
                 })?;
                 self.session = Some(Session {
                     origin: None,
+                    written: Default::default(),
                     operations: Default::default(),
                     seen: Default::default(),
                     changes: Vec::new(),
@@ -123,18 +164,40 @@ impl Store {
                 if !self.session.as_ref().is_some_and(|s| s.id == id) {
                     return Err(Fault::denied("unknown request transaction"));
                 }
-                let failed = self.session.as_ref().unwrap().failed.clone();
+                let mut session = self.session.take().expect("validated session");
                 let db = self.db.driver()?;
+                let failed = session.failed.take();
+                let written: Vec<_> = session.written.values().flatten().cloned().collect();
                 if commit && failed.is_none() {
-                    if let Err(err) = db.batch("COMMIT") {
-                        db.batch("ROLLBACK")?;
-                        self.session = None;
+                    let mut tx = Transaction {
+                        pending_access: None,
+                        admission: None,
+                        origin: None,
+                        seen: None,
+                        changes: &mut session.changes,
+                        outbox: false,
+                        trail: self.trail.as_ref(),
+                        resources: None,
+                        topic_policy: None,
+                        inputs: &self.inputs,
+                        namer: &*self.namer,
+                        db,
+                        model: &self.model,
+                        policies: &self.policies,
+                        scope: &Scope::Internal,
+                        frame: None,
+                        failed: None,
+                    };
+                    let result = tx
+                        .flush_written(&session.frame, std::mem::take(&mut session.written))
+                        .and_then(|_| tx.db.batch("COMMIT"));
+                    if let Err(err) = result {
+                        tx.db.batch("ROLLBACK")?;
                         return Err(err);
                     }
                 } else {
                     db.batch("ROLLBACK")?;
                 }
-                let session = self.session.take().expect("validated session");
                 if !commit {
                     return Ok(Value::Null);
                 }
@@ -155,7 +218,10 @@ impl Store {
                     method: session.frame.action,
                     changes: session.changes,
                 };
-                serde_json::to_value(event).map_err(|e| Fault::internal(e.to_string()))
+                let mut receipt =
+                    serde_json::to_value(event).map_err(|e| Fault::internal(e.to_string()))?;
+                receipt["writtenSubjects"] = serde_json::json!(written);
+                Ok(receipt)
             }
         }
     }
@@ -200,6 +266,7 @@ impl Store {
             }
         };
         let mut tx = Transaction {
+            pending_access: Some(&mut session.written),
             admission: self.admission.as_ref(),
             origin: session.origin.clone(),
             seen: (!session.frame.tenant.is_empty()).then_some(&mut session.seen),
@@ -240,6 +307,7 @@ impl Store {
                 && call.method == "Memberships"
             {
                 let mut reader = Transaction {
+                    pending_access: tx.pending_access.as_deref_mut(),
                     admission: None,
                     origin: None,
                     seen: None,

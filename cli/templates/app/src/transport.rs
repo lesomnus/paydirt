@@ -146,6 +146,7 @@ fn tokens(config: &str) -> Result<HashMap<String, Principal>, String> {
                 token,
                 Principal {
                     frame: Frame {
+            address:None,
                         topics,
                         tenant: tenant
                             .as_deref()
@@ -239,6 +240,7 @@ pub fn error(mut f: Fault) -> ConnectError {
 
 #[derive(Clone)]
 pub struct Database {
+    flushing_access:Arc<std::sync::atomic::AtomicBool>,
     presence: Option<Arc<presence::Verify>>,
     #[cfg(not(target_arch = "wasm32"))]
     providers: Option<Arc<providers::Providers>>,
@@ -296,6 +298,7 @@ impl Database {
             capture_origin,
             principals,
             lock: Default::default(),
+            flushing_access:Default::default(),
             queue,
             broker: Some(Arc::new(Memory::default())),
             general_writes: false,
@@ -311,6 +314,7 @@ impl Database {
             capture_origin: true,
             principals: Arc::new(tokens(config)?),
             lock: Default::default(),
+            flushing_access:Default::default(),
             broker: Some(Arc::new(Memory::default())),
             general_writes: false,
             policy: None,
@@ -492,7 +496,7 @@ impl Database {
             principal = Some(auth.principal(&e, &action)?);
             ctx.extensions_mut().insert(providers::Verified(e));
         }
-        let Some(principal) = principal else {
+        let Some(mut principal) = principal else {
             if public
                 && !direct
                 && ctx.header("authorization").is_none()
@@ -509,6 +513,7 @@ impl Database {
         if let Some(key) = resolved {
             ctx.extensions_mut().insert(ResolvedKey(key));
         }
+        if let Some(remote)=ctx.extensions().get::<std::net::SocketAddr>(){principal.frame.address=Some(remote.ip().to_string());}
         access::Attempt::frame(&ctx,&principal.frame,&action);
         let private = ["OWN_AUDIT","OWN_ACCESS"].contains(&TRAIL_POLICIES.get(entity).and_then(|p|p.entity["own"].as_str()).unwrap_or(""));
         if private && (self.policy.is_none() && principal.methods.is_none() || !access::OPTIONS.reads) {
@@ -1000,8 +1005,13 @@ pub struct Guard {
 impl Guard {
     pub async fn finish(mut self, commit: bool) -> Result<(), ConnectError> {
         let id = self.id.take().expect("active transaction");
-        let value = self.db.send(Packet::Finish { id, commit }).await?;
-        if let Some(a)=&self.access { a.committed(&value) }
+        let value=if let Some(a)=&self.access{
+            let settlement=self.db.send(Packet::Settle{id,commit}).await?;
+            *a.refused.lock().unwrap()=serde_json::from_value(settlement["refused"].clone()).map_err(|_|ConnectError::internal("invalid access settlement"))?;
+            if let Some(f)=settlement.get("fault"){return Err(error(serde_json::from_value(f.clone()).map_err(|_|ConnectError::internal("invalid transaction fault"))?));}
+            let receipt=settlement["receipt"].clone();
+            a.committed(&receipt);receipt
+        }else{self.db.send(Packet::Finish{id,commit}).await?};
         if let Some(broker) = &self.db.broker {
             if !value.is_null() {
                 let event = serde_json::from_value(value)

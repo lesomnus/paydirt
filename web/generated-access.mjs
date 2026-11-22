@@ -35,11 +35,17 @@ export async function accessCases(registry,baseUrl,robot,cell,own,foreign,primar
     await denied(()=>robot.patch({ref:ref(row.id),alias:"denied-sensitive"},opts("reader")));
     const ctrl=new AbortController();const stream=robot.watch({filters:[{ref:ref(row.id)}]},{...own,signal:ctrl.signal,timeoutMs:4000})[Symbol.asyncIterator]();
     await stream.next();ctrl.abort();await stream.return?.().catch(()=>{});
-    const entries=(await list(access,review)).filter(r=>r.subjects.some(id=>same(id,row.id)));
+    let entries=[];
+    const deadline=Date.now()+5000;
+    do {
+      entries=(await list(access,review)).filter(r=>r.subjects.some(id=>same(id,row.id)));
+      if(entries.some(r=>r.action==="/app.RobotService/Watch"&&r.kind==="read")&&entries.some(r=>r.result==="permission_denied"))break;
+      await new Promise(resolve=>setTimeout(resolve,80));
+    } while(Date.now()<deadline);
     assert(entries.some(r=>r.kind==="write"&&r.result==="ok"));
     assert(entries.some(r=>r.action==="/app.RobotService/Watch"&&r.kind==="read"));
     const refused=entries.find(r=>r.result==="permission_denied");assert(refused);
     const detail=r=>fromBinary(registry.getMessage("payday.AccessDetail"),r.value);assert.equal(detail(refused).request.length,0);
-    const download=entries.find(r=>r.kind==="download");assert(download);assert.equal(detail(download).reason,reason);assert(detail(download).request.length);
+    const download=entries.find(r=>r.kind==="download");assert(download);assert.equal(detail(download).reason,reason);assert(detail(download).request.length);assert(["127.0.0.1","::1","::ffff:127.0.0.1"].includes(detail(download).address));
     assert(!(await list(access,review)).some(r=>r.subjects.some(id=>same(id,alien.id))));
 }
