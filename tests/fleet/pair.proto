@@ -8,3 +8,4 @@ message RobotRenamePairRequest {
 
 message RobotAllowanceRequest { string key=1; bool lock=2; }
 message RobotAllowanceResponse { bool enabled=1; bool allows_two=2; }
+message InvitationCount { int32 mine = 1; int32 selected = 2; }

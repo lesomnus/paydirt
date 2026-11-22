@@ -31,9 +31,17 @@ const TEMPLATE: &[(&str, &str)] = &[
         "src/operator.rs",
         include_str!("../templates/app/src/operator.rs"),
     ),
+    (
+        "src/grants.rs",
+        include_str!("../templates/app/src/grants.rs"),
+    ),
     ("src/main.rs", include_str!("../templates/app/src/main.rs")),
     ("src/sink.rs", include_str!("../templates/app/src/sink.rs")),
     ("src/core.rs", include_str!("../templates/app/src/core.rs")),
+    (
+        "tests/core.rs",
+        include_str!("../templates/app/tests/core.rs"),
+    ),
     ("client.mjs", include_str!("../templates/app/client.mjs")),
     ("README.md", include_str!("../templates/app/README.md.in")),
     (".gitignore", "/target/\n/paydirt.sqlite3*\n"),
