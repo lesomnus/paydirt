@@ -28,3 +28,19 @@ impl TenantTokens {
         self.principals.get(token).map(Vec::as_slice)
     }
 }
+
+/// Match the three whole components of a Payday action grant, including wildcards.
+pub fn covers(held: &str, want: &str) -> bool {
+    fn parts(s: &str) -> Option<[&str; 3]> {
+        let (service, method) = s.strip_prefix('/')?.split_once('/')?;
+        let (package, service) = service.rsplit_once('.')?;
+        if package.is_empty() || service.is_empty() || method.is_empty() || method.contains('/') {
+            return None;
+        }
+        Some([package, service, method])
+    }
+    held == want
+        || parts(held)
+            .zip(parts(want))
+            .is_some_and(|(a, b)| a.iter().zip(b).all(|(h, w)| *h == "*" || *h == w))
+}

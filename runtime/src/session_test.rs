@@ -29,6 +29,8 @@ fn exercise(url: &str) {
         tenant: tenant.to_vec(),
         actor: Some(actor.to_vec()),
         caller: None,
+        sets: None,
+        tenants: None,
         caller_tenant: None,
         trace: vec![1; 16],
         action: "/app.RobotService/Move".into(),

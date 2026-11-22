@@ -22,16 +22,7 @@ impl Transaction<'_> {
         let object = &row[&key.json];
         let actor = value::encoded(frame.actor.as_deref().unwrap_or(&[0; 16]));
         let tenant = value::encoded(&frame.tenant);
-        let object_tenant = if p.get("tenant").is_some() {
-            object.clone()
-        } else {
-            e.fields
-                .iter()
-                .find(|f| f.number == 2)
-                .and_then(|f| row.get(&f.json))
-                .map(|v| v.get("id").unwrap_or(v).clone())
-                .unwrap_or_else(|| tenant.clone())
-        };
+        let object_tenant = self.object_tenant(e, row)?;
         let by = format!("/{}Service/{}", e.name, method);
         let changed: Vec<_> = e
             .fields

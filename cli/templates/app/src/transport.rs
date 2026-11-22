@@ -8,7 +8,7 @@ pub const MODEL: &str = include_str!("../generated/storage/model.json");
 pub const POLICIES: &str = include_str!("../generated/storage/policies.json");
 
 #[derive(Deserialize)]
-#[serde(untagged)]
+#[serde(untagged, deny_unknown_fields)]
 enum Credential {
     Tenant(String),
     Principal {
@@ -17,6 +17,8 @@ enum Credential {
         caller: Option<String>,
         caller_tenant: Option<String>,
         methods: Option<Vec<String>>,
+        tenants: Option<Vec<String>>,
+        sets: Option<Vec<String>>,
     },
 }
 
@@ -42,15 +44,17 @@ fn tokens(config: &str) -> Result<HashMap<String, Principal>, String> {
             if token.is_empty() {
                 return Err("empty bearer token".into());
             }
-            let (tenant, actor, caller, caller_tenant, methods) = match c {
-                Credential::Tenant(tenant) => (tenant, None, None, None, None),
+            let (tenant, actor, caller, caller_tenant, methods, tenants, sets) = match c {
+                Credential::Tenant(tenant) => (tenant, None, None, None, None, None, None),
                 Credential::Principal {
                     tenant,
                     actor,
                     caller,
                     caller_tenant,
                     methods,
-                } => (tenant, actor, caller, caller_tenant, methods),
+                    tenants,
+                    sets,
+                } => (tenant, actor, caller, caller_tenant, methods, tenants, sets),
             };
             if caller.is_some() != caller_tenant.is_some() || (caller.is_some() && actor.is_none())
             {
@@ -61,6 +65,24 @@ fn tokens(config: &str) -> Result<HashMap<String, Principal>, String> {
                 Principal {
                     frame: Frame {
                         tenant: id(&tenant, 1)?,
+                        tenants: tenants
+                            .map(|v| v.iter().map(|t| id(t, 1)).collect::<Result<_, _>>())
+                            .transpose()?,
+                        sets: sets
+                            .map(|v| {
+                                v.iter()
+                                    .map(|t| {
+                                        let bytes = hex::decode(t).map_err(|e| e.to_string())?;
+                                        if bytes.len() != 16
+                                            || !paydirt::has_domain(&bytes, bytes[9])
+                                        {
+                                            return Err("invalid set ID".into());
+                                        }
+                                        Ok(bytes)
+                                    })
+                                    .collect::<Result<_, String>>()
+                            })
+                            .transpose()?,
                         actor: actor.as_deref().map(|v| id(v, 2)).transpose()?,
                         caller: caller.as_deref().map(|v| id(v, 2)).transpose()?,
                         caller_tenant: caller_tenant.as_deref().map(|v| id(v, 1)).transpose()?,
@@ -166,11 +188,11 @@ impl Database {
             .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("Bearer"))
             .and_then(|(_, token)| self.principals.get(token))
             .ok_or_else(|| ConnectError::unauthenticated("unknown bearer token"))?;
-        if principal
-            .methods
-            .as_ref()
-            .is_some_and(|allowed| !allowed.contains(&action))
-        {
+        if principal.methods.as_ref().is_some_and(|allowed| {
+            !allowed
+                .iter()
+                .any(|grant| paydirt::tenant::covers(grant, &action))
+        }) {
             return Err(ConnectError::permission_denied(
                 "method outside credential grant",
             ));
