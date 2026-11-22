@@ -123,7 +123,26 @@ impl Store {
                 tx.resolve_account(&account, bound.as_deref(), &selector)
             }),
             Packet::BeginOrigin { id, frame, origin } => {
-                let result = self.handle(Packet::Begin { id, frame })?;
+                let result = self.handle(Packet::Begin {
+                    id: id.clone(),
+                    frame,
+                })?;
+                if matches!(origin.method.as_str(), "Add" | "AddMany") {
+                    let preflight = Call {
+                        entity: origin.entity.clone(),
+                        method: if origin.method == "Add" {
+                            "$check_add"
+                        } else {
+                            "$check_add_many"
+                        }
+                        .into(),
+                        request: origin.request.clone(),
+                    };
+                    if let Err(err) = self.session_call(id.clone(), preflight, None) {
+                        self.handle(Packet::Finish { id, commit: false })?;
+                        return Err(err);
+                    }
+                }
                 self.session.as_mut().unwrap().origin = Some(origin);
                 Ok(result)
             }
@@ -284,7 +303,12 @@ impl Store {
             frame: Some(&session.frame),
             failed: None,
         };
-        let result = if session.frame.tenant.is_empty() {
+        let result = if matches!(call.method.as_str(), "$check_add" | "$check_add_many")
+            && !session.frame.tenant.is_empty()
+        {
+            let e = tx.model.entity(&call.entity).map_err(Fault::invalid)?;
+            tx.check_add_input(e, &call.request, call.method == "$check_add_many")
+        } else if session.frame.tenant.is_empty() {
             let declared = self.policies.get(&call.entity).is_some_and(|p| {
                 p.entity["own"] == "OWN_HOLDER"
                     && p.methods.get("Memberships").unwrap_or(&Value::Null)["policy"]

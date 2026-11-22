@@ -629,7 +629,7 @@ impl Database {
         method: &str,
         request: impl FnOnce() -> I,
     ) -> Result<Option<Guard>, ConnectError> {
-        let origin = if self.capture_origin {
+        let origin = if self.capture_origin || matches!(method,"Add"|"AddMany") {
             Some(Call {
                 entity: entity.to_owned(),
                 method: method.to_owned(),
@@ -646,6 +646,7 @@ impl Database {
         ctx: &mut RequestContext,
         origin: Option<Call>,
     ) -> Result<Option<Guard>, ConnectError> {
+        if ctx.extensions().get::<Session>().is_some(){return Ok(None);}
         let Some(frame) = ctx.extensions().get::<Frame>().cloned() else {
             return Ok(None);
         };
