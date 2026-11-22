@@ -137,12 +137,13 @@ impl Tree {
                 format!("{prefix}/")
             };
             if help {
-                let names = self
+                let mut names = self
                     .routes
                     .keys()
                     .filter(|p| !self.hidden.contains(*p))
                     .filter_map(|p| p.strip_prefix(&dot)?.split('/').next())
                     .collect::<BTreeSet<_>>();
+                if prefix.is_empty() { names.insert("config"); }
                 if names.is_empty() {
                     return Err(format!("unknown command {prefix}").into());
                 }
