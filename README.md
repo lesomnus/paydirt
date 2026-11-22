@@ -1,39 +1,58 @@
 # Paydirt
 
-Paydirt is an early Rust port of [Payday](https://github.com/lesomnus/payday). The first application implements a subset of Payday's `app.RobotService`. The same Rust handlers serve native Connect RPC with PostgreSQL and browser dRPC with SQLite. Diesel implements the queries on both backends.
+Paydirt is a Rust port of the Payday application framework. Declare an entity in protobuf, generate its service and Diesel storage, and implement your domain RPCs as Rust service layers. The same generated app can serve Connect over HTTP with PostgreSQL or SQLite, or run inside a web page with a separate SQLite Worker. The compatibility baseline is [Go Payday at `53acc135`](https://github.com/lesomnus/payday/tree/53acc135cc084adafda524e882f19275c0d0cc96).
 
-## Implemented
+## Create an app
 
-- `Add` mints a domain-7 Payday UUIDv8 or validates a supplied ID. `AddMany` writes the entire batch and its change records in one transaction.
-- `Get` accepts an ID or a tenant-qualified alias. `List` supports tenant and robot filters and forward keyset pagination by creation time and ID. Page tokens belong to Paydirt.
-- `Patch` changes an alias. `Erase` soft-deletes a row, releases its alias and reports whether that call erased it.
-- `Watch` resolves up to 32 robot references under one database snapshot, then follows their IDs from the same tenant revision. It sends the initial state unless skipped, committed postimages on changes, and an ID with no value when a previously delivered row is erased. The example polls its transactional change table every 100 ms while idle.
-- A host-provisioned bearer token identifies the caller's tenant. SQL queries scope reads and mutations to that tenant.
+Install Rust, Go and Buf 1.72. On Linux x86_64, run these commands from this repository to install the CLI and pinned protobuf generators.
 
-The root crate contains the reusable ID and tenant-token primitives. The robot application uses checked-in Buffa, Connect and [protoc-gen-orm-rust](https://github.com/protobuf-orm/protoc-gen-orm-rust) output. This original compatibility fixture has handwritten storage and RPC handlers. CLI-created apps use generated service sinks backed by the common Diesel store. Further work includes generating the entity write path and migrations, porting Payday's gate, audit and outbox layers, and supporting additional fields, orders, and methods such as `Apply` and `Move`.
+```sh
+cargo install --locked --path cli
+scripts/install-codegen-linux.sh "$HOME/.local/bin"
+export PATH="$HOME/.local/bin:$PATH"
+paydirt new inventory
+cd inventory
+paydirt entity add --tenanted --watch Gauge .
+paydirt gen
+paydirt doctor
+cargo run
+```
 
-## Generate Rust contracts for an application
+In another terminal in the app directory, `node client.mjs` reads the deployment's public Setting over Connect. The native server uses `paydirt.sqlite3` by default. Set `DATABASE_URL` to a PostgreSQL URL to use PostgreSQL. `cargo run -- gauge --help` shows the generated operator commands. Remote calls use `PAYDIRT_URL` and `PAYDIRT_TOKEN`. The local provisioning command `cargo run -- app.Tenant Add '{"alias":"acme"}'` uses the binary's database connection. Configure the native token map with `PAYDIRT_PRINCIPALS`. The app README describes the token and ID format.
 
-Install the CLI with `cargo install --path cli --locked`. Generation uses Buf 1.72, Buffa 0.8.1 (including its packaging plugin), Connect Rust 0.8.2, and the ORM service and Rust plugins. On Linux x86_64, `scripts/install-codegen-linux.sh "$HOME/.local/bin"` installs the pinned plugins. Put that directory and `buf` on your path.
+| App developer writes | Paydirt generates |
+| --- | --- |
+| Entity fields, keys, relationships and Payday options in `proto/` | Standard `*_svc.g.proto` contracts, protobuf messages and typed Connect services |
+| Custom RPC declarations in `proto/ext/` | A merged service that includes both standard and custom methods |
+| Business logic in `src/core.rs` or an app module and its registration in `src/lib.rs` | Delegating service layers, default Diesel sinks, relational models, migration metadata and operator commands |
 
-Create a standalone project with `paydirt new inventory` (or `paydirt new inventory .` in an empty directory). In the project run `cargo run`. Run `node client.mjs` in another terminal to query the service setting over Connect. The initial handler reads the deployment name from `app.json`. The app assembles its typed Core and settings sink in `src/lib.rs`. Adding a tenanted entity such as Cell and running `paydirt gen` registers its standard RPCs and generates its relational schema. The app binary accepts operator commands such as `cargo run -- app.Tenant Add '{"alias":"my-team"}' `. Its HTTP server resolves opaque tokens from `PAYDIRT_PRINCIPALS`. Implement individual methods on the generated `SettingServiceLayer` in `src/core.rs`. All other calls, including streams, pass to the next service with their request context. The bottom of the stack returns the Connect `unimplemented` status for an unhandled RPC.
+`paydirt gen` replaces the framework-owned `generated/` tree. `paydirt gen --check` detects stale output. Requests pass through Gate, Audit, app Core and Sink. Core can use the typed next service to make scoped reads and writes in the original call's transaction. The Fleet acceptance fixture implements Robot.Move this way. [Robot Core](tests/fleet/robot.rs) · [generation and upgrade checks](scripts/test-generated-cell.sh)
 
-Place the app's entity declarations in `proto/` with a v2 `buf.yaml` at the project root and pin the dependencies in `buf.lock`. Run `paydirt gen` there or pass the project directory. The CLI first generates standard ORM service contracts, then compiles messages, services and Rust lookup helpers from those contracts. It stages all outputs before replacing its owned `generated/` tree. Use `paydirt gen --check` in CI. A Payday app also has `paydirt.schema.json` naming the app's protobuf and Go package. The CLI copies the pinned framework entities into the app package, applies app options and entity overlays, runs Payday's proto plugin for List, Watch and computed resources, and merges service overlays from `proto/ext/`. The Rust runtime implements a subset of these generated contracts. CI compares all 44 app/shared file descriptors of upstream's reference app, including custom field options, with the output generated from the same source declarations.
+## What is tested
+
+- **Schema and storage.** CI compares all 44 application and shared file descriptors with the Go reference. A new project receives Cell CRUD from its schema alone. Database tests cover guards and collection updates, alias uniqueness, keyset pages, watch cancellation, version checks and migration of an existing database.
+- **Application layers.** The same TypeScript clients run against the Go reference and the generated Rust service. The tests exercise Robot.Move, roles, tenant and group scope, account selection and revocation. A deliberate conflict on the second write in a custom Core verifies rollback of both rows, the audit trail and the outbox.
+- **Optional services.** Fleet enables event and fact history, notification inboxes and read markers, usage meters and entitlement grants. The linked matrix records the upstream cases and Rust tests for each. [Compatibility matrix](https://github.com/lesomnus/paydirt/issues/16)
+- **SDK.** CI runs Payday's original query, writes and store tests against both native implementations. It also runs the original sandbox suite against both implementations in Chromium. The browser persistence test closes and recreates both Rust Workers, then reads the saved data by ID. [SDK runner](scripts/test-sdk.sh) · [Worker persistence test](web/generated-browser.mjs)
+
+The root `robot/` crate is the original compatibility fixture for Go's `internal/apptest`. It has its own handwritten handlers and smaller API. The CLI scaffold and generated Fleet tests above demonstrate the application development workflow.
 
 ## Browser sandbox
 
 The page creates two dedicated Workers and transfers the ends of a private `MessageChannel` to them.
 
 ```text
-Payday TypeScript RobotService client
+Payday TypeScript Connect client
   → SandboxLink → createDrpcTransport → MessagePort
-  → Rust RobotService Worker (drpc-rs + Connect)
+  → Rust app Worker (drpc-rs + Connect)
   → MessagePort → Rust storage Worker (Diesel + SQLite) → OPFS
 ```
 
+Inside an app, run `paydirt sandbox init`, then `npm ci`, `npm run build:wasm` and `npm run dev` in `sandbox/`. Building requires the `wasm32-unknown-unknown` Rust target, Clang, an LLVM archiver and `wasm-bindgen-cli` 0.2.130. A web client can pass the transport from `openSandbox(principals)` to its generated Connect client and close the link on shutdown.
+
 The database Worker owns the SQLite connection and transaction boundaries. It uses OPFS sync access handles in a secure browser context with one active database Worker per origin for this fixture. The browser interop test imports Payday's upstream generated TypeScript service and `SandboxLink` at commit `53acc135` and the published `@lesomnus/grpc-dgram@0.1.0`. The Rust Worker uses its own startup code and `dialWorker`. Both test clients send binary protobuf.
 
-## Run the interoperability test
+## Run the original Robot fixture
 
 Install Rust with `wasm32-unknown-unknown`, Clang and LLVM's archiver, the PostgreSQL client development library, Node 24+, and `wasm-bindgen-cli` 0.2.130. Set `DATABASE_URL` to a disposable PostgreSQL database. The test creates its tables and uses fresh tenant identities on each run.
 
@@ -50,7 +69,7 @@ npx playwright install chromium
 npm test
 ```
 
-The test runs the same suite against native HTTP and the browser MessagePort. It covers cross-tenant access, duplicate-key rollback, a subscription that follows a renamed robot through erasure, cancellation, and cursor pagination. For SQLite it also reloads the page, recreates both Workers, and reads the same row by ID. The native executable accepts `PAYDIRT_LISTEN`, `DATABASE_URL` and `PAYDIRT_PRINCIPALS` (a JSON map of bearer tokens to hex tenant IDs).
+The fixture runs the same suite against native HTTP and the browser MessagePort. It covers cross-tenant access, duplicate-key rollback, a subscription that follows a renamed robot through erasure, cancellation, and cursor pagination. For SQLite it also reloads the page, recreates both Workers, and reads the same row by ID. The native executable accepts `PAYDIRT_LISTEN`, `DATABASE_URL` and `PAYDIRT_PRINCIPALS` (a JSON map of bearer tokens to hex tenant IDs).
 
 To regenerate this repository's fixture, run `paydirt gen` at the root. The TypeScript fixture and upstream contract inputs can also be extracted from a local Payday checkout with `PAYDAY_CHECKOUT=/path/to/payday scripts/upstream.sh`.
 

@@ -46,10 +46,7 @@ pub fn generate(work: &Path) -> Result<()> {
     for (name, policy) in policies {
         let methods = policy["methods"].as_object().ok_or("missing methods")?;
         for (rpc, meta) in methods {
-            if !matches!(
-                rpc.as_str(),
-                "Get" | "List" | "Add" | "Patch" | "Watch" | "Erase"
-            ) {
+            if meta["client_stream"] == true {
                 continue;
             }
             let message = |n: &str| module(meta[n].as_str().unwrap().trim_start_matches('.'));
@@ -62,7 +59,7 @@ pub fn generate(work: &Path) -> Result<()> {
             let args = format!(
                 "client,config,{service:?},{rpc:?},serde_json::from_value(request)?,Default::default()"
             );
-            let action = if rpc == "Watch" {
+            let action = if meta["server_stream"] == true {
                 format!(
                     "let mut stream=call_server_stream::<{types}>({args}).await?;while let Some(msg)=stream.message::<proto::{output}>().await?{{emit(serde_json::to_value(msg.to_owned_message())?)?;}}"
                 )

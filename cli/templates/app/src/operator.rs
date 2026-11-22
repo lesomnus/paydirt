@@ -1,5 +1,6 @@
 use __APP_CRATE__::{proto, transport::POLICIES};
 use base64::{Engine, engine::general_purpose::STANDARD};
+use buffa_reflect::{DescriptorPool, DynamicMessage, FormatOptions, MessageDescriptor};
 use connectrpc::client::{ClientConfig, HttpClient};
 use serde_json::{Value, json};
 use std::{
@@ -57,18 +58,42 @@ fn translate(v: &mut Value, from_uuid: bool) {
         _ => {}
     }
 }
-fn argument(arg: &str) -> Result<Value> {
-    if arg == "-" {
-        let mut data = String::new();
-        io::stdin().read_to_string(&mut data)?;
-        Ok(serde_json::from_str(&data)?)
-    } else {
-        Ok(serde_json::from_str(arg)?)
+fn template_value(value: Value) -> gtmpl::Value {
+    match value {
+        Value::Null => gtmpl::Value::Nil,
+        Value::Bool(v) => v.into(),
+        Value::Number(v) => {
+            if let Some(n) = v.as_i64() {
+                n.into()
+            } else if let Some(n) = v.as_u64() {
+                n.into()
+            } else {
+                v.as_f64().unwrap().into()
+            }
+        }
+        Value::String(v) => v.into(),
+        Value::Array(v) => gtmpl::Value::Array(v.into_iter().map(template_value).collect()),
+        Value::Object(v) => {
+            gtmpl::Value::Map(v.into_iter().map(|(k, v)| (k, template_value(v))).collect())
+        }
     }
 }
-fn print(mut v: Value, format: &str) -> Result<()> {
+fn print(mut v: Value, format: &str, message: Option<&MessageDescriptor>) -> Result<()> {
+    if let Some(desc) = message {
+        let msg = DynamicMessage::deserialize(desc.clone(), v)?;
+        println!(
+            "{}",
+            msg.to_text_format_with_options(&FormatOptions::new().pretty(true))
+                .trim_end()
+        );
+        return Ok(());
+    }
     if format != "protojson" {
         translate(&mut v, false);
+    }
+    if let Some(template) = format.strip_prefix("template=") {
+        println!("{}", gtmpl::template(template, template_value(v))?);
+        return Ok(());
     }
     let mut out = io::stdout().lock();
     let rows = v
@@ -123,17 +148,6 @@ fn print(mut v: Value, format: &str) -> Result<()> {
     out.flush()?;
     Ok(())
 }
-fn method(s: &str) -> Option<&'static str> {
-    Some(match s {
-        "get" => "Get",
-        "ls" | "list" => "List",
-        "watch" => "Watch",
-        "add" => "Add",
-        "patch" => "Patch",
-        "erase" => "Erase",
-        _ => return None,
-    })
-}
 pub async fn run(args: &[String]) -> Result<()> {
     let policies: paydirt_store::Policies = serde_json::from_str(POLICIES)?;
     if args.is_empty() || args[0] == "--help" || args[0] == "-h" {
@@ -160,20 +174,30 @@ pub async fn run(args: &[String]) -> Result<()> {
     if names.next().is_some() {
         return Err("use the qualified entity name".into());
     }
+    let verbs = || {
+        policy
+            .methods
+            .iter()
+            .filter(|(_, m)| m["client_stream"] != true)
+    };
     if args.len() == 1 || args.iter().any(|a| matches!(a.as_str(), "--help" | "-h")) {
-        println!(
-            "{entity}: {}",
-            ["get", "ls", "watch", "add", "patch", "erase"]
-                .into_iter()
-                .filter(|v| policy.methods.contains_key(method(v).unwrap()))
-                .collect::<Vec<_>>()
-                .join(" ")
-        );
+        let names = verbs()
+            .map(|(v, _)| {
+                if v == "List" {
+                    "list,ls".into()
+                } else {
+                    v.to_lowercase()
+                }
+            })
+            .collect::<Vec<_>>();
+        println!("{entity}: {}", names.join(" "));
         return Ok(());
     }
-    let rpc = method(&args[1])
-        .filter(|m| policy.methods.contains_key(*m))
+    let verb = if args[1] == "ls" { "list" } else { &args[1] };
+    let (rpc, meta) = verbs()
+        .find(|(name, _)| name.eq_ignore_ascii_case(verb))
         .ok_or("verb is not declared for this entity")?;
+    let rpc = rpc.as_str();
     let short = entity.rsplit('.').next().unwrap();
     let mut body = json!({});
     let mut name = None;
@@ -209,18 +233,19 @@ pub async fn run(args: &[String]) -> Result<()> {
                     .ok_or("unknown order")?;
                 body["order"] = json!(index + 1);
             }
-            v if (v == "-" || v.trim_start().starts_with('{')) && document.is_none() => {
-                document = Some(argument(v)?)
+            v if name.is_none() && (v.starts_with('@') || uuid::Uuid::parse_str(v).is_ok()) => {
+                name = Some(reference(v, short)?)
             }
-            v if !v.starts_with('-') && name.is_none() => name = Some(reference(v, short)?),
+            v if document.is_none() && (v == "-" || !v.starts_with('-')) => document = Some(v),
             _ => return Err(format!("unexpected argument {a}").into()),
         }
     }
-    if !matches!(input, "json" | "protojson")
-        || !matches!(
-            output,
-            "pretty" | "json" | "protojson" | "name" | "table" | "wide"
-        )
+    if !matches!(input, "json" | "protojson" | "prototext")
+        || (!output.starts_with("template=")
+            && !matches!(
+                output,
+                "pretty" | "json" | "protojson" | "name" | "table" | "wide" | "prototext"
+            ))
     {
         return Err("unsupported input or output format".into());
     }
@@ -230,14 +255,45 @@ pub async fn run(args: &[String]) -> Result<()> {
             "Erase" => body = key.clone(),
             "List" | "Watch" => body["filters"] = json!([{"ref":key}]),
             "Add" => body = key.get("slug").unwrap_or(key).clone(),
-            _ => unreachable!(),
+            _ => return Err("pass a request body for this verb".into()),
         }
     }
-    if let Some(obj) = document {
-        for (k, v) in obj.as_object().ok_or("expected a JSON request object")? {
-            if body.get(k).is_some() {
-                return Err(format!("request field {k} specified twice").into());
-            }
+    let pool = if input == "prototext" || output == "prototext" {
+        Some(DescriptorPool::decode(include_bytes!(
+            "../generated/storage/descriptors.binpb"
+        ))?)
+    } else {
+        None
+    };
+    let descriptor = |key: &str| -> Result<MessageDescriptor> {
+        let name = meta[key]
+            .as_str()
+            .ok_or("missing method type")?
+            .trim_start_matches('.');
+        pool.as_ref()
+            .and_then(|p| p.get_message_by_name(name))
+            .ok_or_else(|| format!("missing descriptor for {name}").into())
+    };
+    let response = (output == "prototext")
+        .then(|| descriptor("output"))
+        .transpose()?;
+    if let Some(text) = document {
+        let mut data = String::new();
+        let text = if text == "-" {
+            io::stdin().read_to_string(&mut data)?;
+            &data
+        } else {
+            text
+        };
+        let obj: Value = if input == "prototext" {
+            serde_json::to_value(DynamicMessage::parse_text_format(
+                descriptor("input")?,
+                text,
+            )?)?
+        } else {
+            serde_json::from_str(text)?
+        };
+        for (k, v) in obj.as_object().ok_or("expected a request object")? {
             body[k] = v.clone();
         }
     }
@@ -268,7 +324,7 @@ pub async fn run(args: &[String]) -> Result<()> {
     }
     loop {
         match dispatch(&client, &config, entity, rpc, body.clone(), |v| {
-            print(v, output)
+            print(v, output, response.as_ref())
         })
         .await
         {

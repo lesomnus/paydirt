@@ -4,8 +4,7 @@ Run `cargo run` in this directory to start the Connect server at the address in 
 
 Edit the entity in `proto/app/setting.proto` and run `paydirt gen` to regenerate the standard service contract and Rust bindings. Add domain RPCs in `proto/ext/app/setting_svc.ext.proto`. Implement only the methods you override on `SettingServiceLayer` in `src/core.rs`. Other methods pass to the next service, including the config-backed Get in `src/sink.rs`. The app owns these files and assembles the layers in `src/lib.rs`. Use `paydirt gen --check` in CI.
 
-
-The native server creates its tables in `paydirt.sqlite3` by default. Set `DATABASE_URL` to a PostgreSQL URL to use that backend. For a tenanted entity, provision a tenant using the local app binary and put its hex ID in the `PAYDIRT_PRINCIPALS` token-to-tenant JSON map. Only the operator with database access can invoke the binary's internal commands. The public Connect services resolve their caller from the bearer token.
+The native server creates its tables in `paydirt.sqlite3` by default. Set `DATABASE_URL` to a PostgreSQL URL to use that backend. For a tenanted entity, provision a tenant using the local app binary and convert the response's base64 ID to a 32-character hex string and put it in the `PAYDIRT_PRINCIPALS` token-to-tenant JSON map. Only the operator with database access can invoke the binary's internal commands. The public Connect services resolve their caller from the bearer token.
 
 `cargo run -- app.Tenant Add '{"alias":"my-team"}'` prints the new tenant with its protobuf JSON (base64) ID. App-owned entities declared in `proto/` receive a generated Diesel sink and registration in the app router. Customize a service by wrapping its typed next service in the app's `storage::Layers` implementation.
 
@@ -19,4 +18,11 @@ A web client can import `openSandbox(principals)` from `sandbox/client.js`, pass
 
 Run `paydirt entity add --watch Gauge .`, edit the resulting entity, and run `paydirt gen`. The new declaration supplies the service, table and application commands. `paydirt doctor` checks generated files and compiles the application entry points. Two consecutive additions choose different domains even before generation.
 
-Run `cargo run -- gauge --help` for the verbs its schema declares. The lowercase commands connect to `PAYDIRT_URL` and use `PAYDIRT_TOKEN` as their bearer credential. For example, `cargo run -- gauge ls --size 10 -o json` reads one page. Requests can also be JSON arguments or read from stdin with `-`. Use `-o protojson` for wire-format identifiers and `-o name` for an identifier per line. The transport closes general Patch and Apply by default. A deployment that serves them opts in with `"allow_general_writes": true` in app.json.
+Run `cargo run -- gauge --help` for the verbs its schema declares. The lowercase commands connect to `PAYDIRT_URL` and use `PAYDIRT_TOKEN` as their bearer credential. For example, `cargo run -- gauge ls --size 10 -o json` reads one page. Requests can also be JSON arguments or read from stdin with `-`. Use `-o protojson` for protobuf JSON identifiers, `-o prototext` for protobuf text and `-o name` for an identifier per line. For example, `-o 'template={{.id}} {{.alias}}'` prints two fields. Request bodies support `--in prototext` as well as JSON. The transport closes general Patch and Apply by default. A deployment that serves them opts in with `"allow_general_writes": true` in app.json.
+
+
+## App-owned behavior
+
+Declare a domain operation in `proto/ext/`, run `paydirt gen`, then implement that method on the generated service layer and mount it in `src/lib.rs`. The request passes through Gate, Audit, your Core, and the storage Sink. Use the typed next service with the incoming request context to keep related changes in the same scoped transaction. Service overlays and application Rust sources are preserved on regeneration. A failed write rolls back the transaction, including its audit trail and outbox records.
+
+The server reads `PAYDIRT_PRINCIPALS` when it starts. A simple tenant credential uses a JSON map such as `{"dev-token":"<32 hex digits>"}`. Set `PAYDIRT_TOKEN=dev-token` on a client to use that credential. Deployments can also supply a role policy with `PAYDIRT_POLICY_FILE` and select an account membership using the header configured by `PAYDIRT_ACCOUNT_HEADER`.
