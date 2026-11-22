@@ -6,6 +6,7 @@ import { createServer } from "vite";
 import { createClient,Code } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 
+import { exerciseTenancy } from "./generated-tenancy.mjs";
 import { exerciseMove } from "./generated-move.js";
 const app = process.env.GENERATED_APP;
 const [primary,other] = Array.from({length:2},()=>{
@@ -14,7 +15,8 @@ const [primary,other] = Array.from({length:2},()=>{
 });
 const clients = [primary,other];
 const sandbox=await createServer({server:{middlewareMode:true},appType:"custom"});
-const { CellService, RobotService }=await sandbox.ssrLoadModule("/upstream/internal/apptest/ts/gen/app/robot_svc_pb.ts");
+const services=await sandbox.ssrLoadModule("/upstream/internal/apptest/ts/gen/app/robot_svc_pb.ts");
+const {CellService, RobotService}=services;
 const schema="pd_accept_"+randomBytes(10).toString("hex");
 const ddl=sql=>execFileSync("psql",[process.env.DATABASE_URL,"-Xq","-v","ON_ERROR_STOP=1","-c",sql],{stdio:"pipe"});
 const tenantRef=id=>({key:{case:"id",value:id}});
@@ -31,6 +33,9 @@ try {
     const principals=Object.fromEntries(clients.map(({token,id})=>[token,id.toString("hex")]));
     const actor=Buffer.from(primary.id);actor[9]=2;
     principals.represented={tenant:primary.id.toString("hex"),actor:actor.toString("hex"),caller:actor.toString("hex"),caller_tenant:primary.id.toString("hex")};
+    const allowedSet=Buffer.from(primary.id);allowedSet[9]=10;
+    principals.both={tenant:primary.id.toString("hex"),tenants:clients.map(p=>p.id.toString("hex"))};
+    principals.grouped={tenant:primary.id.toString("hex"),sets:[allowedSet.toString("hex")],methods:["/app.*/*"]};
     principals.reader={tenant:primary.id.toString("hex"),methods:["/app.RobotService/Get"]};
     const env={...process.env,DATABASE_URL:url,PAYDIRT_PRINCIPALS:JSON.stringify(principals),PAYDIRT_LISTEN:"127.0.0.1:"+process.env.CELL_PORT};
     for(const {id} of clients)execFileSync(app,["app.Tenant","Add",JSON.stringify({id:id.toString("base64"),alias:id.toString("hex")})],{cwd:process.env.CELL_PROJECT,env});
@@ -55,6 +60,7 @@ try {
       if(process.env.PAYDIRT_TEST_MOVE==="1"){
         const robots=createClient(RobotService,createConnectTransport({baseUrl,useBinaryFormat:true}));
         await exerciseMove(robots,cell,own,foreign,opts("represented"),opts("reader"),primary.id,other.id);
+        await exerciseTenancy(services,createConnectTransport({baseUrl,useBinaryFormat:true}),primary,other,allowedSet);
         console.log(engine,"served the user-written Move and enforced the dispatched method grant");
       }
       console.log(engine,"served Cell CRUD and enforced tenant scope using only the app entity declaration");

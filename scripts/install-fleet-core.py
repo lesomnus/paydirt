@@ -16,7 +16,7 @@ for rel in ["shared/thing.proto", "app/robot.proto", "ext/app/robot_svc.ext.prot
 robot = app / "proto/app/robot.proto"
 source = robot.read_text()
 header = source.split("// This package", 1)[0]
-entities = [re.search(rf"^message {name} \{{.*?^\}}", source, re.M | re.S).group() for name in ["Cell", "Robot"]]
+entities = [re.search(rf"^message {name} \{{.*?^\}}", source, re.M | re.S).group() for name in ["Cell", "Robot", "Pairing", "Reading"]]
 robot.write_text(header + "option (payday.app) = {};\n" + "\n\n".join(entities) + "\n")
 copyfile(repo / "tests/fleet/robot.rs", app / "src/robot.rs")
 lib = app / "src/lib.rs"
