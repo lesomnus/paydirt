@@ -7,8 +7,59 @@ use connectrpc::{RequestContext, Response, ServiceRequest, ServiceResult};
 
 pub struct Pair(pub crate::storage::Next);
 
+static ACTIVE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+struct Active;
+impl Drop for Active {
+    fn drop(&mut self) {
+        ACTIVE.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 #[allow(refining_impl_trait)]
 impl<N: RobotService> RobotServiceLayer<N> for Pair {
+    async fn in_flight(
+        &self,
+        _: &N,
+        _: RequestContext,
+        _: ServiceRequest<'_, StreamNumber>,
+    ) -> ServiceResult<StreamNumber> {
+        Response::ok(StreamNumber {
+            value: ACTIVE.load(std::sync::atomic::Ordering::SeqCst),
+            ..Default::default()
+        })
+    }
+    async fn collect(
+        &self,
+        _: &N,
+        _: RequestContext,
+        mut input: connectrpc::InboundStream<StreamNumber>,
+    ) -> ServiceResult<StreamNumber> {
+        use futures_util::StreamExt;
+        let mut value = 0;
+        while let Some(v) = input.next().await {
+            value += v?.to_owned_message().value;
+        }
+        Response::ok(StreamNumber {
+            value,
+            ..Default::default()
+        })
+    }
+    async fn converse(
+        &self,
+        _: &N,
+        _: RequestContext,
+        mut input: connectrpc::InboundStream<StreamNumber>,
+    ) -> ServiceResult<connectrpc::ServiceStream<StreamNumber>> {
+        use futures_util::StreamExt;
+        let stream = async_stream::try_stream! {
+            ACTIVE.fetch_add(1,std::sync::atomic::Ordering::SeqCst);
+            let _active=Active;
+            while let Some(v)=input.next().await {
+                yield StreamNumber{value:2*v?.to_owned_message().value,..Default::default()};
+            }
+        };
+        Response::ok(Box::pin(stream))
+    }
     async fn allowance(
         &self,
         _: &N,

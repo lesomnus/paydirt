@@ -34,10 +34,15 @@ cargo build --quiet --manifest-path "$CELL_PROJECT/Cargo.toml"
 export PAYDIRT_TEST_MOVE=1 CELL_SQLITE_PATH="$work/fleet.sqlite3"
 node generated-cell.mjs
 node generated-replicas.mjs
+node generated-grant-follower.mjs
 if [[ "${PAYDIRT_TEST_WASM:-0}" == 1 ]]; then
   "${PAYDIRT_BIN:-$repo/target/debug/paydirt}" sandbox init "$CELL_PROJECT"
   "${PAYDIRT_BIN:-$repo/target/debug/paydirt}" sandbox init "$CELL_PROJECT"
   (cd "$CELL_PROJECT/sandbox" && bash build.sh && npm ci --no-audit --no-fund)
+  if [[ -n "${PAYDIRT_GO_CHECKOUT:-}" ]]; then
+    (cd "$PAYDIRT_GO_CHECKOUT/internal/apptest" && GOOS=js GOARCH=wasm go build -o "$CELL_PROJECT/sandbox/public/stream-reference.wasm" "$repo/tests/fleet/stream-reference.go")
+    cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" "$CELL_PROJECT/sandbox/public/"
+  fi
   node generated-browser.mjs
 fi
 

@@ -43,7 +43,7 @@ wasm-bindgen = "=0.2.130"
 js-sys = "0.3"
 wasm-bindgen-futures = "0.4"
 send_wrapper = {version="0.6",features=["futures"]}
-drpc-rs = { git = "https://github.com/lesomnus/drpc-rs", rev = "2e9d63e2c21a908b88c3569c9c8d785b3b33893c" }
+drpc-rs = { git = "https://github.com/lesomnus/drpc-rs", rev = "b16f80c57663205c3d812aaea8a082db101e7d74" }
 web-sys = { version = "0.3", features = ["MessagePort"] }
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 paydirt-test = {git="https://github.com/lesomnus/paydirt",rev="137cf914c840e01637f4ed9a0d44e2b059a02677"}

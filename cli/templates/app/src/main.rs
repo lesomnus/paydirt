@@ -1,3 +1,4 @@
+mod grants;
 mod operator;
 use __APP_CRATE__::{
     router,
@@ -49,6 +50,7 @@ struct Meter {
 struct Config {
     watch: Watch,
     meter: Option<Meter>,
+    grant_source: Option<grants::Source>,
     #[serde(default)]
     worker_lease: Option<String>,
     listen: std::net::SocketAddr,
@@ -157,6 +159,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .map_err(|e| e.to_string())
             }
         })?;
+    }
+    if let Some(source) = config.grant_source {
+        grants::register(&mut workers, &url, source)?;
     }
     let lease = match config.worker_lease.as_deref() {
         None | Some("local") => Lease::Local,
