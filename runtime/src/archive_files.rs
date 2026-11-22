@@ -18,7 +18,7 @@ fn io(e: std::io::Error) -> Fault {
 pub struct Archive {
     pub(crate) root: PathBuf,
     pub(crate) notary: Option<crate::attestation::Notary>,
-    key: aead::LessSafeKey,
+    key: Option<aead::LessSafeKey>,
 }
 impl Archive {
     pub fn open(root: impl AsRef<Path>, key: &[u8]) -> Result<Self> {
@@ -27,8 +27,20 @@ impl Archive {
         Ok(Self {
             root: root.as_ref().into(),
             notary: None,
-            key: aead::LessSafeKey::new(key),
+            key: Some(aead::LessSafeKey::new(key)),
         })
+    }
+    pub fn without_decryption_key(root: impl AsRef<Path>) -> Self {
+        Self {
+            root: root.as_ref().into(),
+            notary: None,
+            key: None,
+        }
+    }
+    fn key(&self) -> Result<&aead::LessSafeKey> {
+        self.key
+            .as_ref()
+            .ok_or_else(|| Fault::precondition("archive decryption key required"))
     }
     pub fn digest(bytes: &[u8]) -> String {
         hex::encode(Sha256::digest(bytes))
@@ -48,7 +60,7 @@ impl Archive {
             .and_then(|f| f.sync_all())
             .map_err(io)
     }
-    pub fn read(&self, digest: &str) -> Result<Vec<u8>> {
+    fn ciphertext(&self, digest: &str) -> Result<Vec<u8>> {
         let mut wire = Vec::new();
         File::open(self.path(digest)?)
             .map_err(io)?
@@ -58,10 +70,17 @@ impl Archive {
         if wire.len() as u64 > LIMIT || !wire.starts_with(MAGIC) || wire.len() < MAGIC.len() + 28 {
             return Err(Fault::precondition("invalid archive object"));
         }
+        Ok(wire)
+    }
+    pub(crate) fn ciphertext_digest(&self, object: &str) -> Result<String> {
+        Ok(Self::digest(&self.ciphertext(object)?))
+    }
+    pub fn read(&self, digest: &str) -> Result<Vec<u8>> {
+        let key = self.key()?;
+        let mut wire = self.ciphertext(digest)?;
         let (prefix, cipher) = wire.split_at_mut(MAGIC.len() + 12);
         let nonce = prefix[MAGIC.len()..].try_into().unwrap();
-        let payload = self
-            .key
+        let payload = key
             .open_in_place(
                 aead::Nonce::assume_unique_for_key(nonce),
                 aead::Aad::from(MAGIC),
@@ -74,6 +93,7 @@ impl Archive {
         Ok(payload.to_vec())
     }
     pub fn put(&self, data: &[u8]) -> Result<String> {
+        let key = self.key()?;
         if data.len() as u64 > LIMIT - 128 {
             return Err(Fault::exhausted("archive object exceeds 64 MiB"));
         }
@@ -99,13 +119,12 @@ impl Archive {
         let mut f = options.open(&tmp).map_err(io)?;
         let result = (|| {
             let mut cipher = data.to_vec();
-            self.key
-                .seal_in_place_append_tag(
-                    aead::Nonce::assume_unique_for_key(nonce),
-                    aead::Aad::from(MAGIC),
-                    &mut cipher,
-                )
-                .map_err(|_| Fault::internal("archive encryption failed"))?;
+            key.seal_in_place_append_tag(
+                aead::Nonce::assume_unique_for_key(nonce),
+                aead::Aad::from(MAGIC),
+                &mut cipher,
+            )
+            .map_err(|_| Fault::internal("archive encryption failed"))?;
             f.write_all(MAGIC)
                 .and_then(|_| f.write_all(&nonce))
                 .and_then(|_| f.write_all(&cipher))

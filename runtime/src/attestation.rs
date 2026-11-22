@@ -368,49 +368,68 @@ impl Archive {
             &hex::decode(std::env::var(key).map_err(bad)?).map_err(bad)?,
         )?;
         if dir == paydirt::environment::PAYDIRT_ARCHIVE_DIR {
-            let signer: Option<Box<dyn Signer>> = match (
-                std::env::var_os(paydirt::environment::PAYDIRT_SIGNING_KEY),
-                std::env::var_os(paydirt::environment::PAYDIRT_SIGNER_PROGRAM),
-            ) {
-                (Some(path), None) => Some(Box::new(Ed25519::from_pkcs8(
-                    &fs::read(path).map_err(bad)?,
-                )?)),
-                (None, Some(program)) => Some(Box::new(ProgramSigner {
-                    executable: program.into(),
-                    arguments: serde_json::from_str(
-                        &std::env::var(paydirt::environment::PAYDIRT_SIGNER_ARGS)
-                            .unwrap_or_else(|_| "[]".into()),
-                    )
-                    .map_err(bad)?,
-                    public_key_der: fs::read(
-                        std::env::var(paydirt::environment::PAYDIRT_SIGNER_PUBLIC_KEY)
-                            .map_err(bad)?,
-                    )
-                    .map_err(bad)?,
-                })),
-                (Some(_), Some(_)) => return Err(bad("select a single signing provider")),
-                (None, None) => None,
-            };
-            if let Some(signer) = signer {
-                let witness = std::env::var_os(paydirt::environment::PAYDIRT_WITNESS_DIR)
-                    .ok_or_else(|| bad("missing external witness directory"))?;
-                let trust: Vec<PathBuf> = serde_json::from_str(
-                    &std::env::var(paydirt::environment::PAYDIRT_TRUST_KEYS)
-                        .unwrap_or_else(|_| "[]".into()),
-                )
-                .map_err(bad)?;
-                let trust = trust
-                    .into_iter()
-                    .map(|p| fs::read(p).map_err(bad))
-                    .collect::<Result<_>>()?;
-                files = files.with_notary(Notary::new(
-                    signer,
-                    trust,
-                    Box::new(DirectoryWitness(witness.into())),
-                ));
-            }
+            files = files.with_environment_notary()?;
         }
         Ok(files)
+    }
+    pub fn verification_from_environment() -> Result<Option<Self>> {
+        use paydirt::environment::{PAYDIRT_ARCHIVE_DIR, PAYDIRT_ARCHIVE_KEY};
+        let Some(root) = std::env::var_os(PAYDIRT_ARCHIVE_DIR) else {
+            return Ok(None);
+        };
+        if std::env::var_os(PAYDIRT_ARCHIVE_KEY).is_some() {
+            return Self::from_environment(PAYDIRT_ARCHIVE_DIR, PAYDIRT_ARCHIVE_KEY).map(Some);
+        }
+        let files = Self::without_decryption_key(root).with_environment_notary()?;
+        if files.notary.is_none() {
+            return Err(bad(
+                "signed evidence or an archive decryption key is required",
+            ));
+        }
+        Ok(Some(files))
+    }
+    fn with_environment_notary(mut self) -> Result<Self> {
+        let signer: Option<Box<dyn Signer>> = match (
+            std::env::var_os(paydirt::environment::PAYDIRT_SIGNING_KEY),
+            std::env::var_os(paydirt::environment::PAYDIRT_SIGNER_PROGRAM),
+        ) {
+            (Some(path), None) => Some(Box::new(Ed25519::from_pkcs8(
+                &fs::read(path).map_err(bad)?,
+            )?)),
+            (None, Some(program)) => Some(Box::new(ProgramSigner {
+                executable: program.into(),
+                arguments: serde_json::from_str(
+                    &std::env::var(paydirt::environment::PAYDIRT_SIGNER_ARGS)
+                        .unwrap_or_else(|_| "[]".into()),
+                )
+                .map_err(bad)?,
+                public_key_der: fs::read(
+                    std::env::var(paydirt::environment::PAYDIRT_SIGNER_PUBLIC_KEY).map_err(bad)?,
+                )
+                .map_err(bad)?,
+            })),
+            (Some(_), Some(_)) => return Err(bad("select a single signing provider")),
+            (None, None) => None,
+        };
+        if let Some(signer) = signer {
+            let witness = std::env::var_os(paydirt::environment::PAYDIRT_WITNESS_DIR)
+                .ok_or_else(|| bad("missing external witness directory"))?;
+            let trust: Vec<PathBuf> = serde_json::from_str(
+                &std::env::var(paydirt::environment::PAYDIRT_TRUST_KEYS)
+                    .unwrap_or_else(|_| "[]".into()),
+            )
+            .map_err(bad)?;
+            let trust = trust
+                .into_iter()
+                .map(|p| fs::read(p).map_err(bad))
+                .collect::<Result<_>>()?;
+            self = self.with_notary(Notary::new(
+                signer,
+                trust,
+                Box::new(DirectoryWitness(witness.into())),
+            ));
+        }
+        Ok(self)
     }
 }
 

@@ -55,25 +55,25 @@ cursor_test.go	431	TestAPassOverTheDeploymentReadsTheTrailFromWhereItLeftOff	tra
 cursor_test.go	489	TestAPassOverTheDeploymentReadsTheAccessRecordFromWhereItLeftOff	tracked			98
 cursor_test.go	519	TestTheErasuresOwedAreReadFromWhereTheyLeftOff	tracked			98
 digest_test.go	61	TestEachRowOfTheTrailKeepsADigestOfTheRowItsWriteLeft	verified	store/sqlite	runtime/tests/trail_integrity.rs#L190	
-digest_test.go	94	TestARowChangedPastTheServersDiffers	tracked			99
+digest_test.go	94	TestARowChangedPastTheServersDiffers	verified	store/sqlite+postgres	runtime/tests/trail_integrity.rs#L273	
 digest_test.go	124	TestAPersonalFieldChangedPastTheServersIsFoundByTheSeal	verified	store/sqlite	runtime/tests/trail_integrity.rs#L197	
 digest_test.go	159	TestASecretChangedPastTheServersDiffers	tracked			99
 digest_test.go	184	TestRowsMadeManyAtATimeAreDigestedToo	tracked			99
 digest_test.go	203	TestATrailWithNoKeyKeepsNoDigest	tracked			99
-digest_test.go	225	TestARowWhoseTrailWasArchivedIsCheckedAgainstTheArchive	tracked			99
-digest_test.go	261	TestASealedArchiveIsCheckedWithNoTenantsKey	tracked			99
-digest_test.go	305	TestARowNothingOnTheTrailIsAboutIsAFinding	tracked			99
-digest_test.go	325	TestARowWrittenBeneathTheServersIsRecordedAsTheActThatWroteIt	tracked			99
-digest_test.go	352	TestADifferenceSomebodyAcceptedIsARecordedAct	tracked			99
-digest_test.go	380	TestARecordedActHoldsOrFallsWithItsTransaction	tracked			99
-digest_test.go	402	TestRecordIsRefusedWhatItCannotSayAnythingTrueAbout	tracked			99
+digest_test.go	225	TestARowWhoseTrailWasArchivedIsCheckedAgainstTheArchive	verified	store/sqlite+postgres	runtime/tests/trail_integrity.rs#L324	
+digest_test.go	261	TestASealedArchiveIsCheckedWithNoTenantsKey	verified	store/sqlite+postgres	runtime/tests/trail_integrity.rs#L339	
+digest_test.go	305	TestARowNothingOnTheTrailIsAboutIsAFinding	verified	store/sqlite+postgres	runtime/tests/trail_integrity.rs#L248	
+digest_test.go	325	TestARowWrittenBeneathTheServersIsRecordedAsTheActThatWroteIt	verified	store/sqlite+postgres	runtime/tests/trail_integrity.rs#L262	
+digest_test.go	352	TestADifferenceSomebodyAcceptedIsARecordedAct	verified	store/sqlite+postgres	runtime/tests/trail_integrity.rs#L285	
+digest_test.go	380	TestARecordedActHoldsOrFallsWithItsTransaction	verified	store/sqlite+postgres	runtime/tests/trail_integrity.rs#L257	
+digest_test.go	402	TestRecordIsRefusedWhatItCannotSayAnythingTrueAbout	tracked	store/sqlite+postgres	runtime/tests/trail_integrity.rs#L278	99
 digest_test.go	421	TestAKindTheAppRecordsIsChecked	tracked			99
 digest_test.go	457	TestAKindKeptOffTheTrailIsNotRead	tracked			99
-digest_test.go	487	TestARowBroughtBackFromAnEraseDiffers	tracked			99
-digest_test.go	522	TestALineWithoutItsDigestIsAFinding	tracked			99
-digest_test.go	544	TestACheckWithTheWrongKeyFindsEverything	tracked			99
-digest_test.go	576	TestADigestCopiedOntoTheNewestLineIsForged	tracked			99
-digest_test.go	598	TestARowRemovedPastTheServersIsMissing	tracked			99
+digest_test.go	487	TestARowBroughtBackFromAnEraseDiffers	verified	store/sqlite+postgres	runtime/tests/trail_integrity.rs#L372	
+digest_test.go	522	TestALineWithoutItsDigestIsAFinding	tracked	store/sqlite+postgres	runtime/tests/trail_integrity.rs#L377	99
+digest_test.go	544	TestACheckWithTheWrongKeyFindsEverything	tracked	store/sqlite+postgres	runtime/tests/trail_integrity.rs#L292	99
+digest_test.go	576	TestADigestCopiedOntoTheNewestLineIsForged	verified	store/sqlite+postgres	runtime/tests/trail_integrity.rs#L299	
+digest_test.go	598	TestARowRemovedPastTheServersIsMissing	verified	store/sqlite+postgres	runtime/tests/trail_integrity.rs#L349	
 digest_test.go	636	TestAKindACheckDoesNotReadIsSaidWithWhy	tracked			99
 digest_test.go	651	TestARowNobodyWroteSinceItsWindowIsCarriedForward	tracked			99
 domains_test.go	54	TestTheManifestAndTheAccessRecordAreTheDomainsTheAppGivesThem	tracked			98

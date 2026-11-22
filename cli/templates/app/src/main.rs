@@ -122,9 +122,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("{}",serde_json::to_string(&store.expire_past(paydirt::parse_id(tenant).ok_or("invalid tenant UUID")?,&req.window,req.dry_run)?)?);
         return Ok(());
     }
+    if let [command, entity, request]=args.as_slice() && command=="trail-record" {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Record { action: String, ids: Vec<String>, #[serde(default)] erased:bool }
+        let req:Record=serde_json::from_str(request)?;
+        let ids=req.ids.iter().map(|v|paydirt::parse_id(v).ok_or("invalid row UUID")).collect::<Result<Vec<_>,_>>()?;
+        let mut store=__APP_CRATE__::resource::record(paydirt_store::Store::open(&url,MODEL,POLICIES)?)?;
+        let archive=paydirt_store::archive_files::Archive::verification_from_environment()?;
+        println!("{}",store.transaction(&paydirt_store::Scope::Internal,|tx|tx.record_objects_with_archive(entity,&ids,&req.action,req.erased,archive.as_ref()))?);
+        return Ok(());
+    }
+    if let [command, entity]=args.as_slice() && command=="trail-scan" {
+        let archive=paydirt_store::archive_files::Archive::verification_from_environment()?;
+        let mut store=__APP_CRATE__::resource::record(paydirt_store::Store::open(&url,MODEL,POLICIES)?)?;
+        let report=store.check_kind(entity,archive.as_ref())?;
+        println!("{}",serde_json::to_string(&report)?);
+        return Ok(());
+    }
     if let [command, entity, id]=args.as_slice() && command=="trail-row" {
         let mut store=__APP_CRATE__::resource::record(paydirt_store::Store::open(&url,MODEL,POLICIES)?)?;
-        let f=store.verify_object(entity,paydirt::parse_id(id).ok_or("invalid row UUID")?)?;
+        let archive=paydirt_store::archive_files::Archive::verification_from_environment()?;
+        let f=store.verify_object_with_archive(entity,paydirt::parse_id(id).ok_or("invalid row UUID")?,archive.as_ref())?;
         println!("{}",serde_json::to_string(&f)?);
         return Ok(());
     }

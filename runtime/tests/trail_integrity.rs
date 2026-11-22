@@ -202,3 +202,220 @@ fn transaction_seals_current_personal_row_and_detects_a_changed_value() {
         Verdict::Forged
     );
 }
+
+#[cfg(feature = "sqlite")]
+fn check_database(url: &str, directory: &std::path::Path, raw: impl Fn(&str)) {
+    use paydirt_store::{Call, Fault, Scope, Store, archive_files::Archive};
+    use serde_json::json;
+    let open = |key: u8| {
+        Store::open(
+            url,
+            include_str!("../../generated/storage/model.json"),
+            include_str!("../../generated/storage/policies.json"),
+        )
+        .unwrap()
+        .with_trail(
+            Default::default(),
+            include_bytes!("../../generated/storage/descriptors.binpb"),
+            include_str!("../../generated/storage/admission.json"),
+        )
+        .unwrap()
+        .with_audit_keys(Keys::new(vec![key; 32], vec![], Default::default()).unwrap())
+        .unwrap()
+    };
+    let mut db = open(6);
+    let t = paydirt::mint(1);
+    let object = paydirt::mint(10);
+    let reference = paydirt::format_id(&object).unwrap();
+    db.call(
+        &Scope::Internal,
+        Call {
+            entity: "app.Tenant".into(),
+            method: "Add".into(),
+            request: json!({"id":STANDARD.encode(t),"alias":"own"}),
+        },
+    )
+    .unwrap();
+    db.seed(vec![(
+        "app.Cell".into(),
+        json!({"id":STANDARD.encode(object),"tenant":{"id":STANDARD.encode(t)},"alias":"external"}),
+    )])
+    .unwrap();
+    let scan =
+        |db: &mut Store, archive: Option<&Archive>| db.check_kind("app.Cell", archive).unwrap();
+    assert_eq!(
+        scan(&mut db, None).findings[&reference].digest,
+        Verdict::NotOnTrail
+    );
+    let rollback: paydirt_store::Result<()> = db.transaction(&Scope::Internal, |tx| {
+        tx.record_objects("app.Cell", &[object], "/ops/first", false)?;
+        Err(Fault::invalid("rollback"))
+    });
+    assert!(rollback.is_err());
+    assert_eq!(
+        scan(&mut db, None).findings[&reference].digest,
+        Verdict::NotOnTrail
+    );
+    assert_eq!(
+        db.transaction(&Scope::Internal, |tx| tx.record_objects(
+            "app.Cell",
+            &[object, object],
+            "/ops/admit",
+            false
+        ))
+        .unwrap(),
+        1
+    );
+    assert!(scan(&mut db, None).findings.is_empty());
+    raw("UPDATE \"pd_app__Cell\" SET f4='external-edit' WHERE f4='external'");
+    assert_eq!(
+        scan(&mut db, None).findings[&reference].digest,
+        Verdict::Differs
+    );
+    assert!(
+        db.transaction(&Scope::Internal, |tx| tx.record_objects(
+            "app.Cell",
+            &[object],
+            "/ops/erase",
+            true
+        ))
+        .is_err()
+    );
+    db.transaction(&Scope::Internal, |tx| {
+        tx.record_objects("app.Cell", &[object], "/ops/accept", false)
+    })
+    .unwrap();
+    assert!(scan(&mut db, None).findings.is_empty());
+    let mut wrong = open(121);
+    assert_eq!(
+        scan(&mut wrong, None).findings[&reference].digest,
+        Verdict::UnknownKey
+    );
+    raw(
+        "UPDATE \"pd_app__Audit\" SET f21=(SELECT f21 FROM \"pd_app__Audit\" WHERE f10='/ops/admit') WHERE f10='/ops/accept'",
+    );
+    assert_eq!(
+        scan(&mut db, None).findings[&reference].digest,
+        Verdict::Forged
+    );
+    db.transaction(&Scope::Internal, |tx| {
+        tx.record_objects("app.Cell", &[object], "/ops/review", false)
+    })
+    .unwrap();
+    let archive_dir = directory.join("archive");
+    let witness = directory.join("witness");
+    let vault = Archive::open(&archive_dir, &[54; 32])
+        .unwrap()
+        .with_notary(notary(witness.clone()));
+    let verify = Archive::without_decryption_key(&archive_dir).with_notary(notary(witness));
+    let tenant = paydirt::format_id(&t).unwrap();
+    for req in [
+        json!({"tenant":tenant,"action":"policy","policy":{"by":{"app.Cell":{"retain_ms":0}}}}),
+        json!({"tenant":tenant,"action":"collect"}),
+    ] {
+        db.manage_trail(&vault, None, serde_json::from_value(req).unwrap())
+            .unwrap();
+    }
+    assert_eq!(
+        scan(&mut db, None).findings[&reference].digest,
+        Verdict::NotOnTrail
+    );
+    let archived = scan(&mut db, Some(&verify));
+    assert_eq!(archived.archived, 1);
+    assert!(archived.findings.is_empty());
+    assert_eq!(
+        db.verify_object_with_archive("app.Cell", object, Some(&verify))
+            .unwrap()
+            .digest,
+        Verdict::Matches
+    );
+    let ciphertext = std::fs::read_dir(&archive_dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .find(|f| f.file_name().len() == 64)
+        .unwrap()
+        .path();
+    let digest = ciphertext.file_name().unwrap().to_str().unwrap();
+    assert!(verify.read(digest).is_err());
+    let original = std::fs::read(&ciphertext).unwrap();
+    let mut corrupt = original.clone();
+    *corrupt.last_mut().unwrap() ^= 1;
+    std::fs::write(&ciphertext, corrupt).unwrap();
+    assert!(db.check_kind("app.Cell", Some(&verify)).is_err());
+    std::fs::write(&ciphertext, original).unwrap();
+    raw("DELETE FROM \"pd_app__Cell\" WHERE f4='external-edit'");
+    assert_eq!(
+        scan(&mut db, Some(&verify)).findings[&reference].digest,
+        Verdict::Missing
+    );
+    assert!(
+        db.transaction(&Scope::Internal, |tx| tx.record_objects(
+            "app.Cell",
+            &[object],
+            "/ops/accept",
+            false
+        ))
+        .is_err()
+    );
+    db.transaction(&Scope::Internal, |tx| {
+        tx.record_objects_with_archive("app.Cell", &[object], "/ops/removed", true, Some(&verify))
+    })
+    .unwrap();
+    assert!(scan(&mut db, Some(&verify)).findings.is_empty());
+    db.seed(vec![(
+        "app.Cell".into(),
+        json!({"id":STANDARD.encode(object),"tenant":{"id":STANDARD.encode(t)},"alias":"restored"}),
+    )])
+    .unwrap();
+    assert_eq!(
+        scan(&mut db, Some(&verify)).findings[&reference].digest,
+        Verdict::Differs
+    );
+    raw("UPDATE \"pd_app__Audit\" SET f21=substr(f21,1,0) WHERE f10='/ops/removed'");
+    assert_eq!(
+        scan(&mut db, Some(&verify)).findings[&reference].digest,
+        Verdict::NoDigest
+    );
+}
+
+#[cfg(feature = "sqlite")]
+#[test]
+fn scans_current_and_signed_archived_rows_and_records_explicit_acceptance() {
+    use diesel::{Connection, connection::SimpleConnection};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("db");
+    let url = path.to_str().unwrap();
+    check_database(url, dir.path(), |sql| {
+        diesel::SqliteConnection::establish(url)
+            .unwrap()
+            .batch_execute(sql)
+            .unwrap()
+    });
+    #[cfg(feature = "postgres")]
+    if let Ok(url) = std::env::var("DATABASE_URL") {
+        let admin = || diesel::PgConnection::establish(&url).unwrap();
+        let schema = format!("integrity_{}", hex::encode(paydirt::mint(0)));
+        admin()
+            .batch_execute(&format!("CREATE SCHEMA {schema}"))
+            .unwrap();
+        let scoped = format!(
+            "{url}{}options=-csearch_path%3D{schema}",
+            if url.contains('?') { "&" } else { "?" }
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let result = std::panic::catch_unwind(|| {
+            check_database(&scoped, dir.path(), |sql| {
+                diesel::PgConnection::establish(&scoped)
+                    .unwrap()
+                    .batch_execute(sql)
+                    .unwrap()
+            })
+        });
+        admin()
+            .batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
+            .unwrap();
+        if let Err(err) = result {
+            std::panic::resume_unwind(err)
+        }
+    }
+}
