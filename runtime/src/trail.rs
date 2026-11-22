@@ -79,6 +79,7 @@ impl Transaction<'_> {
             seen: None,
             changes: self.changes,
             outbox: self.outbox,
+            topic_policy: self.topic_policy,
             inputs: self.inputs,
             namer: self.namer,
             db: self.db,

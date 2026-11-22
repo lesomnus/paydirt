@@ -21,6 +21,36 @@ pub struct TopicGrants {
     pub producer: Option<String>,
 }
 
+/// Application-owned topic policy. The reader and grants are resolved again on
+/// each call, including stream invalidation. Relationships are read on the same
+/// connection and under the same scope as the outer operation.
+pub trait Policy: Send + Sync + 'static {
+    fn resolve(
+        &self,
+        rows: &mut Rows<'_, '_>,
+        frame: &crate::Frame,
+        tenant: &[u8],
+        method: &str,
+        request: &Value,
+    ) -> Result<(Vec<u8>, TopicGrants)>;
+}
+pub struct Rows<'a, 'db>(&'a mut Transaction<'db>);
+impl Rows<'_, '_> {
+    pub fn get(&mut self, entity: &str, reference: &Value) -> Result<Option<Value>> {
+        let e = self.0.model.entity(entity).map_err(Fault::invalid)?;
+        match self.0.lookup(e, reference, false) {
+            Ok(v) => Ok(Some(v)),
+            Err(e) if e.code == "not_found" => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+}
+impl crate::Store {
+    pub fn with_notification_policy(mut self, policy: impl Policy) -> Self {
+        self.topic_policy = Some(Box::new(policy));
+        self
+    }
+}
 pub(crate) fn install(db: &mut dyn Driver) -> Result<()> {
     db.batch("CREATE TABLE IF NOT EXISTS paydirt_notify_key(id INTEGER PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS paydirt_notify_revisions(tenant TEXT NOT NULL,topic TEXT NOT NULL,reader TEXT NOT NULL,version BIGINT NOT NULL,PRIMARY KEY(tenant,topic,reader));")?;
@@ -120,35 +150,20 @@ impl Transaction<'_> {
             ..Default::default()
         };
         let frame = self.frame;
-        let (actor, grants) = if internal && method == "Add" {
-            (vec![0; 16], &host)
-        } else {
-            let f =
-                frame.ok_or_else(|| Fault::unauthenticated("notification requires a caller"))?;
-            if accounts && (!f.tenant.is_empty() || f.account.is_none()) {
-                return Err(Fault::denied("account namespace requires an account frame"));
-            }
-            (
-                f.actor.clone().ok_or_else(|| {
-                    Fault::precondition("notification requires a reader identity")
-                })?,
-                &f.topics,
-            )
-        };
-        // Get names a notification, not a tenant. Resolve the row under the caller's
-        // full tenant scope before applying its topic grant.
-        if !global && method == "Get" {
+        if accounts
+            && !internal
+            && !frame.is_some_and(|f| f.tenant.is_empty() && f.account.is_some())
+        {
+            return Err(Fault::denied("account namespace requires an account frame"));
+        }
+        let found = if !global && method == "Get" {
             let key = &req["ref"]["id"];
             id(key)?;
             let records = self.owned_entity("OWN_NOTIFICATION")?.clone();
-            let row = self.lookup(&records, &json!({"id":key}), false)?;
-            if !paydirt::has_domain(&id(&row["tenantId"])?, 1)
-                || !visible(&grants.read, row["topicKey"].as_str().unwrap_or(""), &actor)
-            {
-                return Err(Fault::missing());
-            }
-            return notice(&row);
-        }
+            Some(self.lookup(&records, &json!({"id":key}), false)?)
+        } else {
+            None
+        };
         let requested = req
             .get("tenantId")
             .filter(|v| v.as_str().is_some_and(|s| !s.is_empty()));
@@ -158,15 +173,46 @@ impl Transaction<'_> {
             }
             vec![0; 16]
         } else {
-            let t = id(requested.ok_or_else(|| Fault::invalid("tenant ID required"))?)?;
+            let t = id(found
+                .as_ref()
+                .map(|row| &row["tenantId"])
+                .or(requested)
+                .ok_or_else(|| Fault::invalid("tenant ID required"))?)?;
             if !paydirt::has_domain(&t, 1) {
-                return Err(Fault::invalid("not a tenant ID"));
+                return Err(if found.is_some() {
+                    Fault::missing()
+                } else {
+                    Fault::invalid("not a tenant ID")
+                });
             }
             if self.scope.tenants().is_some_and(|ids| !ids.contains(&t)) {
                 return Err(Fault::denied("outside tenant scope"));
             }
             t
         };
+        let (actor, grants) = match (frame, self.topic_policy) {
+            (None, _) if internal && method == "Add" => (vec![0; 16], host),
+            (Some(f), Some(policy)) => {
+                let (reader, grants) = policy.resolve(&mut Rows(self), f, &tenant, method, req)?;
+                if reader.len() != 16 || reader.iter().all(|&b| b == 0) {
+                    return Err(Fault::precondition("topic policy returned an empty reader"));
+                }
+                (reader, grants)
+            }
+            (Some(f), None) => (
+                f.actor.clone().ok_or_else(|| {
+                    Fault::precondition("notification requires a reader identity")
+                })?,
+                f.topics.clone(),
+            ),
+            _ => return Err(Fault::unauthenticated("notification requires a caller")),
+        };
+        if let Some(row) = found {
+            if !visible(&grants.read, row["topicKey"].as_str().unwrap_or(""), &actor) {
+                return Err(Fault::missing());
+            }
+            return notice(&row);
+        }
         let r = Reader {
             namespace: cfg["goPackage"]
                 .as_str()
@@ -176,7 +222,7 @@ impl Transaction<'_> {
                 .unwrap_or(service),
             tenant: value::encoded(&tenant),
             actor,
-            grants,
+            grants: &grants,
         };
         let scope = Scope::Tenant(tenant);
         let mut db = Transaction {
@@ -185,6 +231,7 @@ impl Transaction<'_> {
             seen: None,
             changes: self.changes,
             outbox: self.outbox,
+            topic_policy: self.topic_policy,
             inputs: self.inputs,
             namer: self.namer,
             db: self.db,
@@ -315,11 +362,14 @@ impl Transaction<'_> {
             if !seen.insert(id(v)?) {
                 return Err(Fault::invalid("duplicate Mark reference"));
             }
-            rows.push(self.visible_notice(e, r, v)?);
         }
         // Serialize overlapping batches in a single order, then return request order.
         for key in seen {
+            self.lookup(e, &json!({"id":value::encoded(&key)}), true)?;
             self.notice_lock(&json!([receipts.name, actor, value::encoded(&key)]))?;
+        }
+        for reference in refs {
+            rows.push(self.visible_notice(e, r, &reference["id"])?);
         }
         let mut out = Vec::new();
         for row in rows {
@@ -409,6 +459,7 @@ impl Transaction<'_> {
                 db: self.db,
                 model: self.model,
                 policies: self.policies,
+                topic_policy: self.topic_policy,
                 inputs: self.inputs,
                 namer: self.namer,
                 outbox: false,
@@ -667,5 +718,66 @@ impl Transaction<'_> {
             ));
         }
         Ok(result)
+    }
+}
+
+impl crate::Store {
+    pub fn notification_keep(&self) -> Result<chrono::Duration> {
+        self.policies
+            .values()
+            .find(|p| p.entity["own"] == "OWN_HOLDER")
+            .and_then(|p| p.application["notify"]["keep"]["days"].as_i64())
+            .filter(|n| *n > 0)
+            .and_then(chrono::Duration::try_days)
+            .ok_or_else(|| Fault::precondition("positive notification retention days required"))
+    }
+    /// Erase one oldest-first batch. Each invocation commits its receipts,
+    /// publication keys, audit rows and invalidations in one transaction.
+    /// A zero tenant selects the account/global namespace. None visits all tenants.
+    pub fn expire_notifications(
+        &mut self,
+        tenant: Option<[u8; 16]>,
+        limit: usize,
+    ) -> Result<usize> {
+        if !(1..=10000).contains(&limit) {
+            return Err(Fault::invalid("invalid expiry batch size"));
+        }
+        let keep = self.notification_keep()?;
+        self.transaction(&Scope::Internal,|tx|{
+            let app=&tx.policies.values().find(|p|p.entity["own"]=="OWN_HOLDER").ok_or_else(||Fault::precondition("missing application schema"))?.application;
+
+            let before=(tx.inputs.clock)().checked_sub_signed(keep).ok_or_else(||Fault::invalid("retention exceeds timestamp range"))?;
+            let ns=app["goPackage"].as_str().unwrap_or("").split(';').next().unwrap_or("");
+            let n=tx.owned_entity("OWN_NOTIFICATION")?.clone();
+            let r=tx.owned_entity("OWN_NOTIFICATION_RECEIPT")?.clone();
+            let d=tx.db.dialect();
+            let mut q=Query::new("");
+            let time=q.param(Bind::Text(before.to_rfc3339_opts(chrono::SecondsFormat::Nanos,true)),d);
+            let date=quote(&n.field("date_created").map_err(Fault::internal)?.column());
+            let key=quote(&n.key().map_err(Fault::internal)?.column());
+            let mut where_clause=format!("r.{date}<{time}");
+            if let Some(t)=tenant{
+                let arg=q.param(Bind::Bytes(t.to_vec()),d);
+                where_clause.push_str(&format!(" AND r.{}={arg}",quote(&n.field("tenant_id").map_err(Fault::internal)?.column())));
+            }
+            let lock=if d==Dialect::Postgres{" FOR UPDATE"}else{""};
+            q.sql=format!("SELECT {} AS value FROM {} r WHERE {where_clause} ORDER BY r.{date},r.{key} LIMIT {limit}{lock}",tx.project_sql(&n)?,quote(&n.table()));
+            let rows=tx.db.rows(q)?.iter().map(|raw|tx.decode_row(&n,raw)).collect::<Result<Vec<_>>>()?;
+            let grants=TopicGrants::default();
+            for row in &rows{
+                let tenant=value::bytes(&row["tenantId"])?;
+                let ref_id=json!({"id":row["id"]});
+                let frame=crate::entitle::deployment(tenant,"payday.notify.expire");
+                let mut writer=Transaction{inputs:tx.inputs,topic_policy:None,admission:None,origin:None,seen:None,changes:tx.changes,outbox:tx.outbox,namer:tx.namer,db:tx.db,model:tx.model,policies:tx.policies,scope:&Scope::Internal,frame:Some(&frame),failed:None};
+                let mut del=Query::new("");
+                let k=del.param(Bind::Bytes(value::bytes(&row["id"])?),d);
+                del.sql=format!("DELETE FROM {} WHERE {}={k}",quote(&r.table()),quote(&r.field("notification_id").map_err(Fault::internal)?.column()));
+                writer.db.exec(del)?;
+                writer.erase(&n,&ref_id)?;
+                let reader=Reader{namespace:ns,tenant:row["tenantId"].clone(),grants:&grants,actor:vec![]};
+                writer.bump(&reader,row["topicKey"].as_str().ok_or_else(||Fault::internal("invalid stored topic"))?,"")?;
+            }
+            Ok(rows.len())
+        })
     }
 }

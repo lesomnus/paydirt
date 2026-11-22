@@ -14,7 +14,7 @@ mod list;
 pub mod meter;
 mod migrate;
 pub mod naming;
-mod notify;
+pub mod notify;
 pub mod outbox;
 mod past;
 mod relations;
@@ -186,6 +186,7 @@ impl Default for Inputs {
     }
 }
 pub struct Store {
+    topic_policy: Option<Box<dyn notify::Policy>>,
     inputs: Inputs,
     admission: Option<admission::Rules>,
     outbox: bool,
@@ -210,6 +211,7 @@ impl Store {
             watch::install(tx)
         })?;
         Ok(Self {
+            topic_policy: None,
             admission: None,
             inputs: Inputs::default(),
             namer: Box::new(naming::names),
@@ -335,6 +337,7 @@ impl Store {
                 seen: Some(&mut seen),
                 changes: &mut changes,
                 outbox: self.outbox,
+                topic_policy: self.topic_policy.as_deref(),
                 inputs: &self.inputs,
                 namer: &*self.namer,
                 db,
@@ -360,6 +363,7 @@ impl Store {
     }
 }
 pub struct Transaction<'a> {
+    topic_policy: Option<&'a dyn notify::Policy>,
     admission: Option<&'a admission::Rules>,
     origin: Option<Call>,
     seen: Option<&'a mut seen::Seen>,

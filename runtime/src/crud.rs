@@ -464,7 +464,7 @@ impl Transaction<'_> {
         }
         self.image(e, updated, &Value::Null)
     }
-    fn erase(&mut self, e: &Entity, reference: &Value) -> Result<Value> {
+    pub(crate) fn erase(&mut self, e: &Entity, reference: &Value) -> Result<Value> {
         let row = match self.lookup(e, reference, true) {
             Ok(row) => row,
             Err(e) if e.code == "not_found" => return Ok(json!({"erased":false})),
