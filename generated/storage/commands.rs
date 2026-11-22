@@ -58,6 +58,22 @@ async fn dispatch(
                 .await?;
             emit(serde_json::to_value(res.into_owned())?)?;
         }
+        ("app.Audit", "Apply") => {
+            let res = call_unary::<
+                _,
+                proto::r#app::r#AuditApplyRequest,
+                <proto::r#app::r#Audit as buffa::HasMessageView>::View<'static>,
+            >(
+                    client,
+                    config,
+                    "app.AuditService",
+                    "Apply",
+                    serde_json::from_value(request)?,
+                    Default::default(),
+                )
+                .await?;
+            emit(serde_json::to_value(res.into_owned())?)?;
+        }
         ("app.Audit", "Erase") => {
             let res = call_unary::<
                 _,
@@ -142,6 +158,22 @@ async fn dispatch(
                 .await?;
             emit(serde_json::to_value(res.into_owned())?)?;
         }
+        ("app.Cell", "Apply") => {
+            let res = call_unary::<
+                _,
+                proto::r#app::r#CellApplyRequest,
+                <proto::r#app::r#Cell as buffa::HasMessageView>::View<'static>,
+            >(
+                    client,
+                    config,
+                    "app.CellService",
+                    "Apply",
+                    serde_json::from_value(request)?,
+                    Default::default(),
+                )
+                .await?;
+            emit(serde_json::to_value(res.into_owned())?)?;
+        }
         ("app.Cell", "Erase") => {
             let res = call_unary::<
                 _,
@@ -202,6 +234,22 @@ async fn dispatch(
                     config,
                     "app.HolderService",
                     "Add",
+                    serde_json::from_value(request)?,
+                    Default::default(),
+                )
+                .await?;
+            emit(serde_json::to_value(res.into_owned())?)?;
+        }
+        ("app.Holder", "Apply") => {
+            let res = call_unary::<
+                _,
+                proto::r#app::r#HolderApplyRequest,
+                <proto::r#app::r#Holder as buffa::HasMessageView>::View<'static>,
+            >(
+                    client,
+                    config,
+                    "app.HolderService",
+                    "Apply",
                     serde_json::from_value(request)?,
                     Default::default(),
                 )
@@ -315,6 +363,40 @@ async fn dispatch(
                 .await?;
             emit(serde_json::to_value(res.into_owned())?)?;
         }
+        ("app.Robot", "AddMany") => {
+            let res = call_unary::<
+                _,
+                proto::r#app::r#RobotAddManyRequest,
+                <proto::r#app::r#RobotAddManyResponse as buffa::HasMessageView>::View<
+                    'static,
+                >,
+            >(
+                    client,
+                    config,
+                    "app.RobotService",
+                    "AddMany",
+                    serde_json::from_value(request)?,
+                    Default::default(),
+                )
+                .await?;
+            emit(serde_json::to_value(res.into_owned())?)?;
+        }
+        ("app.Robot", "Apply") => {
+            let res = call_unary::<
+                _,
+                proto::r#app::r#RobotApplyRequest,
+                <proto::r#app::r#Robot as buffa::HasMessageView>::View<'static>,
+            >(
+                    client,
+                    config,
+                    "app.RobotService",
+                    "Apply",
+                    serde_json::from_value(request)?,
+                    Default::default(),
+                )
+                .await?;
+            emit(serde_json::to_value(res.into_owned())?)?;
+        }
         ("app.Robot", "Erase") => {
             let res = call_unary::<
                 _,
@@ -361,6 +443,22 @@ async fn dispatch(
                     config,
                     "app.RobotService",
                     "List",
+                    serde_json::from_value(request)?,
+                    Default::default(),
+                )
+                .await?;
+            emit(serde_json::to_value(res.into_owned())?)?;
+        }
+        ("app.Robot", "Move") => {
+            let res = call_unary::<
+                _,
+                proto::r#app::r#RobotMoveRequest,
+                <proto::r#app::r#Robot as buffa::HasMessageView>::View<'static>,
+            >(
+                    client,
+                    config,
+                    "app.RobotService",
+                    "Move",
                     serde_json::from_value(request)?,
                     Default::default(),
                 )
@@ -416,6 +514,22 @@ async fn dispatch(
                     config,
                     "app.TenantService",
                     "Add",
+                    serde_json::from_value(request)?,
+                    Default::default(),
+                )
+                .await?;
+            emit(serde_json::to_value(res.into_owned())?)?;
+        }
+        ("app.Tenant", "Apply") => {
+            let res = call_unary::<
+                _,
+                proto::r#app::r#TenantApplyRequest,
+                <proto::r#app::r#Tenant as buffa::HasMessageView>::View<'static>,
+            >(
+                    client,
+                    config,
+                    "app.TenantService",
+                    "Apply",
                     serde_json::from_value(request)?,
                     Default::default(),
                 )

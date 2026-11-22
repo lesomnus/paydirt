@@ -10,6 +10,12 @@ export async function operatorScenario(app,workspace,env,primary){
   const idText=tenant.replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/,"$1-$2-$3-$4-$5");
   const add=JSON.parse(run(["cell","add",JSON.stringify({tenant:{id:idText},alias:"cli"}),"-o","json"]));
   assert.equal(JSON.parse(run(["cell","get",add.id,"-o","json"])).alias,"cli");
+  assert.equal(run(["cell","get",add.id,"-o","template={{.id}} {{.alias}}"]),add.id+" cli");
+  assert.match(run(["cell","get",add.id,"-o","prototext"]),/alias:\s*"cli"/);
+  assert.equal(JSON.parse(run(["cell","patch",add.id,'alias: "text-edit"',"--in","prototext","-o","json"])).alias,"text-edit");
+  assert.match(run(["robot","--help"]),/move/);
+  const batch=JSON.parse(run(["robot","addmany",JSON.stringify({items:[{tenant:{id:idText},alias:"cli-batch"}]}),"-o","json"]));
+  assert.equal(batch.items[0].alias,"cli-batch");
   assert.equal(JSON.parse(run(["cell","patch",add.id,'{"alias":"cli-edit"}',"-o","json"])).alias,"cli-edit");
   assert.equal(JSON.parse(run(["cell","erase",add.id,"-o","protojson"])).erased,true);
   assert.throws(()=>run(["cell","get",add.id]),e=>e.status!==0 && /not.?found/i.test(e.stderr));
