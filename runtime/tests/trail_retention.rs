@@ -210,6 +210,13 @@ fn exercise(url: &str, dir: &Path) {
 }
 #[test]
 fn dry_run_recovery_holds_and_encrypted_export() {
+    backends(exercise);
+}
+#[test]
+fn shared_owners_and_transactional_obligations() {
+    backends(shared_window);
+}
+fn backends(exercise: fn(&str, &Path)) {
     let temp = tempfile::tempdir().unwrap();
     exercise(temp.path().join("db").to_str().unwrap(), temp.path());
     #[cfg(feature = "postgres")]
@@ -233,4 +240,120 @@ fn dry_run_recovery_holds_and_encrypted_export() {
             std::panic::resume_unwind(err)
         }
     }
+}
+
+fn shared_window(url: &str, dir: &Path) {
+    let mut policies: Value = serde_json::from_str(POLICIES).unwrap();
+    policies["app.Cell"]["entity"]["formerly"] = json!([{"message":"Box","name":"box"}]);
+    let mut db = Store::open(url, MODEL, &policies.to_string()).unwrap();
+    let vault = Archive::open(dir.join("shared-vault"), &[88; 32]).unwrap();
+    let recipient = Archive::open(dir.join("recipient"), &[99; 32]).unwrap();
+    let left = paydirt::mint(1);
+    let right = paydirt::mint(1);
+    let outsider = paydirt::mint(1);
+    let uuid = |id: &[u8]| paydirt::format_id(id).unwrap();
+    let id = paydirt::mint(
+        policies["app.Audit"]["entity"]["domain"]
+            .as_u64()
+            .unwrap()
+            .try_into()
+            .unwrap(),
+    );
+    let subject = paydirt::mint(10);
+    db.seed(vec![("app.Audit".into(), json!({
+        "id":STANDARD.encode(id),"tenantId":STANDARD.encode(left),"actorTenantId":STANDARD.encode(right),
+        "actorId":STANDARD.encode(paydirt::mint(2)),"objectId":STANDARD.encode(subject),
+        "action":"/app.CellService/Add","domain":10,"dateCreated":"2020-01-01T00:00:00Z","value":STANDARD.encode(b"private")
+    }))]).unwrap();
+    let pass = |db: &mut Store, owner: &[u8], arg| pass(db, &vault, &recipient, &uuid(owner), arg);
+    let set = |by: Value| json!({"action":"policy","policy":{"by":by}});
+    for kind in ["not-a-resource", "cells"] {
+        assert!(pass(&mut db, &left, set(json!({kind:{}}))).is_err());
+    }
+    assert!(pass(&mut db, &left, set(json!({"box":{},"cell":{}}))).is_err());
+    let policy = pass(
+        &mut db,
+        &left,
+        set(json!({"box":{"retain_ms":0,"discard":true}})),
+    )
+    .unwrap()
+    .policy;
+    assert!(policy.by.contains_key("app.Cell"));
+    let inspect = json!({"action":"inspect"});
+    let collect = json!({"action":"collect"});
+    assert!(
+        pass(&mut db, &left, collect.clone())
+            .unwrap()
+            .archived
+            .is_empty()
+    );
+    assert_eq!(
+        pass(&mut db, &right, inspect.clone()).unwrap().inventory[&uuid(&id)],
+        "online"
+    );
+    assert!(
+        pass(&mut db, &outsider, inspect.clone())
+            .unwrap()
+            .inventory
+            .is_empty()
+    );
+    pass(&mut db, &right, set(json!({"app.Cell":{"retain_ms":0}}))).unwrap();
+    let collected = pass(&mut db, &left, collect.clone()).unwrap();
+    assert_eq!(collected.archived, [uuid(&id)]);
+    assert!(collected.removed.is_empty());
+    for owner in [left, right] {
+        assert_eq!(
+            pass(&mut db, &owner, inspect.clone()).unwrap().inventory[&uuid(&id)],
+            "archived"
+        );
+        let export = json!({"action":"export","operator":"test","recipient":"owner","reason":"shared record"});
+        let bundle = pass(&mut db, &owner, export).unwrap().bundle.unwrap();
+        let rows: Value = serde_json::from_slice(&recipient.read(&bundle).unwrap()).unwrap();
+        assert_eq!(rows["rows"][0]["id"], STANDARD.encode(id));
+    }
+    pass(
+        &mut db,
+        &right,
+        json!({"action":"policy","policy":{"held":["cell"]}}),
+    )
+    .unwrap();
+    let blocked = pass(&mut db, &left, json!({"action":"purge"})).unwrap();
+    assert_eq!(blocked.held, [uuid(&id)]);
+    assert!(blocked.blanked.is_empty());
+    pass(&mut db, &right, set(json!({}))).unwrap();
+    let departure = pass(&mut db, &left, json!({"action":"purge"})).unwrap();
+    assert_eq!(departure.blanked, [uuid(&id)]);
+    assert!(departure.removed.is_empty());
+    let bundle = pass(
+        &mut db,
+        &right,
+        json!({"action":"export","operator":"test","recipient":"owner","reason":"after departure"}),
+    )
+    .unwrap()
+    .bundle
+    .unwrap();
+    let shared: Value = serde_json::from_slice(&recipient.read(&bundle).unwrap()).unwrap();
+    assert_eq!(shared["rows"][0]["id"], STANDARD.encode(id));
+    assert_eq!(shared["rows"][0]["value"], "");
+    let refused: paydirt_store::Result<()> = db.transaction(&Scope::Internal, |tx| {
+        tx.owe_trail_erasure(left, subject)?;
+        Err(paydirt_store::Fault::invalid("undo accompanying write"))
+    });
+    assert!(refused.is_err());
+    assert!(
+        pass(&mut db, &left, inspect.clone())
+            .unwrap()
+            .owed
+            .is_empty()
+    );
+    let second = paydirt::mint(10);
+    db.transaction(&Scope::Internal, |tx| {
+        tx.owe_trail_erasure(left, subject)?;
+        tx.owe_trail_erasure(left, second)?;
+        tx.owe_trail_erasure(left, subject)
+    })
+    .unwrap();
+    assert_eq!(pass(&mut db, &left, inspect).unwrap().owed.len(), 2);
+    let retry = pass(&mut db, &left, json!({"action":"retry"})).unwrap();
+    assert!(retry.owed.is_empty());
 }

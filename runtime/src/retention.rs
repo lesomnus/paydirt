@@ -37,6 +37,8 @@ struct Entry {
     kind: String,
     created: String,
     owners: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    namespace: Option<String>,
     table: String,
     #[serde(default)]
     digest: Option<String>,
@@ -84,6 +86,57 @@ pub struct Report {
     pub bundle: Option<String>,
     pub retired: bool,
 }
+impl Policy {
+    fn resolve(&self, policies: &crate::Policies) -> Result<Self> {
+        let domains = crate::domain::Domains::from_policies(policies)?;
+        let canonical = |name: &str| -> Result<String> {
+            let number = domains
+                .lookup(name)
+                .or_else(|| domains.domain_of(name))
+                .ok_or_else(|| Fault::invalid(format!("unknown or ambiguous trail kind {name}")))?;
+            let mut matches = policies
+                .iter()
+                .filter(|(_, p)| p.entity["domain"].as_u64() == Some(number as u64));
+            let (entity, policy) = matches
+                .next()
+                .ok_or_else(|| Fault::invalid("unknown domain"))?;
+            if matches.next().is_some() {
+                return Err(Fault::invalid(format!("ambiguous trail kind {name}")));
+            }
+            Ok(if policy.entity["own"] == "OWN_ACCESS" {
+                "access".into()
+            } else {
+                entity.clone()
+            })
+        };
+        let mut by = BTreeMap::new();
+        for (name, value) in &self.by {
+            if by.insert(canonical(name)?, value.clone()).is_some() {
+                return Err(Fault::invalid("trail policy names the same kind twice"));
+            }
+        }
+        let mut held = BTreeSet::new();
+        for name in &self.held {
+            let kind = if name == "*" {
+                name.clone()
+            } else {
+                canonical(name)?
+            };
+            if !held.insert(kind) {
+                return Err(Fault::invalid("trail hold names the same kind twice"));
+            }
+        }
+        Ok(Self {
+            default: self.default.clone(),
+            by,
+            held,
+        })
+    }
+    fn keep(&self, kind: &str) -> &Keep {
+        self.by.get(kind).unwrap_or(&self.default)
+    }
+}
+
 fn decode<T: DeserializeOwned>(v: &str) -> Result<T> {
     serde_json::from_str(v).map_err(|e| Fault::precondition(e.to_string()))
 }
@@ -128,6 +181,26 @@ impl Transaction<'_> {
         }
         self.db.batch(TABLES)
     }
+    /// Queue a subject erasure in the same transaction as the host's business write.
+    /// The maintenance pass services the obligation after commit and respects holds.
+    pub fn owe_trail_erasure(&mut self, tenant: [u8; 16], subject: [u8; 16]) -> Result<()> {
+        if !matches!(self.scope, Scope::Internal) {
+            return Err(Fault::denied(
+                "erasure obligations require a host transaction",
+            ));
+        }
+        if !paydirt::has_domain(&tenant, 1) || subject == [0; 16] {
+            return Err(Fault::invalid("expected tenant and subject IDs"));
+        }
+        let tenant = paydirt::format_id(&tenant).expect("sixteen-byte identifier");
+        let subject = paydirt::format_id(&subject).expect("sixteen-byte identifier");
+        self.lock_trail()?;
+        self.trail_set(
+            "paydirt_trail_owed",
+            &format!("{tenant}/{subject}"),
+            Some(&(&tenant, &subject)),
+        )
+    }
     fn trail_docs<T: DeserializeOwned>(&mut self, table: &str) -> Result<Vec<T>> {
         self.db
             .rows(Query::new(format!(
@@ -155,7 +228,7 @@ impl Transaction<'_> {
     fn trail_clear(&mut self, table: &str, id: &str) -> Result<()> {
         self.trail_set(table, id, None::<&Value>)
     }
-    fn live_trail(&mut self, tenant: &str) -> Result<Vec<(Entry, Value)>> {
+    fn live_trail(&mut self, tenant: &str, shared: bool) -> Result<Vec<(Entry, Value)>> {
         let mut rows = Vec::new();
         for (name, p) in self
             .policies
@@ -169,11 +242,21 @@ impl Transaction<'_> {
                 Bind::Bytes(paydirt::parse_id(tenant).unwrap().to_vec()),
                 self.db.dialect(),
             );
+            let columns = if shared {
+                &["tenant_id", "actor_tenant_id", "counterpart_tenant_id"][..]
+            } else {
+                &["tenant_id"][..]
+            };
+            let owners = columns
+                .iter()
+                .filter_map(|n| entity.field(n).ok())
+                .map(|f| format!("r.{}={owner}", quote(&f.column())))
+                .collect::<Vec<_>>()
+                .join(" OR ");
             q.sql = format!(
-                "SELECT {} AS value FROM {} r WHERE r.{}={owner} ORDER BY r.{}",
+                "SELECT {} AS value FROM {} r WHERE ({owners}) ORDER BY r.{}",
                 self.project_sql(entity)?,
                 quote(&entity.table()),
-                quote(&entity.field("tenant_id").map_err(bad)?.column()),
                 quote(&entity.key().map_err(bad)?.column())
             );
             if self.db.dialect() == Dialect::Postgres {
@@ -198,13 +281,15 @@ impl Transaction<'_> {
                 rows.push((
                     Entry {
                         id,
-                        tenant: tenant.into(),
+                        tenant: row_id(&row["tenantId"])
+                            .unwrap_or_else(|| "00000000-0000-0000-0000-000000000000".into()),
                         kind,
                         created: row["dateCreated"]
                             .as_str()
                             .ok_or_else(|| bad("missing trail time"))?
                             .into(),
                         owners,
+                        namespace: None,
                         table: name.clone(),
                         digest: None,
                         signature: None,
@@ -312,7 +397,7 @@ fn run_pass(
                 return Err(Fault::invalid("destroy window precedes retention"));
             }
         }
-        state.policy = policy.clone();
+        state.policy = policy.resolve(tx.policies)?;
         if !dry {
             tx.trail_set("paydirt_trail_policy", &tenant, Some(&(&tenant, &state)))?;
         }
@@ -353,10 +438,11 @@ fn run_pass(
     }
     let mut waiting = BTreeSet::new();
     let mut exported = Vec::new();
-    let mut rows = tx.live_trail(&tenant)?;
+    let shared = !matches!(request.action, Action::Retire | Action::Purge);
+    let mut rows = tx.live_trail(&tenant, shared)?;
     for entry in tx.trail_docs::<Entry>("paydirt_trail_archive")?.into_iter() {
         entry.validate(files, "present")?;
-        if entry.tenant != tenant {
+        if entry.tenant != tenant && !(shared && entry.owners.contains(&tenant)) {
             continue;
         }
         let digest = entry
@@ -384,13 +470,20 @@ fn run_pass(
                 .get(t)
                 .is_some_and(|s| s.policy.held.contains("*") || s.policy.held.contains(&e.kind))
         });
-        let k = state
-            .policy
-            .by
-            .get(&e.kind)
-            .unwrap_or(&state.policy.default);
-        let collect = due(&e.created, k.retain_ms, now)?;
-        let destroy = due(&e.created, k.destroy_ms, now)? || k.discard && collect;
+        let default_policy = Policy::default();
+        let mut collect = true;
+        let mut destroy = true;
+        for owner in &e.owners {
+            let keep = states
+                .get(owner)
+                .map(|s| &s.policy)
+                .unwrap_or(&default_policy)
+                .keep(&e.kind);
+            let cold = due(&e.created, keep.retain_ms, now)?;
+            collect &= cold;
+            destroy &= due(&e.created, keep.destroy_ms, now)? || keep.discard && cold;
+        }
+        let k = state.policy.keep(&e.kind);
         let archived = e.digest.is_some();
         let forget = matches!(
             request.action,
@@ -412,11 +505,14 @@ fn run_pass(
             exported.push(row);
             continue;
         }
-        if held && (target || forget && !subjects.is_empty()) {
+        let shared_departure = e.owners.len() > 1
+            && (matches!(request.action, Action::Purge | Action::Retire)
+                || state.retired && e.tenant == tenant);
+        if held && (target || shared_departure || forget && !subjects.is_empty()) {
             out.held.push(e.id.clone());
             waiting.extend(subjects.iter().cloned());
         }
-        if target && !held {
+        if target && !held && !shared_departure {
             out.removed.push(e.id.clone());
             if !dry {
                 if let Some(old) = &e.digest {
@@ -429,9 +525,8 @@ fn run_pass(
             }
             continue;
         }
-        let blank = forget
-            && !held
-            && !subjects.is_empty()
+        let blank = !held
+            && (shared_departure || forget && !subjects.is_empty())
             && ["patch", "value", "digest"]
                 .iter()
                 .any(|k| row[k].as_str().is_some_and(|s| !s.is_empty()));
@@ -456,6 +551,9 @@ fn run_pass(
             let hash = files.stage(&serde_json::to_vec(&row).map_err(bad)?)?;
             if e.digest.is_some() {
                 tx.removal(files, &e)?;
+            }
+            if !archived && e.owners.len() > 1 {
+                e.namespace = Some("shared".into());
             }
             if let Some(old) = e.digest.replace(hash) {
                 tx.trail_set("paydirt_trail_gc", &old, Some(&old))?;
@@ -513,11 +611,13 @@ impl Entry {
     fn blob(&self) -> Result<crate::attestation::Blob> {
         self.digest
             .as_ref()
-            .map(|d| crate::attestation::Blob::of(&self.tenant, d))
+            .map(|d| {
+                crate::attestation::Blob::of(self.namespace.as_deref().unwrap_or(&self.tenant), d)
+            })
             .ok_or_else(|| bad("archive entry has no digest"))
     }
     fn statement(&self, state: &str) -> Result<Vec<u8>> {
-        let labels = [
+        let mut labels: BTreeMap<String, String> = [
             ("kind".into(), self.kind.clone()),
             ("table".into(), self.table.clone()),
             ("created".into(), self.created.clone()),
@@ -527,9 +627,12 @@ impl Entry {
             ),
         ]
         .into();
+        if self.namespace.is_some() {
+            labels.insert("filed_under".into(), self.tenant.clone());
+        }
         Ok(crate::attestation::manifest_statement(
             &self.id,
-            &self.tenant,
+            self.namespace.as_deref().unwrap_or(&self.tenant),
             &self.blob()?.digest,
             "archive",
             state,

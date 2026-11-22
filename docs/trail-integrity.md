@@ -15,3 +15,5 @@ The pinned Go fixture uses upstream Payday to emit row MACs, seals, a signed man
 | Log, remote object store, Rekor | A deployment can implement the Rust Witness trait. Dedicated remote adapters and Rekor inclusion-proof verification remain open. |
 
 For a process signer set `PAYDIRT_SIGNER_PROGRAM`, a JSON argument vector in `PAYDIRT_SIGNER_ARGS` and a PKIX DER public key in `PAYDIRT_SIGNER_PUBLIC_KEY`. The process reads the statement on stdin and returns its raw signature on stdout. The framework verifies each signature before publishing. `PAYDIRT_TRUST_KEYS` accepts a JSON list of trusted DER public key paths for rotation.
+
+For a record shared by several tenants, the online window and final destruction date each follow the longest applicable window. Any owner’s hold protects the record. Both owners can export the same shared archive entry. Purging the filing tenant blanks the shared content and keeps the event. A host can queue a subject erasure using `Transaction::owe_trail_erasure` alongside its database update. The obligation becomes visible to maintenance on commit.

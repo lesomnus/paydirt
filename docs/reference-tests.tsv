@@ -308,15 +308,15 @@ tenantlist_test.go	23	TestATenantListIsNarrowedLikeAnyOtherRead	tracked			102
 tenantlist_test.go	49	TestHoldersCanBeListedByTenant	tracked			102
 time_zone_test.go	13	TestCommandsUseTheRequestedDisplayZoneBeforeCallingTheServer	verified	connect/sqlite+postgres	web/generated-operator.mjs#L26	
 trail_test.go	45	TestTheTrailIsKeptPerKindOfThing	tracked			98
-trail_test.go	116	TestAKindTheAppDoesNotHaveIsRefused	tracked			98
-trail_test.go	185	TestARenamedKindIsConfiguredByEitherWordAndNotBoth	tracked			98
+trail_test.go	116	TestAKindTheAppDoesNotHaveIsRefused	tracked	store/sqlite+postgres	runtime/tests/trail_retention.rs#L270	98
+trail_test.go	185	TestARenamedKindIsConfiguredByEitherWordAndNotBoth	verified	store/sqlite+postgres	runtime/tests/trail_retention.rs#L281	
 trail_test.go	216	TestTheArchiveIsSplitByKindSoThatTheSecondClockCanBe	tracked			98
 trail_test.go	293	TestOnePersonLeavesTheTrailWithoutTakingTheEventWithThem	tracked			98
 trail_test.go	373	TestAnArchivedRowIsForgottenToo	verified	store/sqlite+postgres	runtime/tests/trail_retention.rs#L184	
 trail_test.go	457	TestTheStoreSaysWhoseARowIs	tracked			98
 trail_test.go	557	TestRowsWrittenAtOneInstantAreReadOnceEach	tracked			98
 trail_test.go	595	TestEachTenantKeepsItsTrailForItsOwnWindow	tracked	store/sqlite+postgres	runtime/tests/trail_retention.rs#L128	98
-trail_test.go	682	TestARowTwoTenantsMayReadLastsAsLongAsTheLongerKeepsIt	tracked			98
+trail_test.go	682	TestARowTwoTenantsMayReadLastsAsLongAsTheLongerKeepsIt	verified	store/sqlite+postgres	runtime/tests/trail_retention.rs#L302	
 trail_test.go	754	TestAHeldTenantKeepsItsTrail	verified	store/sqlite+postgres	runtime/tests/trail_retention.rs#L143	
 trail_test.go	803	TestErasingASubjectThroughTheStoreLeavesWhatIsHeld	verified	store/sqlite+postgres	runtime/tests/trail_retention.rs#L140	
 trail_test.go	851	TestATenantLeavesTheDatabase	tracked			98
@@ -325,7 +325,7 @@ trail_test.go	983	TestTheManifestIsSignedAndChainedInTheAppsOwnTable	tracked			9
 trail_test.go	1069	TestADatabaseRestoredFromBeforeTheLatestCheckpointIsAcceptedInTheAppsOwnTable	tracked			98
 trail_test.go	1193	TestTheGeneratedManifestWritesARowWholeWithItsSignature	tracked			98
 trail_test.go	1269	TestWhatTheTrailSaysIsSealedThroughTheAppsOwnStore	tracked			98
-trail_test.go	1338	TestAnErasureIsOwedInItsTransaction	tracked			98
+trail_test.go	1338	TestAnErasureIsOwedInItsTransaction	tracked	store/sqlite+postgres	runtime/tests/trail_retention.rs#L339	98
 uuid_contract_test.go	23	TestUUIDTypesReachGeneratedRequestsAndCLI	tracked			103
 uuid_contract_test.go	72	TestUUIDFilterMetadataTravelsTheStack	tracked			103
 valid_test.go	34	TestAnIndexWhoseBuildDidNotFinishIsRefused	verified	store/postgres	runtime/tests/upgrade.rs#L203	
