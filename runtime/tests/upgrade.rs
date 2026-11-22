@@ -112,3 +112,124 @@ fn postgres() {
         std::panic::resume_unwind(panic)
     }
 }
+
+fn former_layout(url: &str) {
+    let earlier = json!({"version":1,"entities":[
+        {"name":"catalog.Part","key":"id","fields":[{"name":"id","json":"id","number":1,"kind":"INT32"},{"name":"label","json":"label","number":2,"kind":"STRING","unique":true}],"indexes":[]},
+        {"name":"catalog.Line","key":"id","fields":[{"name":"id","json":"id","number":1,"kind":"INT32"},{"name":"part","json":"part","number":2,"kind":"MESSAGE","target":"catalog.Part","nullable":true}],"indexes":[]}
+    ]}).to_string();
+    let new = earlier.replace("catalog.Part", "catalog.Component");
+    let policies = r#"{"catalog.Component":{"entity":{"formerly":[{"message":"Part"}]}}}"#;
+    let op = |db: &mut Store, name: &str, method: &str, request| {
+        db.call(
+            &Scope::Internal,
+            Call {
+                entity: name.into(),
+                method: method.into(),
+                request,
+            },
+        )
+    };
+    let mut db = Store::open(url, &earlier, "{}").unwrap();
+    op(
+        &mut db,
+        "catalog.Part",
+        "Add",
+        json!({"id":1,"label":"bolt"}),
+    )
+    .unwrap();
+    op(
+        &mut db,
+        "catalog.Part",
+        "Add",
+        json!({"id":2,"label":"nut"}),
+    )
+    .unwrap();
+    op(
+        &mut db,
+        "catalog.Line",
+        "Add",
+        json!({"id":3,"part":{"id":1}}),
+    )
+    .unwrap();
+    drop(db);
+    assert!(Store::open(url, &new, "{}").is_err());
+    let mut db = Store::open(url, &new, policies).unwrap();
+    assert_eq!(
+        op(&mut db, "catalog.Component", "Get", json!({"ref":{"id":1}})).unwrap()["label"],
+        "bolt"
+    );
+    assert_eq!(
+        op(&mut db, "catalog.Line", "Get", json!({"ref":{"id":3}})).unwrap()["part"]["id"],
+        1
+    );
+    assert_eq!(
+        op(
+            &mut db,
+            "catalog.Component",
+            "Add",
+            json!({"id":4,"label":"bolt"})
+        )
+        .unwrap_err()
+        .code,
+        "already_exists"
+    );
+    assert!(op(&mut db, "catalog.Component", "Erase", json!({"id":1})).is_err());
+    drop(db);
+    assert!(Store::open(url, &earlier, "{}").is_err());
+    Store::open(url, &new, policies).unwrap();
+    if url.starts_with("postgres") {
+        #[cfg(feature = "postgres")]
+        {
+            let mut admin = diesel::PgConnection::establish(url).unwrap();
+            admin.batch_execute("ALTER TABLE \"pd_catalog__Component\" ADD COLUMN legacy_label TEXT NOT NULL DEFAULT ''").unwrap();
+            admin
+                .batch_execute(
+                    "ALTER TABLE \"pd_catalog__Component\" ALTER COLUMN legacy_label DROP DEFAULT",
+                )
+                .unwrap();
+            assert!(
+                matches!(Store::open(url,&new,policies),Err(e) if e.message.contains("legacy_label")&&e.message.contains("no default"))
+            );
+            admin
+                .batch_execute("ALTER TABLE \"pd_catalog__Component\" DROP COLUMN legacy_label")
+                .unwrap();
+            assert!(admin.batch_execute("CREATE UNIQUE INDEX CONCURRENTLY broken_manual ON \"pd_catalog__Component\" ((1))").is_err());
+            Store::open(url, &new, policies).unwrap();
+            admin
+                .batch_execute("DROP INDEX \"pd_catalog__Component__field_2\"")
+                .unwrap();
+            assert!(admin.batch_execute("CREATE UNIQUE INDEX CONCURRENTLY \"pd_catalog__Component__field_2\" ON \"pd_catalog__Component\" ((1))").is_err());
+            assert!(
+                matches!(Store::open(url,&new,policies),Err(e) if e.message.contains("pd_catalog__Component__field_2")&&e.message.contains("invalid or unready"))
+            );
+        }
+    }
+}
+#[cfg(feature = "sqlite")]
+#[test]
+fn formerly_sqlite() {
+    let tmp = tempfile::tempdir().unwrap();
+    former_layout(tmp.path().join("old.db").to_str().unwrap());
+}
+#[cfg(feature = "postgres")]
+#[test]
+fn formerly_postgres() {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        return;
+    };
+    let schema = format!("former_{}", hex::encode(paydirt::mint(1)));
+    let mut conn = diesel::PgConnection::establish(&url).unwrap();
+    conn.batch_execute(&format!("CREATE SCHEMA {schema}"))
+        .unwrap();
+    let scoped = format!(
+        "{url}{}options=-csearch_path%3D{schema}",
+        if url.contains('?') { "&" } else { "?" }
+    );
+    let run = std::panic::catch_unwind(|| former_layout(&scoped));
+    conn.batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
+        .unwrap();
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
+}
