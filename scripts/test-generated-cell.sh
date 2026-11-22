@@ -38,6 +38,7 @@ node generated-replicas.mjs
 cargo test --manifest-path "$repo/Cargo.toml" -p paydirt-store --features sqlite,postgres --test notify_policy
 
 node generated-serving.mjs
+node generated-authentication.mjs
 node generated-grant-follower.mjs
 if [[ "${PAYDIRT_TEST_WASM:-0}" == 1 ]]; then
   "${PAYDIRT_BIN:-$repo/target/debug/paydirt}" sandbox init "$CELL_PROJECT"

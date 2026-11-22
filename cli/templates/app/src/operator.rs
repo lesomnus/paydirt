@@ -466,4 +466,3 @@ fn connection() -> Result<(HttpClient, ClientConfig)> {
     let (client, config) = rpc_client(&endpoint, env::var("PAYDIRT_TOKEN").ok().as_deref())?;
     Ok((client, config))
 }
-

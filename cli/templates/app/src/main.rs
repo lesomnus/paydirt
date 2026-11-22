@@ -1,7 +1,7 @@
 mod commands;
-mod tree;
 mod grants;
 mod operator;
+mod tree;
 use __APP_CRATE__::{
     router,
     transport::{Database, MODEL, POLICIES},
@@ -51,6 +51,7 @@ struct Meter {
 #[derive(Deserialize)]
 struct Config {
     watch: Watch,
+    authentication: Option<paydirt_server::authentication::Config>,
     #[serde(default)]
     serving: paydirt_server::Serving,
     rate: Option<paydirt_server::Rate>,
@@ -82,7 +83,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let config: Config = serde_json::from_slice(&fs::read("app.json")?)?;
         let broker = config.watch.connect(&url).await?;
         let mut store =
-            __APP_CRATE__::resource::record(paydirt_store::Store::open(&url, MODEL, POLICIES)?)?.with_outbox(config.watch.outbox);
+            __APP_CRATE__::resource::record(paydirt_store::Store::open(&url, MODEL, POLICIES)?)?
+                .with_outbox(config.watch.outbox);
         let call = paydirt_store::Call {
             entity: entity.clone(),
             method: method.clone(),
@@ -105,12 +107,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
     let principals = std::env::var("PAYDIRT_PRINCIPALS").unwrap_or_else(|_| "{}".into());
     let broker = config.watch.connect(&url).await?;
-    let store = __APP_CRATE__::resource::record(paydirt_store::Store::open(&url, MODEL, POLICIES)?)?.with_outbox(config.watch.outbox);
+    let store =
+        __APP_CRATE__::resource::record(paydirt_store::Store::open(&url, MODEL, POLICIES)?)?
+            .with_outbox(config.watch.outbox);
     let mut db = Database::from_store(store, &principals)?
         .with_broker(broker.clone())
         .allow_general_writes(config.allow_general_writes);
     if let Some(rate) = config.rate {
         db = db.with_rate(paydirt_server::Limiter::new(rate).map_err(|e| e as Box<dyn Error>)?);
+    }
+    if let Some(auth) = config.authentication {
+        db = db.with_authentication(auth)?;
     }
     if let Ok(path) = std::env::var("PAYDIRT_POLICY_FILE") {
         let refresh = std::env::var("PAYDIRT_POLICY_REFRESH_MS")
