@@ -35,12 +35,19 @@ pub fn generate(work: &Path) -> Result<()> {
     let mut policies = BTreeMap::new();
     let mut apps = BTreeMap::new();
     let mut event_types = BTreeMap::new();
+    let mut payloads = Vec::new();
     for file in image["file"].as_array().ok_or("expected files")? {
         let package = file["package"].as_str().unwrap_or_default();
         if let Some(app) = file["options"].get("[payday.app]") {
             apps.insert(package, app);
         }
         for message in file["messageType"].as_array().into_iter().flatten() {
+            if message["options"].get("[payday.notification]").is_some() {
+                payloads.push(format!(
+                    "{package}.{}",
+                    message["name"].as_str().ok_or("missing payload name")?
+                ));
+            }
             if let Some(kinds) = message["options"]["[payday.event]"]["kinds"].as_array() {
                 for kind in kinds {
                     let kind = kind.as_str().ok_or("invalid event kind")?;
@@ -72,6 +79,21 @@ pub fn generate(work: &Path) -> Result<()> {
     for file in image["file"].as_array().unwrap() {
         let package = file["package"].as_str().unwrap_or_default();
         for service in file["service"].as_array().into_iter().flatten() {
+            if let Some(short) = service["name"]
+                .as_str()
+                .and_then(|s| s.strip_suffix("Service"))
+                && matches!(short, "Notification" | "NotificationAccount")
+                && apps.get(package).is_some_and(|a| a.get("notify").is_some())
+                && file["name"].as_str().is_some_and(|p| {
+                    p.ends_with("/payday/notification.proto")
+                        || p.ends_with("/payday/notification_account.proto")
+                })
+            {
+                policies.insert(
+                    format!("{package}.{short}"),
+                    json!({"notification":true,"methods":{}}),
+                );
+            }
             let Some(entity) = service["name"]
                 .as_str()
                 .and_then(|s| s.strip_suffix("Service"))
@@ -90,6 +112,9 @@ pub fn generate(work: &Path) -> Result<()> {
             && let Some(app) = name.rsplit_once('.').and_then(|(p, _)| apps.get(p))
         {
             policy["application"] = (*app).clone();
+            if !payloads.is_empty() {
+                policy["application"]["notificationPayloads"] = json!(payloads);
+            }
             if !event_types.is_empty() {
                 policy["application"]["eventTypes"] = json!(event_types);
             }

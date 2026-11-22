@@ -12,11 +12,15 @@ pub const POLICIES: &str = include_str!("../generated/storage/policies.json");
 enum Credential {
     Tenant(String),
     Account {
+        #[serde(default)]
+        topics: paydirt_store::TopicGrants,
         account: String,
         tenant: Option<String>,
         methods: Option<Vec<String>>,
     },
     Principal {
+        #[serde(default)]
+        topics: paydirt_store::TopicGrants,
         tenant: String,
         name: Option<String>,
         actor: Option<String>,
@@ -51,12 +55,19 @@ fn tokens(config: &str) -> Result<HashMap<String, Principal>, String> {
             if token.is_empty() {
                 return Err("empty bearer token".into());
             }
+            let topics = match &c {
+                Credential::Tenant(_) => Default::default(),
+                Credential::Principal { topics, .. } | Credential::Account { topics, .. } => {
+                    topics.clone()
+                }
+            };
             let (tenant, actor, caller, caller_tenant, methods, tenants, sets, account, name) =
                 match c {
                     Credential::Tenant(tenant) => {
                         (Some(tenant), None, None, None, None, None, None, None, None)
                     }
                     Credential::Account {
+                        topics: _,
                         account,
                         tenant,
                         methods,
@@ -72,6 +83,7 @@ fn tokens(config: &str) -> Result<HashMap<String, Principal>, String> {
                         None,
                     ),
                     Credential::Principal {
+                        topics: _,
                         name,
                         tenant,
                         actor,
@@ -100,6 +112,7 @@ fn tokens(config: &str) -> Result<HashMap<String, Principal>, String> {
                 token,
                 Principal {
                     frame: Frame {
+                        topics,
                         tenant: tenant
                             .as_deref()
                             .map(|v| id(v, 1))
@@ -470,6 +483,29 @@ impl Database {
         response
     }
 
+    pub async fn listen<I: Serialize, O: DeserializeOwned + Send + 'static>(
+        &self,
+        ctx: RequestContext,
+        entity: &'static str,
+        req: &I,
+    ) -> connectrpc::ServiceResult<connectrpc::ServiceStream<O>> {
+        let request = serde_json::to_value(req)
+            .map_err(|_| ConnectError::invalid_argument("invalid listen request"))?;
+        let start = self.read(&ctx, entity, "$listen", &request).await?;
+        let db = self.clone();
+        let stream = async_stream::try_stream! {
+            let mut old=start["revisions"].clone();
+            yield serde_json::from_value(serde_json::json!({"ready":{"readerId":start["readerId"]}})).map_err(|_|ConnectError::internal("invalid listen reply"))?;
+            loop{
+                futures_timer::Delay::new(std::time::Duration::from_millis(80)).await;
+                let batch=db.read(&ctx,entity,"$listen",&request).await?;
+                let changed:Vec<_>=batch["topics"].as_array().into_iter().flatten().enumerate().filter(|(i,_)|old[*i]!=batch["revisions"][*i]).map(|(_,v)|v).collect();
+                if !changed.is_empty(){yield serde_json::from_value(serde_json::json!({"invalidated":{"topics":changed}})).map_err(|_|ConnectError::internal("invalid listen change"))?;}
+                old=batch["revisions"].clone();
+            }
+        };
+        connectrpc::Response::stream_ok(stream)
+    }
     pub async fn watch<I: Serialize, O: DeserializeOwned + Send + 'static>(
         &self,
         ctx: RequestContext,

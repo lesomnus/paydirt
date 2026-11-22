@@ -10,7 +10,8 @@ export function accounts(tenants) {
   const seeds=[[a,"alice",account,1],[b,"alice",account,2],[a,"bob",one,3]].map(([t,alias,acct,tag])=>({
     entity:"app.Holder",row:{id:b64(id(t,tag)),alias,tenant:{id:b64(t)},account:b64(acct)}
   }));
-  const principals={member:{account},single:{account:one},noMember:{account:none},bound:{account,tenant:a},
+  const principals={member:{account},single:{account:one},noMember:{account:none,topics:{read:["n:jobs"]}},bound:{account,tenant:a},
+    notices:{tenant:a,actor:id(a,1),topics:{read:["n:jobs"]}},publisher:{tenant:a,actor:id(a,1),topics:{publish:["*"],producer:"worker"}},
     attenuated:{account,methods:["/app.RobotService/Get"]}};
   const policy={roles:{["@"+a+"/reader"]:{methods:["/app.RobotService/List","/app.RobotService/Watch"]}},
     groups:{["@"+a+"/office"]:{members:["@"+a+"/alice"]}},bindings:[{role:"@"+a+"/reader",group:"@"+a+"/office"}]};

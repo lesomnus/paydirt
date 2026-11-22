@@ -5,6 +5,7 @@ mod crud;
 mod driver;
 mod list;
 mod migrate;
+mod notify;
 mod past;
 mod relations;
 mod session;
@@ -14,6 +15,7 @@ mod value;
 mod watch;
 pub use driver::Connection;
 use driver::Driver;
+pub use notify::TopicGrants;
 use paydirt_model::Model;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -60,6 +62,8 @@ pub struct Call {
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Policy {
     #[serde(default)]
+    pub notification: bool,
+    #[serde(default)]
     pub application: Value,
     #[serde(default)]
     pub entity: Value,
@@ -78,11 +82,14 @@ pub struct Store {
 impl Store {
     pub fn open(url: &str, model_json: &str, policy_json: &str) -> Result<Self> {
         let model = Model::parse(model_json.as_bytes()).map_err(Fault::invalid)?;
-        let policies =
+        let policies: Policies =
             serde_json::from_str(policy_json).map_err(|e| Fault::invalid(e.to_string()))?;
         let mut db = Connection::open(url)?;
         db.transaction(|tx| {
             migrate::install(tx, &model)?;
+            if policies.values().any(|p| p.notification) {
+                notify::install(tx)?;
+            }
             watch::install(tx)
         })?;
         Ok(Self {
@@ -134,11 +141,18 @@ impl Transaction<'_> {
         if let Some(failure) = &self.failed {
             return Err(failure.clone());
         }
-        let result = self
-            .model
-            .entity(&call.entity)
-            .map_err(Fault::invalid)
-            .and_then(|entity| self.dispatch(entity, &call.method, &call.request));
+        let result = if self
+            .policies
+            .get(&call.entity)
+            .is_some_and(|p| p.notification)
+        {
+            self.notify(&call.entity, &call.method, &call.request)
+        } else {
+            self.model
+                .entity(&call.entity)
+                .map_err(Fault::invalid)
+                .and_then(|entity| self.dispatch(entity, &call.method, &call.request))
+        };
         if let Err(err) = &result {
             self.failed = Some(err.clone());
         }
