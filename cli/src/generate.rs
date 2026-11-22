@@ -99,6 +99,15 @@ fn build(root: &Path, work: &Path) -> Result<()> {
         write_file(&dest, &bytes)?;
     }
     buf(work, include_str!("../templates/bindings.yaml"))?;
+    let storage = work.join("generated/storage");
+    let model = paydirt_model::Model::parse(&fs::read(storage.join("model.json"))?)?;
+    for (file, dialect) in [
+        ("postgres.sql", paydirt_model::Dialect::Postgres),
+        ("sqlite.sql", paydirt_model::Dialect::Sqlite),
+    ] {
+        fs::write(storage.join(file), model.ddl(dialect)?)?;
+    }
+    fs::write(storage.join("tables.rs"), model.diesel_tables()?)?;
     if schema.is_some() {
         crate::layers::generate(&work.join("generated/services"))?;
     }

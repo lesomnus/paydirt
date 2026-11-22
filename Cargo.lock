@@ -703,12 +703,22 @@ name = "paydirt-cli"
 version = "0.1.0"
 dependencies = [
  "include_dir",
+ "paydirt-model",
  "prettyplease",
  "quote",
  "serde",
  "serde_json",
  "syn 2.0.119",
  "tempfile",
+]
+
+[[package]]
+name = "paydirt-model"
+version = "0.1.0"
+dependencies = [
+ "heck",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
