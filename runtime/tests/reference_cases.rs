@@ -2232,3 +2232,6 @@ mod walls;
 
 #[path = "reference_cases/events.rs"]
 mod events;
+
+#[path = "reference_cases/queries.rs"]
+mod queries;
