@@ -62,6 +62,8 @@ jobs:
           repository: lesomnus/payday
           ref: 53acc135cc084adafda524e882f19275c0d0cc96
           path: upstream-go
+      - name: Check both upstream Rekor witnesses against the Rust notary
+        run: python3 scripts/test-rekor.py upstream-go
       - name: Build the pinned Go reference server
         working-directory: upstream-go
         run: go build -o "$RUNNER_TEMP/payday-reference" ./internal/apptest/testsrv

@@ -2,8 +2,9 @@
 use crate::{Fault, Result, archive_files::Archive};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use chrono::{DateTime, Utc};
+use ed25519_dalek::{SigningKey, pkcs8::DecodePrivateKey};
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
-use ring::signature::{self, KeyPair};
+use ring::signature;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use sha2::{Digest, Sha256};
@@ -22,26 +23,32 @@ fn bad(e: impl ToString) -> Fault {
 pub trait Signer: Send + Sync {
     fn public_der(&self) -> Vec<u8>;
     fn sign(&self, statement: &[u8]) -> Result<Vec<u8>>;
+    fn sign_prehash(&self, _statement: &[u8]) -> Result<Vec<u8>> {
+        Err(bad("the signing provider does not support Ed25519ph"))
+    }
 }
-pub struct Ed25519(signature::Ed25519KeyPair);
+pub struct Ed25519(SigningKey);
 impl Ed25519 {
     pub fn from_pkcs8(bytes: &[u8]) -> Result<Self> {
-        signature::Ed25519KeyPair::from_pkcs8_maybe_unchecked(bytes)
-            .map(Self)
-            .map_err(bad)
+        SigningKey::from_pkcs8_der(bytes).map(Self).map_err(bad)
     }
     pub fn from_seed(seed: &[u8]) -> Result<Self> {
-        signature::Ed25519KeyPair::from_seed_unchecked(seed)
-            .map(Self)
-            .map_err(bad)
+        SigningKey::try_from(seed).map(Self).map_err(bad)
     }
 }
 impl Signer for Ed25519 {
     fn public_der(&self) -> Vec<u8> {
-        [ED, self.0.public_key().as_ref()].concat()
+        [ED, self.0.verifying_key().as_bytes()].concat()
     }
-    fn sign(&self, b: &[u8]) -> Result<Vec<u8>> {
-        Ok(self.0.sign(b).as_ref().to_vec())
+    fn sign(&self, statement: &[u8]) -> Result<Vec<u8>> {
+        use ed25519_dalek::Signer;
+        Ok(self.0.sign(statement).to_vec())
+    }
+    fn sign_prehash(&self, statement: &[u8]) -> Result<Vec<u8>> {
+        self.0
+            .sign_prehashed(sha2::Sha512::new_with_prefix(statement), None)
+            .map(|s| s.to_vec())
+            .map_err(bad)
     }
 }
 #[derive(Clone, Serialize, Deserialize)]
@@ -116,12 +123,116 @@ pub struct Head {
     pub k: u64,
     pub digest: String,
 }
+pub struct Claim {
+    pub head: Head,
+    pub statement: String,
+    pub signature: Signature,
+}
+
 pub trait Witness: Send + Sync {
-    fn heads(&self) -> Result<BTreeMap<u64, Head>>;
-    fn publish(&self, head: &Head) -> Result<()>;
+    fn heads(&self) -> Result<BTreeMap<u64, Head>> {
+        Ok(BTreeMap::new())
+    }
+    fn publish(&self, _head: &Head) -> Result<()> {
+        Err(bad("witness needs a signed statement"))
+    }
+    fn submit(&self, _root: &Path, claim: &Claim, _signer: &dyn Signer) -> Result<()> {
+        self.publish(&claim.head)
+    }
+    fn check(
+        &self,
+        root: &Path,
+        history: &BTreeMap<u64, Claim>,
+        signer: &dyn Signer,
+        _trusted: &BTreeSet<Vec<u8>>,
+        advance: bool,
+    ) -> Result<()> {
+        let witness = self.heads()?;
+        for (k, heard) in &witness {
+            if history.get(k).map(|c| &c.head) != Some(heard) {
+                return Err(bad("external witness disagrees"));
+            }
+        }
+        for (k, claim) in history {
+            if !witness.contains_key(k) {
+                if !advance {
+                    return Err(bad("checkpoint has no witness receipt"));
+                }
+                self.submit(root, claim, signer)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+pub struct Witnesses(pub Vec<Box<dyn Witness>>);
+impl Witness for Witnesses {
+    fn submit(&self, root: &Path, claim: &Claim, signer: &dyn Signer) -> Result<()> {
+        for witness in &self.0 {
+            witness.submit(root, claim, signer)?;
+        }
+        Ok(())
+    }
+    fn check(
+        &self,
+        root: &Path,
+        history: &BTreeMap<u64, Claim>,
+        signer: &dyn Signer,
+        trusted: &BTreeSet<Vec<u8>>,
+        advance: bool,
+    ) -> Result<()> {
+        for witness in &self.0 {
+            witness.check(root, history, signer, trusted, advance)?;
+        }
+        Ok(())
+    }
+}
+pub struct LogWitness;
+impl Witness for LogWitness {
+    fn submit(&self, root: &Path, claim: &Claim, _signer: &dyn Signer) -> Result<()> {
+        eprintln!("paydirt checkpoint {} {}", claim.head.k, claim.head.digest);
+        write_once(
+            &root
+                .join(".receipts/log")
+                .join(format!("{:020}.json", claim.head.k)),
+            &serde_json::to_vec(&claim.head).map_err(bad)?,
+        )
+    }
+    fn check(
+        &self,
+        root: &Path,
+        history: &BTreeMap<u64, Claim>,
+        signer: &dyn Signer,
+        _trusted: &BTreeSet<Vec<u8>>,
+        advance: bool,
+    ) -> Result<()> {
+        DirectoryWitness(root.join(".receipts/log"))
+            .heads()?
+            .into_iter()
+            .try_for_each(|(k, h)| {
+                if history.get(&k).map(|c| &c.head) == Some(&h) {
+                    Ok(())
+                } else {
+                    Err(bad("log receipt disagrees"))
+                }
+            })?;
+        for (k, claim) in history {
+            if !root
+                .join(".receipts/log")
+                .join(format!("{k:020}.json"))
+                .exists()
+            {
+                if !advance {
+                    return Err(bad("checkpoint has no log receipt"));
+                }
+                self.submit(root, claim, signer)?;
+            }
+        }
+        Ok(())
+    }
 }
 pub struct DirectoryWitness(pub PathBuf);
-fn write_once(path: &Path, data: &[u8]) -> Result<()> {
+pub(crate) fn write_once(path: &Path, data: &[u8]) -> Result<()> {
     let dir = path
         .parent()
         .ok_or_else(|| bad("invalid checkpoint directory"))?;
@@ -154,7 +265,7 @@ fn write_once(path: &Path, data: &[u8]) -> Result<()> {
     let _ = fs::remove_file(tmp);
     result
 }
-fn files(path: &Path, ext: &str) -> Result<BTreeMap<u64, PathBuf>> {
+pub(crate) fn files(path: &Path, ext: &str) -> Result<BTreeMap<u64, PathBuf>> {
     let mut out = BTreeMap::new();
     let list = match fs::read_dir(path) {
         Ok(v) => v,
@@ -239,6 +350,7 @@ impl Notary {
                 "1.2.840.10045.2.1" => &[
                     &signature::ECDSA_P256_SHA256_ASN1,
                     &signature::ECDSA_P384_SHA256_ASN1,
+                    &signature::ECDSA_P384_SHA384_ASN1,
                 ],
                 "1.2.840.113549.1.1.1" => &[
                     &signature::RSA_PKCS1_2048_8192_SHA256,
@@ -256,6 +368,9 @@ impl Notary {
         Ok(())
     }
     pub fn verify_point(&self, raw: &[u8], previous: Option<&Head>) -> Result<Checkpoint> {
+        self.read_point(raw, previous).map(|(c, _)| c)
+    }
+    fn read_point(&self, raw: &[u8], previous: Option<&Head>) -> Result<(Checkpoint, Envelope)> {
         let mut body = Vec::new();
         GzDecoder::new(raw)
             .take(16 * 1024 * 1024 + 1)
@@ -275,7 +390,7 @@ impl Notary {
         {
             return Err(bad("invalid checkpoint membership or predecessor"));
         }
-        Ok(c)
+        Ok((c, signed))
     }
     pub fn check_chain(
         &self,
@@ -285,7 +400,6 @@ impl Notary {
         advance: bool,
     ) -> Result<Option<Head>> {
         let directory = root.join(".checkpoints");
-        let witness = self.witness.heads()?;
         let mut history = BTreeMap::new();
         let mut head: Option<Head> = None;
         let mut latest = BTreeSet::new();
@@ -294,7 +408,7 @@ impl Notary {
                 return Err(bad("oversized checkpoint"));
             }
             let raw = fs::read(path).map_err(bad)?;
-            let c = self.verify_point(&raw, head.as_ref())?;
+            let (c, signed) = self.read_point(&raw, head.as_ref())?;
             if c.k != k {
                 return Err(bad("incorrect checkpoint filename"));
             }
@@ -303,23 +417,18 @@ impl Notary {
                 k,
                 digest: hash(&raw),
             };
-            history.insert(k, next.clone());
+            history.insert(
+                k,
+                Claim {
+                    head: next.clone(),
+                    statement: signed.checkpoint.get().into(),
+                    signature: signed.signature,
+                },
+            );
             head = Some(next);
         }
-        for (k, w) in &witness {
-            if history.get(k) != Some(w) {
-                return Err(bad("external witness disagrees"));
-            }
-        }
-        for (k, h) in &history {
-            if !witness.contains_key(k) {
-                if advance {
-                    self.witness.publish(h)?
-                } else {
-                    return Err(bad("checkpoint has no witness receipt"));
-                }
-            }
-        }
+        self.witness
+            .check(root, &history, self.signer.as_ref(), &self.trusted, advance)?;
         if !advance {
             if latest != blobs {
                 return Err(bad("checkpoint differs from current archive"));
@@ -353,7 +462,12 @@ impl Notary {
             k,
             digest: hash(&bytes),
         };
-        self.witness.publish(&h)?;
+        let claim = Claim {
+            head: h.clone(),
+            statement: env.checkpoint.get().into(),
+            signature: env.signature,
+        };
+        self.witness.submit(root, &claim, self.signer.as_ref())?;
         Ok(Some(h))
     }
 }
@@ -412,8 +526,25 @@ impl Archive {
             (None, None) => None,
         };
         if let Some(signer) = signer {
-            let witness = std::env::var_os(paydirt::environment::PAYDIRT_WITNESS_DIR)
-                .ok_or_else(|| bad("missing external witness directory"))?;
+            let mut witnesses: Vec<Box<dyn Witness>> = Vec::new();
+            if let Some(path) = std::env::var_os(paydirt::environment::PAYDIRT_WITNESS_DIR) {
+                witnesses.push(Box::new(DirectoryWitness(path.into())));
+            }
+            if let Ok(raw) = std::env::var(paydirt::environment::PAYDIRT_WITNESSES) {
+                for spec in serde_json::from_str::<Vec<String>>(&raw).map_err(bad)? {
+                    if spec == "log:" {
+                        witnesses.push(Box::new(LogWitness));
+                    } else if let Some(path) = spec.strip_prefix("store:").filter(|p| !p.is_empty())
+                    {
+                        witnesses.push(Box::new(DirectoryWitness(path.into())));
+                    } else {
+                        witnesses.push(Box::new(crate::rekor::Rekor::open(&spec)?));
+                    }
+                }
+            }
+            if witnesses.is_empty() {
+                return Err(bad("missing external witness configuration"));
+            }
             let trust: Vec<PathBuf> = serde_json::from_str(
                 &std::env::var(paydirt::environment::PAYDIRT_TRUST_KEYS)
                     .unwrap_or_else(|_| "[]".into()),
@@ -423,11 +554,7 @@ impl Archive {
                 .into_iter()
                 .map(|p| fs::read(p).map_err(bad))
                 .collect::<Result<_>>()?;
-            self = self.with_notary(Notary::new(
-                signer,
-                trust,
-                Box::new(DirectoryWitness(witness.into())),
-            ));
+            self = self.with_notary(Notary::new(signer, trust, Box::new(Witnesses(witnesses))));
         }
         Ok(self)
     }
