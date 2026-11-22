@@ -122,11 +122,22 @@ fn sql_name(s: &str) -> String {
     let hash = s.bytes().fold(0xcbf29ce484222325u64, |h, b| {
         (h ^ u64::from(b)).wrapping_mul(0x100000001b3)
     });
-    format!("{}_{hash:016x}", &s[..46])
+    format!("{}_{hash:016x}", &s[..s.floor_char_boundary(46)])
 }
 impl Entity {
     pub fn table(&self) -> String {
         sql_name(&format!("pd_{}", self.name.replace('.', "__")))
+    }
+    pub fn managed_tables(&self) -> Vec<String> {
+        let table = self.table();
+        let mut names = vec![table.clone()];
+        names.extend(
+            self.fields
+                .iter()
+                .filter(|f| !f.is_column() && f.inverse.is_empty())
+                .map(|f| sql_name(&format!("{table}__edge_{}", f.number))),
+        );
+        names
     }
     pub fn field(&self, name: &str) -> Result<&Field> {
         self.fields
@@ -185,16 +196,55 @@ impl Model {
         }
     }
     pub fn ddl(&self, dialect: Dialect) -> Result<String> {
+        self.migration(None, dialect)
+    }
+    pub fn migration(&self, previous: Option<&Model>, dialect: Dialect) -> Result<String> {
+        if let Some(old) = previous {
+            for entity in &old.entities {
+                let next = self
+                    .entity(&entity.name)
+                    .map_err(|_| format!("migration would remove {}", entity.name))?;
+                if entity.key()?.number != next.key()?.number {
+                    return Err(format!("primary key changed on {}", entity.name));
+                }
+                for field in &entity.fields {
+                    let to = next
+                        .fields
+                        .iter()
+                        .find(|f| f.number == field.number)
+                        .ok_or_else(|| {
+                            format!("migration would remove {}.{}", entity.name, field.name)
+                        })?;
+                    if field.kind != to.kind
+                        || field.target != to.target
+                        || field.nullable != to.nullable
+                        || field.collection != to.collection
+                        || field.inverse != to.inverse
+                        || field.erased != to.erased
+                        || field.version != to.version
+                    {
+                        return Err(format!(
+                            "incompatible storage change on {}.{}",
+                            entity.name, field.name
+                        ));
+                    }
+                }
+            }
+        }
         let mut sql = String::new();
         let mut later = String::new();
         let mut names = BTreeSet::new();
         for e in &self.entities {
+            let old = previous.and_then(|m| m.entities.iter().find(|other| other.name == e.name));
             let table = e.table();
             if !names.insert(table.to_ascii_lowercase()) {
                 return Err(format!("duplicate table {table}"));
             }
             let mut defs = Vec::new();
             for f in &e.fields {
+                if old.is_some_and(|ent| ent.fields.iter().any(|v| v.number == f.number)) {
+                    continue;
+                }
                 if !f.is_column() {
                     // Inverse properties read the owning side. A forward collection
                     // uses a relation table whose two references are checked by the DB.
@@ -245,16 +295,78 @@ impl Model {
                         .unwrap();
                     }
                 }
-                defs.push(def);
+                if old.is_some() {
+                    if !f.nullable {
+                        let default = match (&*f.collection, f.default.as_deref(), self.scalar(f)?)
+                        {
+                            ("map", _, _) => "'{}'".into(),
+                            ("list", _, _) => "'[]'".into(),
+                            ("", Some(""), Scalar::Text) if f.kind == "STRING" => "''".into(),
+                            ("", Some(""), Scalar::Bool) => "FALSE".into(),
+                            ("", Some(""), Scalar::Integer | Scalar::BigInt | Scalar::Double) => {
+                                "0".into()
+                            }
+                            ("", Some(v), Scalar::Text) if f.kind == "STRING" => {
+                                format!("'{}'", v.replace('\'', "''"))
+                            }
+                            _ => {
+                                return Err(format!(
+                                    "new required field {}.{} needs a backfill",
+                                    e.name, f.name
+                                ));
+                            }
+                        };
+                        write!(def, " DEFAULT {default}").unwrap();
+                    }
+                    writeln!(sql, "ALTER TABLE {} ADD COLUMN {def};", quote(&table)).unwrap();
+                } else {
+                    defs.push(def);
+                }
             }
-            writeln!(
-                sql,
-                "CREATE TABLE {} (\n  {}\n);",
-                quote(&table),
-                defs.join(",\n  ")
-            )
-            .unwrap();
+            if old.is_none() {
+                writeln!(
+                    sql,
+                    "CREATE TABLE {} (\n  {}\n);",
+                    quote(&table),
+                    defs.join(",\n  ")
+                )
+                .unwrap();
+            }
+            let signature = |ent: &Entity, idx: &Index| -> Result<_> {
+                Ok((
+                    idx.unique,
+                    idx.active_only,
+                    idx.fields
+                        .iter()
+                        .map(|f| ent.field(f).map(|c| c.number))
+                        .collect::<Result<Vec<_>>>()?,
+                ))
+            };
+            if let Some(old) = old {
+                for idx in old.indexes() {
+                    let keep = if let Some(new) = e.indexes().iter().find(|i| i.name == idx.name) {
+                        signature(old, &idx)? == signature(e, new)?
+                    } else {
+                        false
+                    };
+                    if !keep {
+                        writeln!(
+                            sql,
+                            "DROP INDEX {};",
+                            quote(&sql_name(&format!("{table}__{}", idx.name)))
+                        )
+                        .unwrap();
+                    }
+                }
+            }
             for i in e.indexes() {
+                if let Some(old) = old
+                    && let Some(was) = old.indexes().iter().find(|idx| idx.name == i.name)
+                    && signature(old, was)? == signature(e, &i)?
+                {
+                    continue;
+                }
+
                 let name = sql_name(&format!("{table}__{}", i.name));
                 if !names.insert(name.to_ascii_lowercase()) {
                     return Err(format!("duplicate index {name}"));

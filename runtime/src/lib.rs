@@ -1,10 +1,11 @@
 //! Transactional entity storage for generated Payday applications.
 mod crud;
 mod driver;
+mod migrate;
 mod value;
 pub use driver::Connection;
-use driver::{Bind, Driver, Query};
-use paydirt_model::{Dialect, Model};
+use driver::Driver;
+use paydirt_model::Model;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -63,7 +64,7 @@ impl Store {
         let policies =
             serde_json::from_str(policy_json).map_err(|e| Fault::invalid(e.to_string()))?;
         let mut db = Connection::open(url)?;
-        db.transaction(|tx| install(tx, &model))?;
+        db.transaction(|tx| migrate::install(tx, &model))?;
         Ok(Self {
             db,
             model,
@@ -117,34 +118,4 @@ impl Transaction<'_> {
         }
         result
     }
-}
-fn install(db: &mut dyn Driver, model: &Model) -> Result<()> {
-    // Serialize two processes creating or upgrading the same application database.
-    if db.dialect() == Dialect::Postgres {
-        db.batch("SELECT pg_advisory_xact_lock(7174429307262620)")?
-    }
-    db.batch(
-        "CREATE TABLE IF NOT EXISTS paydirt_schema (id INTEGER PRIMARY KEY, model TEXT NOT NULL)",
-    )?;
-    let existing = db.rows(Query::new(
-        "SELECT model AS value FROM paydirt_schema WHERE id=1",
-    ))?;
-    if let Some(old) = existing.first() {
-        let old = Model::parse(old.as_bytes()).map_err(Fault::precondition)?;
-        if old != *model {
-            return Err(Fault::precondition(
-                "stored ORM schema differs from the application schema",
-            ));
-        }
-        return Ok(());
-    }
-    db.batch(&model.ddl(db.dialect()).map_err(Fault::invalid)?)?;
-    let mut q = Query::new("");
-    let p = q.param(
-        Bind::Text(serde_json::to_string(model).map_err(|e| Fault::internal(e.to_string()))?),
-        db.dialect(),
-    );
-    q.sql = format!("INSERT INTO paydirt_schema (id,model) VALUES (1,{p})");
-    db.exec(q)?;
-    Ok(())
 }
