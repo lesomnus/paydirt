@@ -89,7 +89,9 @@ with (app / "src/operator.rs").open("a") as operator:
 copyfile(repo / "tests/fleet/presence.rs", app / "src/presence_fixture.rs")
 with lib.open("a") as library:
     library.write("\npub mod presence_fixture;\n")
-hook = 'if let Ok(path) = std::env::var("PAYDIRT_POLICY_FILE")'
+hook = "if let Some(auth) = config.authentication {"
+if main.read_text().count(hook) != 1:
+    raise ValueError("generated native server has no unique authentication setup")
 main.write_text(main.read_text().replace(hook, 'db = fleet::presence_fixture::install(db);\n    ' + hook))
 
 (app / "trail.json").write_text('{"access":true,"reads":true,"by":{"app.Robot":"value","app.Cell":"fields"},"downloads":["/app.RobotService/ExportRobot"]}\n')
