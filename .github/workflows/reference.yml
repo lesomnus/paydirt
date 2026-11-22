@@ -1,0 +1,40 @@
+name: reference cases
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  reference:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: paydirt
+          POSTGRES_DB: reference
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: lesomnus/payday
+          ref: 53acc135cc084adafda524e882f19275c0d0cc96
+          path: upstream-go
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.4'
+          cache-dependency-path: |
+            upstream-go/go.sum
+            upstream-go/internal/apptest/go.sum
+      - run: python3 scripts/reference-tests.py upstream-go
+      - name: Run Go reference including PostgreSQL-only cases
+        working-directory: upstream-go/internal/apptest
+        env:
+          PDTEST_POSTGRES: postgres://postgres:paydirt@127.0.0.1:5432/reference?sslmode=disable
+        run: |
+          go test -json ./cmd -count=1 | tee "$RUNNER_TEMP/reference.jsonl"
+      - run: python3 scripts/reference-tests.py upstream-go --go-json "$RUNNER_TEMP/reference.jsonl"

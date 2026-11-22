@@ -30,6 +30,7 @@ In another terminal in the app directory, `node client.mjs` reads the deployment
 
 ## What is tested
 
+- **Reference tests.** The [Go case ledger](docs/reference-tests.md) records the environment, Rust evidence and outstanding work for each of the 362 reference app cases.
 - **Schema and storage.** CI compares all 44 application and shared file descriptors with the Go reference. A new project receives Cell CRUD from its schema alone. Database tests cover guards and collection updates, alias uniqueness, keyset pages, watch cancellation, version checks and migration of an existing database.
 - **Application layers.** The same TypeScript clients run against the Go reference and the generated Rust service. The tests exercise Robot.Move, roles, tenant and group scope, account selection and revocation. A deliberate conflict on the second write in a custom Core verifies rollback of both rows, the audit trail and the outbox.
 - **Optional services.** Fleet enables event and fact history, notification inboxes and read markers, usage meters and entitlement grants. The linked matrix records the upstream cases and Rust tests for each. [Compatibility matrix](https://github.com/lesomnus/paydirt/issues/16)
