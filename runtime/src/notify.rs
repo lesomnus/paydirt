@@ -173,6 +173,7 @@ impl Transaction<'_> {
         };
         let scope = Scope::Tenant(tenant);
         let mut db = Transaction {
+            namer: self.namer,
             db: self.db,
             model: self.model,
             policies: self.policies,

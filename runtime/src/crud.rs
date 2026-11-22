@@ -274,9 +274,52 @@ impl Transaction<'_> {
             .and_then(|v| u8::try_from(v).ok())
     }
     pub(crate) fn insert(&mut self, e: &Entity, req: &Value) -> Result<Value> {
+        let mut row = self.admit(e, req)?;
+        let alias = e
+            .field("alias")
+            .ok()
+            .filter(|f| f.number == 4 && f.kind == "STRING");
+        let given = req["alias"].as_str().unwrap_or("");
+        let mut conflict = String::new();
+        if alias.is_some()
+            && given.is_empty()
+            && let Some(index) = e
+                .indexes()
+                .into_iter()
+                .find(|i| i.unique && i.fields.iter().any(|f| f == "alias"))
+        {
+            let columns = index
+                .fields
+                .iter()
+                .map(|name| e.field(name).map(|f| quote(&f.column())))
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(Fault::invalid)?;
+            conflict = format!(" ON CONFLICT ({})", columns.join(","));
+            if index.active_only {
+                let erased = e
+                    .erased()
+                    .ok_or_else(|| Fault::internal("missing erase field"))?;
+                conflict.push_str(&format!(" WHERE {} IS NULL", quote(&erased.column())));
+            }
+            conflict.push_str(" DO NOTHING");
+        }
+        for _ in 0..3 {
+            if alias.is_some() {
+                row["alias"] = json!(self.namer.name(crate::naming::NameRequest {
+                    entity: &e.name,
+                    given,
+                    request: req,
+                    frame: self.frame,
+                })?);
+            }
+            if let Some(added) = self.insert_row(e, &row, &conflict)? {
+                return Ok(added);
+            }
+        }
+        Err(Fault::conflict("key already exists"))
+    }
+    fn insert_row(&mut self, e: &Entity, req: &Value, conflict: &str) -> Result<Option<Value>> {
         let mut q = Query::new("");
-        let req = self.admit(e, req)?;
-        let req = self.alias(e, req)?;
         let mut cols = Vec::new();
         let mut params = Vec::new();
         let key = e.key().map_err(Fault::invalid)?;
@@ -319,36 +362,28 @@ impl Transaction<'_> {
             params.push(q.param(b, self.db.dialect()));
         }
         q.sql = format!(
-            "INSERT INTO {} ({}) VALUES ({})",
+            "INSERT INTO {} ({}) VALUES ({}){conflict}",
             quote(&e.table()),
             cols.join(","),
             params.join(",")
         );
-        self.db.exec(q)?;
-        self.write_edges(e, &id, &req, true)?;
+        if self.db.exec(q)? == 0 {
+            return Ok(None);
+        }
+        self.write_edges(e, &id, req, true)?;
         // The postimage must belong to the caller as well. Failure rolls back the insert.
         let row = self.lookup(e, &json!({&key.json:id}), false)?;
         self.record(e, "Add", None, Some(&row))?;
-        self.image(e, row, &Value::Null)
-    }
-    fn alias(&self, e: &Entity, mut req: Value) -> Result<Value> {
-        if self.frame.is_some()
-            && e.field("alias").is_ok()
-            && let Some(v) = req["alias"].as_str().filter(|v| !v.is_empty())
-        {
-            let folded = v.trim().to_ascii_lowercase();
-            if !paydirt::rbac::alias(&folded) {
-                return Err(Fault::field(
-                    "alias",
-                    "alias must begin with a letter and contain lowercase words separated by single hyphens",
-                ));
-            }
-            req["alias"] = json!(folded);
-        }
-        Ok(req)
+        self.image(e, row, &Value::Null).map(Some)
     }
     pub(crate) fn patch(&mut self, e: &Entity, req: &Value, method: &str) -> Result<Value> {
-        let req = self.alias(e, req.clone())?;
+        let mut req = req.clone();
+        if e.field("alias")
+            .is_ok_and(|f| f.number == 4 && f.kind == "STRING")
+            && let Some(given) = req["alias"].as_str()
+        {
+            req["alias"] = json!(crate::naming::parse(given)?);
+        }
         let req = &req;
         let row = self.lookup(e, &req["ref"], true)?;
         let mut q = Query::new("");

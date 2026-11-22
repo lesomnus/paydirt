@@ -161,7 +161,7 @@ impl Store {
                     update["ref"]=json!({"id":row["id"]});update["dateUpdated"]=row["dateUpdated"].clone();
                     if update["dateEffective"].is_null(){update.as_object_mut().unwrap().remove("dateEffective");update["dateEffectiveNull"]=json!(true);}
                 }
-                let frame=deployment(tenant,"payday.entitle.apply");let mut w=Transaction{db:tx.db,model:tx.model,policies:tx.policies,scope:&Scope::Internal,frame:Some(&frame),failed:None};
+                let frame=deployment(tenant,"payday.entitle.apply");let mut w=Transaction{namer:tx.namer,db:tx.db,model:tx.model,policies:tx.policies,scope:&Scope::Internal,frame:Some(&frame),failed:None};
                 if old.is_some(){w.patch(&entity,&update,"Patch")?;}else{w.insert(&entity,&update)?;}result.applied+=1;
             }
             if complete{
@@ -171,7 +171,7 @@ impl Store {
                 for row in tx.matching(&entity,&fields,true)?{
                     if !listed.contains(row["grantId"].as_str().unwrap()) && stamp(&row["dateExpires"])?<=now{
                         let frame=deployment(value::bytes(&row["tenant"]["id"])?,"payday.entitle.forget");
-                        let mut w=Transaction{db:tx.db,scope:&Scope::Internal,model:tx.model,policies:tx.policies,frame:Some(&frame),failed:None};
+                        let mut w=Transaction{namer:tx.namer,db:tx.db,scope:&Scope::Internal,model:tx.model,policies:tx.policies,frame:Some(&frame),failed:None};
                         w.dispatch(&entity,"Erase",&json!({"id":row["id"]}))?;result.forgotten+=1;
                     }
                 }

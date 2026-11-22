@@ -25,7 +25,7 @@ fn exercise(url: &str) {
             op(
                 "Tenant",
                 "Add",
-                json!({"id":STANDARD.encode(id),"alias":hex::encode(id)}),
+                json!({"id":STANDARD.encode(id),"alias":format!("tenant-{}",hex::encode(id))}),
             ),
         )
         .unwrap();
@@ -73,8 +73,10 @@ fn exercise(url: &str) {
     );
     assert_eq!(
         db.call(&this, op("Cell", "Patch", json!({"ref":key,"alias":""})))
-            .unwrap()["alias"],
-        ""
+            .unwrap_err()
+            .field
+            .as_deref(),
+        Some("alias")
     );
     let add = |alias: &str| json!({"tenant":t,"alias":alias});
     let r = db.call(&this, op("Robot", "Add", add("r1"))).unwrap();
