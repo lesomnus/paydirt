@@ -357,3 +357,104 @@ fn shared_window(url: &str, dir: &Path) {
     let retry = pass(&mut db, &left, json!({"action":"retry"})).unwrap();
     assert!(retry.owed.is_empty());
 }
+
+#[test]
+fn checkpoint_retry_after_publication_uses_the_durable_database_intent() {
+    use paydirt_store::{
+        Fault,
+        attestation::{DirectoryWitness, Ed25519, Head, Notary, Witness},
+    };
+    use std::{
+        collections::BTreeMap,
+        sync::atomic::{AtomicBool, Ordering},
+    };
+    struct FailsOnce {
+        dir: DirectoryWitness,
+        fail: AtomicBool,
+    }
+    impl Witness for FailsOnce {
+        fn heads(&self) -> paydirt_store::Result<BTreeMap<u64, Head>> {
+            self.dir.heads()
+        }
+        fn publish(&self, h: &Head) -> paydirt_store::Result<()> {
+            if h.k == 2 && self.fail.swap(false, Ordering::SeqCst) {
+                return Err(Fault::unavailable("witness unavailable"));
+            }
+            self.dir.publish(h)
+        }
+    }
+    backends(|url, dir| {
+        let mut store = open(url);
+        let (tenant, _) = sample(&mut store);
+        let (other, _) = sample(&mut store);
+        let make = |fail| {
+            Archive::open(dir.join("vault"), &[17; 32])
+                .unwrap()
+                .with_notary(Notary::new(
+                    Box::new(Ed25519::from_seed(&[72; 32]).unwrap()),
+                    Default::default(),
+                    Box::new(FailsOnce {
+                        dir: DirectoryWitness(dir.join("witness")),
+                        fail: AtomicBool::new(fail),
+                    }),
+                ))
+        };
+        let vault = make(true);
+        let recipient = Archive::open(dir.join("out"), &[13; 32]).unwrap();
+        for id in [&tenant, &other] {
+            pass(
+                &mut store,
+                &vault,
+                &recipient,
+                id,
+                json!({"action":"policy","policy":{"default":{"retain_ms":0}}}),
+            )
+            .unwrap();
+        }
+        pass(
+            &mut store,
+            &vault,
+            &recipient,
+            &tenant,
+            json!({"action":"collect"}),
+        )
+        .unwrap();
+        assert!(
+            pass(
+                &mut store,
+                &vault,
+                &recipient,
+                &other,
+                json!({"action":"collect"})
+            )
+            .err()
+            .unwrap()
+            .message
+            .contains("witness unavailable")
+        );
+        drop(store);
+        drop(vault);
+        let vault = make(false);
+        let mut restarted = open(url);
+        pass(
+            &mut restarted,
+            &vault,
+            &recipient,
+            &other,
+            json!({"action":"collect"}),
+        )
+        .unwrap();
+        let point = restarted.attest_trail(&vault, false).unwrap().unwrap();
+        assert_eq!(point.k, 2);
+        assert_eq!(
+            restarted.review_trail(&vault).unwrap().database_checkpoint,
+            2
+        );
+        assert_eq!(
+            std::fs::read_dir(dir.join("vault/.checkpoints"))
+                .unwrap()
+                .count(),
+            2
+        );
+    });
+}

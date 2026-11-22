@@ -22,6 +22,8 @@ pub use paydirt_model;
 mod driver;
 pub mod entitle;
 mod list;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod manifest;
 pub mod meter;
 mod migrate;
 pub mod naming;

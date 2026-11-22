@@ -76,7 +76,7 @@ digest_test.go	576	TestADigestCopiedOntoTheNewestLineIsForged	verified	store/sql
 digest_test.go	598	TestARowRemovedPastTheServersIsMissing	verified	store/sqlite+postgres	runtime/tests/trail_integrity.rs#L349	-
 digest_test.go	636	TestAKindACheckDoesNotReadIsSaidWithWhy	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L267	-
 digest_test.go	651	TestARowNobodyWroteSinceItsWindowIsCarriedForward	verified	store/sqlite+postgres	runtime/tests/trail_integrity.rs#L443	-
-domains_test.go	54	TestTheManifestAndTheAccessRecordAreTheDomainsTheAppGivesThem	tracked			98
+domains_test.go	54	TestTheManifestAndTheAccessRecordAreTheDomainsTheAppGivesThem	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L836	-
 entitle_test.go	193	TestTheCopyIsWhatTheSourceSays	verified	connect/sqlite+postgres	web/generated-billing.mjs#L23	-
 entitle_test.go	303	TestTwoWritesCannotBothPassALimitOfOne	tracked			102
 entitle_test.go	381	TestAReadThatDoesNotLockLetsBothThrough	tracked			102
@@ -320,10 +320,10 @@ trail_test.go	682	TestARowTwoTenantsMayReadLastsAsLongAsTheLongerKeepsIt	verifie
 trail_test.go	754	TestAHeldTenantKeepsItsTrail	verified	store/sqlite+postgres	runtime/tests/trail_retention.rs#L143	-
 trail_test.go	803	TestErasingASubjectThroughTheStoreLeavesWhatIsHeld	verified	store/sqlite+postgres	runtime/tests/trail_retention.rs#L140	-
 trail_test.go	851	TestATenantLeavesTheDatabase	tracked			98
-trail_test.go	906	TestTheManifestIsKeptInTheAppsOwnTable	tracked			98
-trail_test.go	983	TestTheManifestIsSignedAndChainedInTheAppsOwnTable	tracked			98
-trail_test.go	1069	TestADatabaseRestoredFromBeforeTheLatestCheckpointIsAcceptedInTheAppsOwnTable	tracked			98
-trail_test.go	1193	TestTheGeneratedManifestWritesARowWholeWithItsSignature	tracked			98
+trail_test.go	906	TestTheManifestIsKeptInTheAppsOwnTable	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L610	-
+trail_test.go	983	TestTheManifestIsSignedAndChainedInTheAppsOwnTable	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L675	-
+trail_test.go	1069	TestADatabaseRestoredFromBeforeTheLatestCheckpointIsAcceptedInTheAppsOwnTable	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L636	-
+trail_test.go	1193	TestTheGeneratedManifestWritesARowWholeWithItsSignature	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L725	-
 trail_test.go	1269	TestWhatTheTrailSaysIsSealedThroughTheAppsOwnStore	tracked			98
 trail_test.go	1338	TestAnErasureIsOwedInItsTransaction	verified	store/sqlite+postgres	runtime/tests/trail_retention.rs#L352	-
 uuid_contract_test.go	23	TestUUIDTypesReachGeneratedRequestsAndCLI	tracked			103

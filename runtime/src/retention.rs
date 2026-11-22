@@ -33,6 +33,8 @@ struct State {
 #[derive(Serialize, Deserialize, Clone)]
 struct Entry {
     id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    manifest: Option<String>,
     tenant: String,
     kind: String,
     created: String,
@@ -176,7 +178,9 @@ const TABLES: &str =
 CREATE TABLE IF NOT EXISTS paydirt_trail_archive (id TEXT PRIMARY KEY, doc TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS paydirt_trail_owed (id TEXT PRIMARY KEY, doc TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS paydirt_trail_removed (id TEXT PRIMARY KEY, doc TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS paydirt_trail_gc (id TEXT PRIMARY KEY, doc TEXT NOT NULL);";
+CREATE TABLE IF NOT EXISTS paydirt_trail_gc (id TEXT PRIMARY KEY, doc TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS paydirt_trail_format (id TEXT PRIMARY KEY, doc TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS paydirt_checkpoint_pending (id TEXT PRIMARY KEY, doc TEXT NOT NULL);";
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 enum Obligation {
@@ -424,6 +428,7 @@ impl Transaction<'_> {
                             .into(),
                         owners,
                         namespace: None,
+                        manifest: None,
                         proof: None,
                         ciphertext: None,
                         table: item.entity,
@@ -496,10 +501,34 @@ impl Store {
             return Err(Fault::invalid("not a tenant ID"));
         }
         let dry = request.dry_run;
-        let out = self.transaction(&Scope::Internal, |tx| {
-            run_pass(tx, files, recipient, &request, tenant, dry)
+        let maintenance = !dry
+            && files.notary.is_some()
+            && matches!(
+                request.action,
+                Action::Collect
+                    | Action::Purge
+                    | Action::Retire
+                    | Action::Forget { .. }
+                    | Action::Retry
+            );
+        let (out, publish) = self.transaction(&Scope::Internal, |tx| {
+            tx.lock_trail()?;
+            if maintenance && tx.pending_checkpoint()?.is_some() {
+                tx.checkpoint(files, true, None)?;
+            }
+            let report = run_pass(tx, files, recipient, &request, tenant, dry)?;
+            let publish = maintenance
+                && (!report.archived.is_empty()
+                    || !report.removed.is_empty()
+                    || !report.blanked.is_empty());
+            if publish {
+                tx.prepare_checkpoint(files)?;
+            }
+            Ok((report, publish))
         })?;
-
+        if publish {
+            self.attest_trail(files, true)?;
+        }
         if !dry
             && !matches!(
                 request.action,
@@ -575,7 +604,7 @@ fn run_pass(
     let shared = !matches!(request.action, Action::Retire | Action::Purge);
     let mut rows = tx.live_trail(&tenant, shared)?;
     for entry in tx.trail_docs::<Entry>("paydirt_trail_archive")?.into_iter() {
-        entry.validate(files, "present")?;
+        tx.check_archive_entry(files, &entry, "present")?;
         if entry.tenant != tenant && !(shared && entry.owners.contains(&tenant)) {
             continue;
         }
@@ -702,34 +731,29 @@ fn run_pass(
             out.archived.push(e.id.clone());
         }
         if !dry && (transfer || archived && blank) {
-            let hash = files.stage(&serde_json::to_vec(&row).map_err(bad)?)?;
             if e.digest.is_some() {
                 tx.removal(files, &e)?;
             }
             if !archived && e.owners.len() > 1 {
                 e.namespace = Some("shared".into());
             }
+            e.manifest = None;
+            tx.begin_blob(files, &mut e)?;
+            let hash = files.stage(&serde_json::to_vec(&row).map_err(bad)?)?;
             if let Some(old) = e.digest.replace(hash) {
                 tx.trail_set("paydirt_trail_gc", &old, Some(&old))?;
             }
             if files.notary.is_some() && row.get("objectId").is_some() {
-                let proof: serde_json::Map<_, _> = [
-                    "id",
-                    "objectId",
-                    "tenantId",
-                    "dateCreated",
-                    "domain",
-                    "action",
-                    "digest",
-                    "digestFields",
-                ]
-                .into_iter()
-                .filter_map(|name| row.get(name).map(|value| (name.to_string(), value.clone())))
-                .collect();
-                e.proof = Some(Value::Object(proof));
+                e.proof = Some(evidence(&row));
                 e.ciphertext =
                     Some(files.ciphertext_digest(e.digest.as_deref().expect("staged digest"))?);
             }
+            tx.settle_blob(
+                files,
+                &e,
+                crate::manifest::State::Adding,
+                crate::manifest::State::Present,
+            )?;
             e.sign(files, "present")?;
             tx.trail_set("paydirt_trail_archive", &e.id, Some(&e))?;
             if transfer {
@@ -785,6 +809,22 @@ fn run_pass(
     Ok(out)
 }
 
+fn evidence(row: &Value) -> Value {
+    let selected = [
+        "id",
+        "objectId",
+        "tenantId",
+        "dateCreated",
+        "domain",
+        "action",
+        "digest",
+        "digestFields",
+    ]
+    .into_iter()
+    .filter_map(|name| row.get(name).map(|v| (name.into(), v.clone())))
+    .collect();
+    Value::Object(selected)
+}
 impl Entry {
     fn blob(&self) -> Result<crate::attestation::Blob> {
         self.digest
@@ -794,7 +834,7 @@ impl Entry {
             })
             .ok_or_else(|| bad("archive entry has no digest"))
     }
-    fn statement(&self, state: &str) -> Result<Vec<u8>> {
+    fn labels(&self) -> Result<BTreeMap<String, String>> {
         let mut labels: BTreeMap<String, String> = [
             ("kind".into(), self.kind.clone()),
             ("table".into(), self.table.clone()),
@@ -817,13 +857,19 @@ impl Entry {
         if self.namespace.is_some() {
             labels.insert("filed_under".into(), self.tenant.clone());
         }
+        if let Some(id) = &self.manifest {
+            labels.insert("manifest_row".into(), id.clone());
+        }
+        Ok(labels)
+    }
+    fn statement(&self, state: &str) -> Result<Vec<u8>> {
         Ok(crate::attestation::manifest_statement(
             &self.id,
             self.namespace.as_deref().unwrap_or(&self.tenant),
             &self.blob()?.digest,
             "archive",
             state,
-            &labels,
+            &self.labels()?,
         ))
     }
     fn sign(&mut self, f: &Archive, state: &str) -> Result<()> {
@@ -843,7 +889,100 @@ impl Entry {
     }
 }
 impl Transaction<'_> {
+    fn typed_labels(&self, e: &Entry) -> Result<BTreeMap<String, String>> {
+        let mut labels = e.labels()?;
+        labels.insert("row".into(), e.id.clone());
+        let name = if e.kind == "access" {
+            "access".to_owned()
+        } else {
+            let domains = crate::domain::Domains::from_policies(self.policies)?;
+            self.policies
+                .get(&e.kind)
+                .and_then(|p| p.entity["domain"].as_u64())
+                .and_then(|n| u8::try_from(n).ok())
+                .map(|domain| domains.name(domain))
+                .unwrap_or_else(|| e.kind.clone())
+        };
+        labels.insert("Kind".into(), name);
+        Ok(labels)
+    }
+    fn begin_blob(&mut self, files: &Archive, e: &mut Entry) -> Result<()> {
+        let labels = self.typed_labels(e)?;
+        let record = self.archive_intent(
+            e.namespace.as_deref().unwrap_or(&e.tenant),
+            "archive",
+            labels,
+            |_, r| {
+                files
+                    .notary
+                    .as_ref()
+                    .map(|n| n.sign(&r.statement()))
+                    .transpose()
+            },
+        )?;
+        e.manifest = paydirt::format_id(&record.id);
+        Ok(())
+    }
+    fn settle_blob(
+        &mut self,
+        files: &Archive,
+        e: &Entry,
+        old: crate::manifest::State,
+        new: crate::manifest::State,
+    ) -> Result<()> {
+        let key = e
+            .manifest
+            .as_deref()
+            .and_then(paydirt::parse_id)
+            .ok_or_else(|| bad("invalid manifest row id"))?;
+        let labels = self.typed_labels(e)?;
+        let digest = e.blob()?.digest;
+        self.change_archive_record(
+            key,
+            old,
+            |r| {
+                r.labels = labels;
+                r.digest = digest;
+                r.state = new;
+                Ok(())
+            },
+            |was, r| {
+                if let Some(was) = was {
+                    was.verify(files.notary.as_ref())?;
+                }
+                files
+                    .notary
+                    .as_ref()
+                    .map(|n| n.sign(&r.statement()))
+                    .transpose()
+            },
+        )?
+        .ok_or_else(|| Fault::aborted("manifest row changed during transition"))?;
+        Ok(())
+    }
+    fn check_archive_entry(&mut self, files: &Archive, e: &Entry, state: &str) -> Result<()> {
+        e.validate(files, state)?;
+        if let Some(key) = &e.manifest {
+            let record = self.archive_record(
+                paydirt::parse_id(key).ok_or_else(|| bad("invalid manifest row ID"))?,
+            )?;
+            record.verify(files.notary.as_ref())?;
+            if record.state.name() != state
+                || record.namespace != e.blob()?.namespace
+                || record.digest != e.blob()?.digest
+                || record.labels != self.typed_labels(e)?
+            {
+                return Err(bad("archived table differs from its recorded blob"));
+            }
+        }
+        Ok(())
+    }
     fn removal(&mut self, f: &Archive, e: &Entry) -> Result<()> {
+        use crate::manifest::State::*;
+        if e.manifest.is_some() {
+            self.settle_blob(f, e, Present, Erasing)?;
+            self.settle_blob(f, e, Erasing, Erased)?;
+        }
         if f.notary.is_some() {
             let mut tombstone = e.clone();
             tombstone.sign(f, "erased")?;
@@ -856,31 +995,291 @@ impl Transaction<'_> {
         Ok(())
     }
 }
-impl Store {
-    pub fn attest_trail(
+#[derive(Serialize, Debug)]
+pub struct Review {
+    pub database_checkpoint: u64,
+    pub archive_checkpoint: u64,
+    pub of: String,
+    pub unaccounted: Vec<crate::attestation::Blob>,
+    pub added: Vec<crate::attestation::Blob>,
+}
+use crate::attestation::{Acceptance, Blob, Head, History};
+type Inventory = (BTreeSet<Blob>, BTreeSet<Blob>);
+impl Transaction<'_> {
+    fn archive_inventory(&mut self, f: &Archive, advance: bool, behind: bool) -> Result<Inventory> {
+        let mut current = BTreeSet::new();
+        let mut removed = BTreeSet::new();
+        for mut e in self.trail_docs::<Entry>("paydirt_trail_archive")? {
+            if behind && let Some(key) = e.manifest.as_deref().and_then(paydirt::parse_id) {
+                if let Err(fault) = self.archive_record(key) {
+                    if fault.code != "not_found" {
+                        return Err(fault);
+                    }
+                    e.validate(f, "present")?;
+                    continue;
+                }
+            }
+            self.check_archive_entry(f, &e, "present")?;
+            f.read(e.digest.as_deref().ok_or_else(|| bad("missing digest"))?)?;
+            if advance && e.manifest.is_none() {
+                self.begin_blob(f, &mut e)?;
+                self.settle_blob(
+                    f,
+                    &e,
+                    crate::manifest::State::Adding,
+                    crate::manifest::State::Present,
+                )?;
+                e.sign(f, "present")?;
+                self.trail_set("paydirt_trail_archive", &e.id, Some(&e))?;
+            }
+            current.insert(e.blob()?);
+        }
+        for e in self.trail_docs::<Entry>("paydirt_trail_removed")? {
+            self.check_archive_entry(f, &e, "erased")?;
+            removed.insert(e.blob()?);
+        }
+        for row in self.archive_records()? {
+            row.verify(f.notary.as_ref())?;
+            let blob = crate::attestation::Blob {
+                namespace: row.namespace,
+                digest: row.digest,
+            };
+            match row.state {
+                crate::manifest::State::Present => {
+                    let digest = blob
+                        .digest
+                        .strip_prefix("sha256:")
+                        .ok_or_else(|| bad("invalid manifest digest"))?;
+                    f.read(digest)?;
+                    current.insert(blob);
+                }
+                crate::manifest::State::Erased => {
+                    removed.insert(blob);
+                }
+                _ => return Err(bad("manifest contains an unfinished transition")),
+            }
+        }
+        Ok((current, removed))
+    }
+    fn compare_checkpoint(
         &mut self,
-        f: &Archive,
+        files: &Archive,
         advance: bool,
-    ) -> Result<Option<crate::attestation::Head>> {
-        let n = f
+    ) -> Result<(Review, History, Inventory)> {
+        self.lock_trail()?;
+        let signer = files
             .notary
             .as_ref()
             .ok_or_else(|| bad("checkpoint requires a configured signer and witness"))?;
+        let history = signer.history(&files.root, advance)?;
+        let external = history.head.as_ref().map_or(0, |h| h.k);
+        let counter = self.checkpoint_counter()?;
+        let legacy =
+            counter.is_none() && self.trail_docs::<bool>("paydirt_trail_format")?.is_empty();
+        let mut database = counter.unwrap_or(0);
+        let inventory = self.archive_inventory(
+            files,
+            advance && database == external,
+            database < external && !legacy,
+        )?;
+        if legacy && inventory.0 == history.latest {
+            database = external;
+        }
+        let unaccounted = history
+            .latest
+            .difference(&inventory.0)
+            .filter(|b| !inventory.1.contains(*b))
+            .cloned()
+            .collect::<Vec<_>>();
+        let added = inventory
+            .0
+            .difference(&history.latest)
+            .cloned()
+            .collect::<Vec<_>>();
+        let state = serde_json::to_vec(&(database, &history.head, &inventory.0, &inventory.1))
+            .map_err(bad)?;
+        let review = Review {
+            database_checkpoint: database,
+            archive_checkpoint: external,
+            of: format!("sha256:{}", Archive::digest(&state)),
+            unaccounted,
+            added,
+        };
+        Ok((review, history, inventory))
+    }
+    fn adopt_checkpoint_blob(&mut self, f: &Archive, blob: &Blob) -> Result<()> {
+        let digest = blob
+            .digest
+            .strip_prefix("sha256:")
+            .ok_or_else(|| bad("invalid checkpoint digest"))?;
+        let raw = f.read(digest)?;
+        let row: Value = serde_json::from_slice(&raw).map_err(bad)?;
+        let id =
+            row_id(&row["id"]).ok_or_else(|| bad("checkpoint blob has no trail row identifier"))?;
+        let source = if row.get("objectId").is_some() {
+            "OWN_AUDIT"
+        } else {
+            "OWN_ACCESS"
+        };
+        let table = self
+            .policies
+            .iter()
+            .find(|(_, p)| p.entity["own"] == source)
+            .ok_or_else(|| bad("missing trail source"))?
+            .0
+            .clone();
+        let kind = if source == "OWN_ACCESS" {
+            "access".into()
+        } else {
+            self.policies
+                .iter()
+                .find(|(_, p)| p.entity["domain"] == row["domain"])
+                .ok_or_else(|| bad("unknown kind in checkpoint object"))?
+                .0
+                .clone()
+        };
+        let tenant = row_id(&row["tenantId"])
+            .unwrap_or_else(|| "00000000-0000-0000-0000-000000000000".into());
+        let owners = ["tenantId", "actorTenantId", "counterpartTenantId"]
+            .into_iter()
+            .filter_map(|k| row_id(&row[k]))
+            .collect();
+        let mut e = Entry {
+            id,
+            manifest: None,
+            kind,
+            created: row["dateCreated"]
+                .as_str()
+                .ok_or_else(|| bad("missing checkpoint object time"))?
+                .into(),
+            namespace: (blob.namespace != tenant).then(|| blob.namespace.clone()),
+            tenant,
+            owners,
+            table,
+            digest: Some(digest.into()),
+            proof: None,
+            ciphertext: None,
+            signature: None,
+        };
+        if source == "OWN_AUDIT" {
+            e.proof = Some(evidence(&row));
+            e.ciphertext = Some(f.ciphertext_digest(digest)?);
+        }
+        self.begin_blob(f, &mut e)?;
+        self.settle_blob(
+            f,
+            &e,
+            crate::manifest::State::Adding,
+            crate::manifest::State::Present,
+        )?;
+        e.sign(f, "present")?;
+        self.trail_set("paydirt_trail_archive", &e.id, Some(&e))
+    }
+    fn pending_checkpoint(&mut self) -> Result<Option<(u64, String)>> {
+        Ok(self
+            .trail_docs::<(u64, String)>("paydirt_checkpoint_pending")?
+            .into_iter()
+            .next())
+    }
+    fn membership_hash(members: &BTreeSet<Blob>) -> Result<String> {
+        Ok(Archive::digest(&serde_json::to_vec(members).map_err(bad)?))
+    }
+    // Commit the intended set before publishing to a witness outside SQL.
+    fn prepare_checkpoint(&mut self, f: &Archive) -> Result<()> {
+        let (review, history, (current, _)) = self.compare_checkpoint(f, true)?;
+        if review.database_checkpoint != review.archive_checkpoint {
+            if self.pending_matches(&review, &history, &current)? {
+                return Ok(());
+            }
+            return Err(bad(format!(
+                "manifest counter is behind or ahead; review {}",
+                review.of
+            )));
+        }
+        if history.head.is_none() || history.latest != current {
+            let pending = (review.database_checkpoint, Self::membership_hash(&current)?);
+            self.trail_set("paydirt_checkpoint_pending", "deployment", Some(&pending))?;
+        }
+        Ok(())
+    }
+    fn pending_matches(
+        &mut self,
+        r: &Review,
+        history: &History,
+        current: &BTreeSet<Blob>,
+    ) -> Result<bool> {
+        Ok(
+            r.database_checkpoint.checked_add(1) == Some(r.archive_checkpoint)
+                && current == &history.latest
+                && self.pending_checkpoint()?
+                    == Some((r.database_checkpoint, Self::membership_hash(current)?)),
+        )
+    }
+    fn checkpoint(
+        &mut self,
+        f: &Archive,
+        advance: bool,
+        accepted: Option<Acceptance>,
+    ) -> Result<Option<Head>> {
+        let (review, history, (mut current, removed)) = self.compare_checkpoint(f, advance)?;
+        if let Some(a) = &accepted {
+            if a.by.trim().is_empty()
+                || a.why.trim().is_empty()
+                || a.of != review.of
+                || a.restored != review.database_checkpoint
+                || a.restored >= review.archive_checkpoint
+            {
+                return Err(bad(
+                    "acceptance requires this reviewed restore, its checkpoint number, operator and reason",
+                ));
+            }
+            for blob in &review.unaccounted {
+                self.adopt_checkpoint_blob(f, blob)?;
+                current.insert(blob.clone());
+            }
+        } else if review.database_checkpoint != review.archive_checkpoint
+            && !(advance && self.pending_matches(&review, &history, &current)?)
+        {
+            return Err(bad(format!(
+                "manifest counter {} differs from the archive at {}: review {}",
+                review.database_checkpoint, review.archive_checkpoint, review.of
+            )));
+        }
+        let result =
+            if advance && accepted.is_none() && history.head.is_some() && history.latest == current
+            {
+                history.head
+            } else {
+                f.notary
+                    .as_ref()
+                    .unwrap()
+                    .finish_chain(&f.root, history, current, removed, advance, accepted)?
+            };
+        if advance && let Some(head) = &result {
+            self.set_checkpoint_counter(head.k)?;
+            self.trail_set("paydirt_trail_format", "typed", Some(&true))?;
+            self.trail_clear("paydirt_checkpoint_pending", "deployment")?;
+        }
+        Ok(result)
+    }
+}
+impl Store {
+    pub fn attest_trail(&mut self, f: &Archive, advance: bool) -> Result<Option<Head>> {
+        if advance {
+            self.transaction(&Scope::Internal, |tx| tx.prepare_checkpoint(f))?;
+        }
+        self.transaction(&Scope::Internal, |tx| tx.checkpoint(f, advance, None))
+    }
+    pub fn review_trail(&mut self, f: &Archive) -> Result<Review> {
         self.transaction(&Scope::Internal, |tx| {
-            tx.lock_trail()?;
-            let mut current = BTreeSet::new();
-            let mut removed = BTreeSet::new();
-            for e in tx.trail_docs::<Entry>("paydirt_trail_archive")? {
-                e.validate(f, "present")?;
-                f.read(e.digest.as_deref().ok_or_else(|| bad("missing digest"))?)?;
-                current.insert(e.blob()?);
-            }
-            for e in tx.trail_docs::<Entry>("paydirt_trail_removed")? {
-                e.validate(f, "erased")?;
-                removed.insert(e.blob()?);
-            }
-            n.check_chain(&f.root, current, removed, advance)
+            tx.compare_checkpoint(f, false).map(|v| v.0)
         })
+    }
+    pub fn accept_trail_restore(&mut self, f: &Archive, acceptance: Acceptance) -> Result<Head> {
+        self.transaction(&Scope::Internal, |tx| {
+            tx.checkpoint(f, true, Some(acceptance))
+        })?
+        .ok_or_else(|| bad("restore did not produce a checkpoint"))
     }
 }
 
@@ -895,7 +1294,7 @@ impl Transaction<'_> {
         let mut rows = Vec::new();
         let encoded = object.map(|id| value::encoded(&id));
         for e in self.trail_docs::<Entry>("paydirt_trail_archive")? {
-            e.validate(files, "present")?;
+            self.check_archive_entry(files, &e, "present")?;
             if e.kind != kind {
                 continue;
             }
