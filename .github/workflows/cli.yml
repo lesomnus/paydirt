@@ -42,7 +42,7 @@ jobs:
       - run: cargo build --locked -p paydirt-cli
       - run: target/debug/paydirt gen --check
       - run: scripts/upstream.sh && python3 scripts/test-payday-contracts.py
-      - run: scripts/test-gen.sh && scripts/test-new.sh
+      - run: scripts/test-gen.sh && scripts/test-new.sh && scripts/test-project-cli.sh
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/app-target
       - name: Install browser and Worker build tools

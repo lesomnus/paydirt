@@ -141,7 +141,9 @@ pub fn add(args: &[String]) -> Result<()> {
 }
 
 pub fn doctor(root: &Path) -> Result<()> {
+    crate::project::legacy_diagnostics(root)?;
     generate::run(root, true)?;
+    crate::project::schema_advice(root)?;
     let checks = ["Cargo.toml", "src/lib.rs", "src/main.rs"];
     for path in checks {
         if !root.join(path).is_file() {
