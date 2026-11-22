@@ -10,6 +10,8 @@ pub struct Frame {
     #[serde(default)]
     pub account: Option<Vec<u8>>,
     #[serde(default)]
+    pub topics: crate::TopicGrants,
+    #[serde(default)]
     pub actor: Option<Vec<u8>>,
     #[serde(default)]
     pub tenants: Option<Vec<Vec<u8>>>,
@@ -120,7 +122,18 @@ impl Store {
                                 .get("account")
                                 .is_some()
                     });
-                    if declared
+                    if self
+                        .policies
+                        .get(&call.entity)
+                        .is_some_and(|p| p.notification)
+                        && call.entity.ends_with(".NotificationAccount")
+                        && session
+                            .frame
+                            .action
+                            .starts_with(&format!("/{}Service/", call.entity))
+                    {
+                        tx.notify(&call.entity, &call.method, &call.request)
+                    } else if declared
                         && session.frame.action == format!("/{}Service/Memberships", call.entity)
                         && call.method == "Memberships"
                     {

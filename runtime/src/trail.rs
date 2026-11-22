@@ -22,7 +22,11 @@ impl Transaction<'_> {
         let key = e.key().map_err(Fault::internal)?;
         let object = &row[&key.json];
         let actor = value::encoded(frame.actor.as_deref().unwrap_or(&[0; 16]));
-        let tenant = value::encoded(&frame.tenant);
+        let tenant = value::encoded(if frame.tenant.is_empty() {
+            &[0; 16]
+        } else {
+            &frame.tenant
+        });
         let object_tenant = self.object_tenant(e, row)?;
         let by = format!("/{}Service/{}", e.name, method);
         let changed: Vec<_> = e

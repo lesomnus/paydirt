@@ -75,6 +75,7 @@ pub fn generate(work: &Path) -> Result<()> {
         }
         // Framework-owned services need the account and administrative policies
         // specific to those services before exposing them on a public router.
+        let notification = policy["notification"] == true;
         let own = policy["entity"]["own"].as_str();
         if own.is_some_and(|v| !matches!(v, "OWN_HOLDER" | "OWN_TENANT" | "OWN_EVENT" | "OWN_FACT"))
             || methods.is_empty()
@@ -94,18 +95,20 @@ pub fn generate(work: &Path) -> Result<()> {
             if own.is_some() && !matches!(rpc.as_str(), "Get" | "List" | "Memberships") {
                 continue;
             }
-            if !matches!(
-                rpc.as_str(),
-                "Memberships"
-                    | "Add"
-                    | "AddMany"
-                    | "Get"
-                    | "Patch"
-                    | "Apply"
-                    | "Erase"
-                    | "List"
-                    | "Watch"
-            ) {
+            if !notification
+                && !matches!(
+                    rpc.as_str(),
+                    "Memberships"
+                        | "Add"
+                        | "AddMany"
+                        | "Get"
+                        | "Patch"
+                        | "Apply"
+                        | "Erase"
+                        | "List"
+                        | "Watch"
+                )
+            {
                 continue;
             }
             let message = |field: &str| -> Result<String> {
@@ -122,6 +125,13 @@ pub fn generate(work: &Path) -> Result<()> {
             let input = message("input")?;
             let output = message("output")?;
             let fun = rpc.to_snake_case();
+            if rpc == "Listen" && notification {
+                writeln!(
+                    out,
+                    "async fn listen(&self,_:&N,ctx:RequestContext,request:ServiceRequest<'_,{input}>)->ServiceResult<::connectrpc::ServiceStream<{output}>> {{self.0.listen(ctx,{name:?},&request.to_owned_message()).await}}"
+                )?;
+                continue;
+            }
             if rpc == "Watch" {
                 writeln!(
                     out,
