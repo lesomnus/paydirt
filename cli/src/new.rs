@@ -45,6 +45,10 @@ const TEMPLATE: &[(&str, &str)] = &[
         include_str!("../templates/app/src/resource.rs"),
     ),
     ("resources.json", "{\"entities\":[],\"previous\":false}\n"),
+    (
+        "src/providers.rs",
+        include_str!("../templates/app/src/providers.rs"),
+    ),
     ("src/main.rs", include_str!("../templates/app/src/main.rs")),
     ("src/sink.rs", include_str!("../templates/app/src/sink.rs")),
     ("src/core.rs", include_str!("../templates/app/src/core.rs")),

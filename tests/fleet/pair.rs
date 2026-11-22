@@ -17,6 +17,53 @@ impl Drop for Active {
 
 #[allow(refining_impl_trait)]
 impl<N: RobotService> RobotServiceLayer<N> for Pair {
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn who(
+        &self,
+        _: &N,
+        ctx: RequestContext,
+        _: ServiceRequest<'_, StreamNumber>,
+    ) -> ServiceResult<StreamNumber> {
+        let e = self.0.0.evidence(&ctx).ok_or_else(|| {
+            connectrpc::ConnectError::unauthenticated("missing provider evidence")
+        })?;
+        let value = match e.method.as_str() {
+            "mtls" => 1,
+            "oidc" => 2,
+            "token" => 3,
+            _ => 0,
+        };
+        Response::ok(StreamNumber {
+            value,
+            ..Default::default()
+        })
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn login(
+        &self,
+        _: &N,
+        ctx: RequestContext,
+        req: ServiceRequest<'_, StreamNumber>,
+    ) -> ServiceResult<StreamNumber> {
+        let e = self
+            .0
+            .0
+            .evidence(&ctx)
+            .ok_or_else(|| connectrpc::ConnectError::unauthenticated("missing login proof"))?;
+        let ttl = std::time::Duration::from_secs(req.value.clamp(1, 60) as u64);
+        let cookie = self.0.0.login_cookie(&ctx, &e.binding, ttl)?;
+        Ok(Response::new(StreamNumber::default()).with_header("set-cookie", cookie))
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn logout(
+        &self,
+        _: &N,
+        ctx: RequestContext,
+        _: ServiceRequest<'_, StreamNumber>,
+    ) -> ServiceResult<StreamNumber> {
+        Ok(Response::new(StreamNumber::default())
+            .with_header("set-cookie", self.0.0.logout_cookie(&ctx)?))
+    }
     async fn pause(
         &self,
         _: &N,
@@ -25,7 +72,7 @@ impl<N: RobotService> RobotServiceLayer<N> for Pair {
     ) -> ServiceResult<StreamNumber> {
         let req = request.to_owned_message();
         futures_timer::Delay::new(std::time::Duration::from_millis(
-            req.value.clamp(0, 2000) as u64,
+            req.value.clamp(0, 2000) as u64
         ))
         .await;
         Response::ok(req)

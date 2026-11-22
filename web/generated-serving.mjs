@@ -1,7 +1,7 @@
 // Drive a generated app and a local OTLP/HTTP collector with real TLS peers.
 import assert from "node:assert/strict";
 import {spawn,execFileSync} from "node:child_process";
-import {randomBytes} from "node:crypto";
+import {randomBytes,X509Certificate} from "node:crypto";
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
@@ -35,6 +35,8 @@ try{
  const config={listen:`127.0.0.1:${main}`,service_name:"fleet-observed",watch:{broker:"memory"},allow_general_writes:true,rate:{burst:2,per_second:20},
    serving:{tls:{...tls,client_ca:"ca.pem"},deadline_ms:200,web:{listen:`127.0.0.1:${web}`,tls,origins:["https://portal.test"]},otlp_traces_endpoint:`http://127.0.0.1:${collector.address().port}/v1/traces`}};
  const id=randomBytes(16);id[6]=128;id[8]=128;id[9]=1;
+ const fingerprint=new X509Certificate(await readFile(join(cwd,"client.pem"))).fingerprint256.replaceAll(":","").toLowerCase();
+ config.authentication={bindings:{["mtls:"+fingerprint]:id.toString("hex")}};
  const env={...process.env,DATABASE_URL:join(cwd,"db"),PAYDIRT_LISTEN:config.listen,PAYDIRT_PRINCIPALS:JSON.stringify({member:id.toString("hex")})};
  await writeFile(join(cwd,"app.json"),JSON.stringify(config));
  run(binary,["app.Tenant","Add",JSON.stringify({id:id.toString("base64"),alias:"tenant"})],env);
@@ -44,7 +46,7 @@ try{
    const {client,method="POST",headers={}}=extras;
    return new Promise((resolve,reject)=>{
      const req=https.request({hostname:"127.0.0.1",port,path,method,ca,...(client?{cert,key}:{}),agent:false,
-       headers:{"content-type":"application/json","connect-protocol-version":"1","authorization":"Bearer member",traceparent:"00-"+traceId+"-0123456789abcdef-01",...headers}},async res=>{
+       headers:{"content-type":"application/json","connect-protocol-version":"1",...(extras.peerOnly?{}:{authorization:"Bearer member"}),traceparent:"00-"+traceId+"-0123456789abcdef-01",...headers}},async res=>{
        const parts=[];for await(const c of res)parts.push(c);resolve({status:res.statusCode,headers:res.headers,body:Buffer.concat(parts).toString()});
      });req.on("error",reject);req.setTimeout(5000,()=>req.destroy(Error("request timed out")));req.end(body&&JSON.stringify(body));
    });
@@ -53,6 +55,9 @@ try{
  child=spawn(binary,[],{cwd,env,stdio:"inherit"});exited=new Promise(r=>child.once("exit",r));
  let ready=false;for(let i=0;i<160;i++){try{if((await rpc(main,settings,setting,{client:true})).status===200){ready=true;break;}}catch{}await delay(30);}
  assert(ready,"mTLS listener did not start");
+ const verified=await rpc(main,"/app.RobotService/Who",{},{client:true,peerOnly:true});
+ assert.equal(verified.status,200);assert.equal(JSON.parse(verified.body).value,1);
+ await delay(120);
  await assert.rejects(rpc(main,settings,setting));
  assert.equal(JSON.parse((await rpc(web,settings,setting)).body).value,"fleet-observed");
  for(const [origin,want] of [["https://portal.test","https://portal.test"],["https://other.test",undefined]]){

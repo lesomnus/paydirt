@@ -20,3 +20,8 @@ hex = "0.4"
 opentelemetry = {version="0.32",default-features=false,features=["trace"]}
 opentelemetry_sdk = {version="0.32",default-features=false,features=["trace"]}
 opentelemetry-otlp = {version="0.32",default-features=false,features=["http-proto","trace","reqwest-blocking-client","reqwest-rustls"]}
+jsonwebtoken={version="12",default-features=false,features=["aws_lc_rs"]}
+reqwest={version="0.13",default-features=false,features=["rustls","json"]}
+chrono={version="0.4",features=["serde"]}
+serde_json="1"
+base64="0.22"

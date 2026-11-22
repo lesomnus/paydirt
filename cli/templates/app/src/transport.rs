@@ -1,3 +1,6 @@
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "providers.rs"]
+mod providers;
 use connectrpc::{ConnectError, RequestContext};
 use futures_util::{FutureExt, StreamExt};
 use paydirt::watch::{Broker, Interest, Memory, Subscription};
@@ -229,6 +232,8 @@ pub fn error(mut f: Fault) -> ConnectError {
 #[derive(Clone)]
 pub struct Database {
     #[cfg(not(target_arch = "wasm32"))]
+    providers: Option<Arc<providers::Providers>>,
+    #[cfg(not(target_arch = "wasm32"))]
     rate: Option<Arc<paydirt_server::Limiter>>,
     capture_origin: bool,
     pub(crate) broker: Option<Arc<dyn Broker>>,
@@ -277,6 +282,7 @@ impl Database {
             })
             .map_err(|e| e.to_string())?;
         Ok(Self {
+            providers: None,
             rate: None,
             capture_origin,
             principals,
@@ -349,12 +355,16 @@ impl Database {
         loop {
             let read = stream.next().fuse();
             futures_util::pin_mut!(read);
-            if self.resolve.is_some() || self.policy.is_some() {
+            #[cfg(not(target_arch = "wasm32"))]
+            let external = ctx.extensions().get::<providers::Verified>().is_some();
+            #[cfg(target_arch = "wasm32")]
+            let external = false;
+            if external || self.resolve.is_some() || self.policy.is_some() {
                 let tick = futures_timer::Delay::new(std::time::Duration::from_millis(100)).fuse();
                 futures_util::pin_mut!(tick);
                 futures_util::select_biased! {
                     event=read=>return event.ok_or_else(||ConnectError::unavailable("watch ended"))?.map(|_|()).map_err(ConnectError::unavailable),
-                    _=tick=>self.check_credential(ctx)?,
+                    _=tick=>self.check_credential(ctx).await?,
                 }
             } else {
                 return read
@@ -447,10 +457,9 @@ impl Database {
             .map(|r| r(&ctx))
             .transpose()?
             .flatten();
+        if ctx.headers().get_all("authorization").iter().count()>1{return Err(ConnectError::unauthenticated("multiple authorization headers"))}
         let header = ctx.headers().get("authorization");
-        if resolved.is_none() && header.is_none() && public && !direct {
-            return Ok(ctx);
-        }
+
         let token = resolved.as_deref().or_else(|| {
             header?
                 .to_str()
@@ -459,9 +468,23 @@ impl Database {
                 .filter(|(s, _)| s.eq_ignore_ascii_case("Bearer"))
                 .map(|(_, v)| v)
         });
-        let principal = token
-            .and_then(|t| self.principals.get(t))
-            .ok_or_else(|| ConnectError::unauthenticated("recognized credential required"))?;
+        let mut principal = token.and_then(|t| self.principals.get(t)).cloned();
+        #[cfg(not(target_arch = "wasm32"))]
+        if principal.is_none()
+            && let Some(auth) = &self.providers
+            && let Some(e) = auth.verify(&ctx).await?
+        {
+            principal = Some(auth.principal(&e, &action)?);
+            ctx.extensions_mut().insert(providers::Verified(e));
+        }
+        let Some(principal) = principal else {
+            if public && !direct && ctx.header("authorization").is_none() {
+                return Ok(ctx);
+            }
+            return Err(ConnectError::unauthenticated(
+                "recognized credential required",
+            ));
+        };
         if let Some(key) = resolved {
             ctx.extensions_mut().insert(ResolvedKey(key));
         }
@@ -526,7 +549,9 @@ impl Database {
             ));
         }
         #[cfg(not(target_arch = "wasm32"))]
-        if let Some(limiter) = &self.rate && cost>0 {
+        if let Some(limiter) = &self.rate
+            && cost > 0
+        {
             let tenant = if frame.tenant.is_empty() {
                 frame.account.as_deref().unwrap_or_default()
             } else {
@@ -738,7 +763,18 @@ impl Database {
         )
         .await
     }
-    fn check_credential(&self, ctx: &RequestContext) -> Result<(), ConnectError> {
+    async fn check_credential(&self, ctx: &RequestContext) -> Result<(), ConnectError> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let (Some(auth), Some(original)) = (
+            &self.providers,
+            ctx.extensions().get::<providers::Verified>(),
+        ) {
+            if auth.verify(ctx).await?.as_ref() != Some(&original.0) {
+                return Err(ConnectError::unauthenticated(
+                    "credential changed; reconnect",
+                ));
+            }
+        }
         if let (Some(resolve), Some(original)) =
             (&self.resolve, ctx.extensions().get::<ResolvedKey>())
             && resolve(ctx)?.as_deref() != Some(&original.0)
@@ -763,7 +799,7 @@ impl Database {
         op: &str,
         request: &Value,
     ) -> Result<Value, ConnectError> {
-        self.check_credential(ctx)?;
+        self.check_credential(ctx).await?;
         if let Some(frame) = ctx.extensions().get::<Frame>()
             && let Some(account) = &frame.account
             && !frame.tenant.is_empty()
