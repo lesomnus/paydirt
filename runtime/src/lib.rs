@@ -155,7 +155,32 @@ pub struct Policy {
     pub methods: BTreeMap<String, Value>,
 }
 pub type Policies = BTreeMap<String, Policy>;
+/// Time and identity sources shared by all writes in a store, including nested writes.
+pub struct Inputs {
+    clock: Box<dyn Fn() -> chrono::DateTime<chrono::Utc> + Send + Sync>,
+    mint: Box<dyn Fn(u8) -> [u8; 16] + Send + Sync>,
+}
+impl Inputs {
+    pub fn new(
+        clock: impl Fn() -> chrono::DateTime<chrono::Utc> + Send + Sync + 'static,
+        mint: impl Fn(u8) -> [u8; 16] + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            clock: Box::new(clock),
+            mint: Box::new(mint),
+        }
+    }
+    fn stamp(&self) -> Value {
+        serde_json::json!((self.clock)().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true))
+    }
+}
+impl Default for Inputs {
+    fn default() -> Self {
+        Self::new(chrono::Utc::now, paydirt::mint)
+    }
+}
 pub struct Store {
+    inputs: Inputs,
     admission: Option<admission::Rules>,
     outbox: bool,
     committed: Option<paydirt::watch::Event>,
@@ -180,6 +205,7 @@ impl Store {
         })?;
         Ok(Self {
             admission: None,
+            inputs: Inputs::default(),
             namer: Box::new(naming::names),
             outbox: true,
             committed: None,
@@ -188,6 +214,10 @@ impl Store {
             model,
             policies,
         })
+    }
+    pub fn with_inputs(mut self, inputs: Inputs) -> Self {
+        self.inputs = inputs;
+        self
     }
     pub fn with_outbox(mut self, enabled: bool) -> Self {
         self.outbox = enabled;
@@ -299,6 +329,7 @@ impl Store {
                 seen: Some(&mut seen),
                 changes: &mut changes,
                 outbox: self.outbox,
+                inputs: &self.inputs,
                 namer: &*self.namer,
                 db,
                 model,
@@ -328,6 +359,7 @@ pub struct Transaction<'a> {
     seen: Option<&'a mut seen::Seen>,
     changes: &'a mut Vec<paydirt::watch::Change>,
     outbox: bool,
+    inputs: &'a Inputs,
     namer: &'a dyn naming::Namer,
     db: &'a mut dyn Driver,
     model: &'a Model,

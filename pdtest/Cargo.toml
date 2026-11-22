@@ -1,0 +1,12 @@
+[package]
+name = "paydirt-test"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Isolated SQLite and in-process Connect RPCs for Payday application tests"
+
+[dependencies]
+paydirt-store = {path="../runtime",features=["sqlite"]}
+tempfile = "3"
+chrono = "0.4"
+connectrpc = {version="=0.8.2",default-features=false,features=["json"]}
