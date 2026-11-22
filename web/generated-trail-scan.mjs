@@ -16,8 +16,12 @@ try {
   const id = randomBytes(16); id[6]=128; id[8]=128; id[9]=1;
   const uuid=id.toString("hex").replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/,"$1-$2-$3-$4-$5");
   run("app.Tenant","Add",JSON.stringify({id:id.toString("base64"),alias:"owner"}));
-  const cell=run("app.Cell","Add",JSON.stringify({tenant:{id:id.toString("base64")},alias:"scan"}));
-  const cellId=Buffer.from(cell.id,"base64").toString("hex").replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/,"$1-$2-$3-$4-$5");
+  // Import a pre-trail Cell directly into the fixture, as an earlier deployment would.
+  const cell=Buffer.from(id);cell[9]=10;
+  execFileSync("python3",["-c",`import sqlite3,sys
+with sqlite3.connect(sys.argv[1]) as db:
+    db.execute('INSERT INTO pd_app__Cell (f1,f2,f4) VALUES (?,?,?)',(bytes.fromhex(sys.argv[2]),bytes.fromhex(sys.argv[3]),'scan'))`,env.DATABASE_URL,cell.toString("hex"),id.toString("hex")]);
+  const cellId=cell.toString("hex").replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/,"$1-$2-$3-$4-$5");
   assert.equal(run("trail-scan","app.Cell").findings[cellId].digest,"not_on_trail");
   assert.equal(run("trail-record","app.Cell",JSON.stringify({ids:[cellId,cellId],action:"/ops/Reconcile"})),1);
   assert.equal(run("trail-row","app.Cell",cellId).digest,"matches");
