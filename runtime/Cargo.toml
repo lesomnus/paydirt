@@ -1,0 +1,20 @@
+[package]
+name = "paydirt-store"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[features]
+postgres = ["diesel/postgres"]
+sqlite = ["diesel/sqlite"]
+
+[dependencies]
+paydirt = { path = ".." }
+paydirt-model = { path = "../model" }
+diesel = { version = "=2.3.14", default-features = false }
+base64 = "0.22"
+hex = "0.4"
+heck = "0.5"
+chrono = { version = "0.4", features = ["wasmbind"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

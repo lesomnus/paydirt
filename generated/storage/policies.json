@@ -1,0 +1,581 @@
+{
+  "app.Access": {
+    "entity": {
+      "domain": 6,
+      "erase": {
+        "hard": {}
+      },
+      "list": {
+        "by": [
+          {
+            "name": "actor_id"
+          },
+          {
+            "name": "tenant_id"
+          },
+          {
+            "name": "actor_tenant_id"
+          },
+          {
+            "name": "kind"
+          }
+        ],
+        "max": 200,
+        "order": [
+          {
+            "desc": true,
+            "field": {
+              "name": "date_created"
+            }
+          },
+          {
+            "desc": true,
+            "field": {
+              "name": "id"
+            }
+          }
+        ],
+        "size": 50
+      },
+      "own": "OWN_ACCESS",
+      "tenanted": {
+        "field": [
+          "tenant_id",
+          "actor_tenant_id"
+        ]
+      }
+    },
+    "fields": {},
+    "methods": {
+      "Get": {
+        "client_stream": false,
+        "input": ".app.AccessGetRequest",
+        "output": ".app.Access",
+        "policy": null,
+        "server_stream": false
+      },
+      "List": {
+        "client_stream": false,
+        "input": ".app.AccessListRequest",
+        "output": ".app.AccessListResponse",
+        "policy": null,
+        "server_stream": false
+      }
+    }
+  },
+  "app.Archived": {
+    "entity": {
+      "domain": 5,
+      "erase": {
+        "hard": {}
+      },
+      "global": {},
+      "own": "OWN_ARCHIVED"
+    },
+    "fields": {},
+    "methods": {}
+  },
+  "app.Audit": {
+    "entity": {
+      "domain": 3,
+      "erase": {
+        "hard": {}
+      },
+      "list": {
+        "by": [
+          {
+            "name": "object_id"
+          },
+          {
+            "name": "actor_id"
+          },
+          {
+            "name": "tenant_id"
+          },
+          {
+            "name": "actor_tenant_id"
+          },
+          {
+            "name": "counterpart_tenant_id"
+          }
+        ],
+        "max": 200,
+        "order": [
+          {
+            "desc": true,
+            "field": {
+              "name": "date_created"
+            }
+          },
+          {
+            "desc": true,
+            "field": {
+              "name": "id"
+            }
+          }
+        ],
+        "size": 50
+      },
+      "own": "OWN_AUDIT",
+      "tenanted": {
+        "field": [
+          "tenant_id",
+          "actor_tenant_id",
+          "counterpart_tenant_id"
+        ]
+      }
+    },
+    "fields": {},
+    "methods": {
+      "Add": {
+        "client_stream": false,
+        "input": ".app.AuditAddRequest",
+        "output": ".app.Audit",
+        "policy": null,
+        "server_stream": false
+      },
+      "Apply": {
+        "client_stream": false,
+        "input": ".app.AuditApplyRequest",
+        "output": ".app.Audit",
+        "policy": null,
+        "server_stream": false
+      },
+      "Erase": {
+        "client_stream": false,
+        "input": ".app.AuditRef",
+        "output": ".app.AuditEraseResponse",
+        "policy": null,
+        "server_stream": false
+      },
+      "Get": {
+        "client_stream": false,
+        "input": ".app.AuditGetRequest",
+        "output": ".app.Audit",
+        "policy": null,
+        "server_stream": false
+      },
+      "List": {
+        "client_stream": false,
+        "input": ".app.AuditListRequest",
+        "output": ".app.AuditListResponse",
+        "policy": null,
+        "server_stream": false
+      },
+      "Patch": {
+        "client_stream": false,
+        "input": ".app.AuditPatchRequest",
+        "output": ".app.Audit",
+        "policy": null,
+        "server_stream": false
+      }
+    }
+  },
+  "app.Cell": {
+    "entity": {
+      "domain": 10
+    },
+    "fields": {},
+    "methods": {
+      "Add": {
+        "client_stream": false,
+        "input": ".app.CellAddRequest",
+        "output": ".app.Cell",
+        "policy": null,
+        "server_stream": false
+      },
+      "Apply": {
+        "client_stream": false,
+        "input": ".app.CellApplyRequest",
+        "output": ".app.Cell",
+        "policy": null,
+        "server_stream": false
+      },
+      "Erase": {
+        "client_stream": false,
+        "input": ".app.CellRef",
+        "output": ".app.CellEraseResponse",
+        "policy": null,
+        "server_stream": false
+      },
+      "Get": {
+        "client_stream": false,
+        "input": ".app.CellGetRequest",
+        "output": ".app.Cell",
+        "policy": null,
+        "server_stream": false
+      },
+      "Patch": {
+        "client_stream": false,
+        "input": ".app.CellPatchRequest",
+        "output": ".app.Cell",
+        "policy": null,
+        "server_stream": false
+      }
+    }
+  },
+  "app.Holder": {
+    "entity": {
+      "domain": 2,
+      "list": {
+        "by": [
+          {
+            "name": "ref"
+          },
+          {
+            "name": "tenant"
+          },
+          {
+            "name": "labels"
+          }
+        ],
+        "max": 100,
+        "order": [
+          {
+            "field": {
+              "name": "date_created"
+            }
+          },
+          {
+            "field": {
+              "name": "id"
+            }
+          }
+        ],
+        "size": 20
+      },
+      "own": "OWN_HOLDER",
+      "watch": {}
+    },
+    "fields": {
+      "alias": {
+        "personal": true
+      },
+      "desc": {
+        "personal": true
+      },
+      "labels": {
+        "personal": true
+      },
+      "name": {
+        "personal": true
+      }
+    },
+    "methods": {
+      "Add": {
+        "client_stream": false,
+        "input": ".app.HolderAddRequest",
+        "output": ".app.Holder",
+        "policy": null,
+        "server_stream": false
+      },
+      "Apply": {
+        "client_stream": false,
+        "input": ".app.HolderApplyRequest",
+        "output": ".app.Holder",
+        "policy": null,
+        "server_stream": false
+      },
+      "Erase": {
+        "client_stream": false,
+        "input": ".app.HolderRef",
+        "output": ".app.HolderEraseResponse",
+        "policy": null,
+        "server_stream": false
+      },
+      "Get": {
+        "client_stream": false,
+        "input": ".app.HolderGetRequest",
+        "output": ".app.Holder",
+        "policy": null,
+        "server_stream": false
+      },
+      "List": {
+        "client_stream": false,
+        "input": ".app.HolderListRequest",
+        "output": ".app.HolderListResponse",
+        "policy": null,
+        "server_stream": false
+      },
+      "Patch": {
+        "client_stream": false,
+        "input": ".app.HolderPatchRequest",
+        "output": ".app.Holder",
+        "policy": null,
+        "server_stream": false
+      },
+      "Watch": {
+        "client_stream": false,
+        "input": ".app.HolderWatchRequest",
+        "output": ".app.HolderWatchResponse",
+        "policy": null,
+        "server_stream": true
+      }
+    }
+  },
+  "app.Outbox": {
+    "entity": {
+      "domain": 4,
+      "erase": {
+        "hard": {}
+      },
+      "global": {},
+      "own": "OWN_OUTBOX"
+    },
+    "fields": {},
+    "methods": {}
+  },
+  "app.Owed": {
+    "entity": {
+      "domain": 254,
+      "erase": {
+        "hard": {}
+      },
+      "global": {},
+      "own": "OWN_OWED"
+    },
+    "fields": {},
+    "methods": {}
+  },
+  "app.Robot": {
+    "entity": {
+      "domain": 7,
+      "list": {
+        "by": [
+          {
+            "name": "ref"
+          },
+          {
+            "name": "tenant"
+          }
+        ],
+        "max": 100,
+        "order": [
+          {
+            "field": {
+              "name": "date_created"
+            }
+          },
+          {
+            "field": {
+              "name": "id"
+            }
+          }
+        ],
+        "orders": [
+          {
+            "name": "alias",
+            "order": [
+              {
+                "field": {
+                  "name": "alias"
+                }
+              },
+              {
+                "field": {
+                  "name": "id"
+                }
+              }
+            ]
+          },
+          {
+            "name": "alias_desc",
+            "order": [
+              {
+                "desc": true,
+                "field": {
+                  "name": "alias"
+                }
+              },
+              {
+                "field": {
+                  "name": "id"
+                }
+              }
+            ]
+          }
+        ],
+        "size": 50,
+        "with": [
+          {
+            "name": "tenant"
+          }
+        ]
+      },
+      "watch": {}
+    },
+    "fields": {},
+    "methods": {
+      "Add": {
+        "client_stream": false,
+        "input": ".app.RobotAddRequest",
+        "output": ".app.Robot",
+        "policy": null,
+        "server_stream": false
+      },
+      "AddMany": {
+        "client_stream": false,
+        "input": ".app.RobotAddManyRequest",
+        "output": ".app.RobotAddManyResponse",
+        "policy": null,
+        "server_stream": false
+      },
+      "Apply": {
+        "client_stream": false,
+        "input": ".app.RobotApplyRequest",
+        "output": ".app.Robot",
+        "policy": null,
+        "server_stream": false
+      },
+      "Erase": {
+        "client_stream": false,
+        "input": ".app.RobotRef",
+        "output": ".app.RobotEraseResponse",
+        "policy": null,
+        "server_stream": false
+      },
+      "Get": {
+        "client_stream": false,
+        "input": ".app.RobotGetRequest",
+        "output": ".app.Robot",
+        "policy": null,
+        "server_stream": false
+      },
+      "List": {
+        "client_stream": false,
+        "input": ".app.RobotListRequest",
+        "output": ".app.RobotListResponse",
+        "policy": null,
+        "server_stream": false
+      },
+      "Move": {
+        "client_stream": false,
+        "input": ".app.RobotMoveRequest",
+        "output": ".app.Robot",
+        "policy": {
+          "direct": {}
+        },
+        "server_stream": false
+      },
+      "Patch": {
+        "client_stream": false,
+        "input": ".app.RobotPatchRequest",
+        "output": ".app.Robot",
+        "policy": null,
+        "server_stream": false
+      },
+      "Watch": {
+        "client_stream": false,
+        "input": ".app.RobotWatchRequest",
+        "output": ".app.RobotWatchResponse",
+        "policy": null,
+        "server_stream": true
+      }
+    }
+  },
+  "app.RowSeal": {
+    "entity": {
+      "domain": 255,
+      "erase": {
+        "hard": {}
+      },
+      "own": "OWN_ROW_SEAL",
+      "tenanted": {
+        "field": [
+          "tenant_id"
+        ]
+      }
+    },
+    "fields": {},
+    "methods": {}
+  },
+  "app.Tenant": {
+    "entity": {
+      "domain": 1,
+      "erase": {
+        "hard": {}
+      },
+      "list": {
+        "by": [
+          {
+            "name": "ref"
+          }
+        ],
+        "max": 100,
+        "order": [
+          {
+            "field": {
+              "name": "date_created"
+            }
+          },
+          {
+            "field": {
+              "name": "id"
+            }
+          }
+        ],
+        "size": 20
+      },
+      "own": "OWN_TENANT",
+      "tenant": {}
+    },
+    "fields": {
+      "alias": {
+        "personal": false
+      },
+      "desc": {
+        "personal": false
+      },
+      "labels": {
+        "personal": false
+      },
+      "name": {
+        "personal": false
+      }
+    },
+    "methods": {
+      "Add": {
+        "client_stream": false,
+        "input": ".app.TenantAddRequest",
+        "output": ".app.Tenant",
+        "policy": null,
+        "server_stream": false
+      },
+      "Apply": {
+        "client_stream": false,
+        "input": ".app.TenantApplyRequest",
+        "output": ".app.Tenant",
+        "policy": null,
+        "server_stream": false
+      },
+      "Erase": {
+        "client_stream": false,
+        "input": ".app.TenantRef",
+        "output": ".app.TenantEraseResponse",
+        "policy": null,
+        "server_stream": false
+      },
+      "Get": {
+        "client_stream": false,
+        "input": ".app.TenantGetRequest",
+        "output": ".app.Tenant",
+        "policy": null,
+        "server_stream": false
+      },
+      "List": {
+        "client_stream": false,
+        "input": ".app.TenantListRequest",
+        "output": ".app.TenantListResponse",
+        "policy": null,
+        "server_stream": false
+      },
+      "Patch": {
+        "client_stream": false,
+        "input": ".app.TenantPatchRequest",
+        "output": ".app.Tenant",
+        "policy": null,
+        "server_stream": false
+      }
+    }
+  }
+}
