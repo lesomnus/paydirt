@@ -52,10 +52,19 @@ jobs:
           echo "$RUNNER_TEMP/$archive" >> "$GITHUB_PATH"
           npm ci --prefix web
           (cd web && npx playwright install --with-deps chromium)
+      - uses: actions/checkout@v4
+        with:
+          repository: lesomnus/payday
+          ref: 53acc135cc084adafda524e882f19275c0d0cc96
+          path: upstream-go
+      - name: Build the pinned Go reference server
+        working-directory: upstream-go
+        run: go build -o "$RUNNER_TEMP/payday-reference" ./internal/apptest/testsrv
       - run: scripts/test-generated-cell.sh
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/app-target
           PAYDIRT_TEST_WASM: "1"
+          PAYDIRT_GO_REFERENCE: ${{ runner.temp }}/payday-reference
           DATABASE_URL: postgres://postgres:paydirt@127.0.0.1:5432/paydirt
       - run: scripts/test-upgrades.sh
         env:

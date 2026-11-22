@@ -61,7 +61,7 @@ pub fn generate(work: &Path) -> Result<()> {
         for (rpc, method) in methods {
             if !matches!(
                 rpc.as_str(),
-                "Add" | "AddMany" | "Get" | "Patch" | "Apply" | "Erase"
+                "Add" | "AddMany" | "Get" | "Patch" | "Apply" | "Erase" | "List" | "Watch"
             ) {
                 continue;
             }
@@ -79,6 +79,14 @@ pub fn generate(work: &Path) -> Result<()> {
             let input = message("input")?;
             let output = message("output")?;
             let fun = rpc.to_snake_case();
+            if rpc == "Watch" {
+                writeln!(
+                    out,
+                    "async fn watch(&self,_:&N,ctx:RequestContext, request:ServiceRequest<'_,{input}>) -> ServiceResult<::connectrpc::ServiceStream<{output}>> {{self.0.watch(ctx,{name:?},&request.to_owned_message()).await}}"
+                )?;
+                continue;
+            }
+
             writeln!(
                 out,
                 "async fn {fun}(&self, _: &N, ctx: RequestContext, request: ServiceRequest<'_, {input}>) -> ServiceResult<{output}> {{\nResponse::ok(self.0.rpc(&ctx, {name:?}, {rpc:?}, &request.to_owned_message()).await?)\n}}"

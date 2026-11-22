@@ -2,12 +2,18 @@
   "name": "paydirt-robot-interop",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node test.mjs" },
+  "scripts": {
+    "test": "node test.mjs"
+  },
   "dependencies": {
     "@bufbuild/protobuf": "2.16.0",
     "@connectrpc/connect": "2.3.0",
     "@connectrpc/connect-web": "2.3.0",
     "@lesomnus/grpc-dgram": "0.1.0"
   },
-  "devDependencies": { "playwright": "1.65.0", "vite": "8.3.6" }
+  "devDependencies": {
+    "@connectrpc/connect-node": "2.3.0",
+    "playwright": "1.65.0",
+    "vite": "8.3.6"
+  }
 }
