@@ -147,6 +147,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("{}",serde_json::to_string(&f)?);
         return Ok(());
     }
+    if matches!(args.first().map(String::as_str),Some("trail-pass"|"trail-receipts")) {
+        let vault=paydirt_store::archive_files::Archive::from_environment(paydirt::environment::PAYDIRT_ARCHIVE_DIR,paydirt::environment::PAYDIRT_ARCHIVE_KEY)?;
+        let result=match args.as_slice(){
+            [cmd] if cmd=="trail-receipts"=>serde_json::to_value(vault.trail_receipts()?)?,
+            _ if args[0]=="trail-pass" && (args.len()==1 || args[1..]==["--dry-run"])=>{
+                let mut store=__APP_CRATE__::resource::record(paydirt_store::Store::open(&url,MODEL,POLICIES)?)?;
+                serde_json::to_value(store.sweep_trail(&vault,args.len()==2)?)?
+            }
+            _=>return Err("expected trail-pass [--dry-run] or trail-receipts".into()),
+        };
+        println!("{}",serde_json::to_string(&result)?);
+        return Ok(());
+    }
     if let [command, argument] = args.as_slice() && matches!(command.as_str(),"trail"|"trail-check"|"trail-read") {
         use paydirt_store::archive_files::Archive;
         let archive=Archive::from_environment;

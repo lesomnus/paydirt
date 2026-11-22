@@ -989,3 +989,270 @@ fn original_master_seals_rows_and_departure_destroys_only_that_tenants_key() {
         assert!(master_reader().open_row(captured, &owners).is_err());
     });
 }
+
+fn trail_sample(
+    tenant: [u8; 16],
+    actor: [u8; 16],
+    counterpart: Option<[u8; 16]>,
+    object: [u8; 16],
+    domain: u8,
+    stamp: &str,
+    action: &str,
+) -> (String, Value) {
+    let mut row = json!({"id":STANDARD.encode(paydirt::mint(3)),"tenantId":STANDARD.encode(tenant),"actorTenantId":STANDARD.encode(actor),"actorId":STANDARD.encode(paydirt::mint(2)),"objectId":STANDARD.encode(object),"domain":domain,"dateCreated":stamp,"action":action,"value":STANDARD.encode(b"private value"),"patch":STANDARD.encode(b"private patch")});
+    if let Some(owner) = counterpart {
+        row["counterpartTenantId"] = json!(STANDARD.encode(owner));
+    }
+    ("app.Audit".into(), row)
+}
+
+#[test]
+fn deployment_and_kind_windows_receipts_and_cutoffs() {
+    use paydirt_store::{
+        archive_files::Archive,
+        attestation::{DirectoryWitness, Ed25519, Notary},
+    };
+    backends(|fixture, url, _| {
+        let mut db = fixture.open(url, &fixture.policies, false);
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("archive");
+        let vault = Archive::open(&root, &[29; 32])
+            .unwrap()
+            .with_notary(Notary::new(
+                Box::new(Ed25519::from_seed(&[7; 32]).unwrap()),
+                Default::default(),
+                Box::new(DirectoryWitness(dir.path().join("witness"))),
+            ));
+        let a = paydirt::mint(1);
+        let b = paydirt::mint(1);
+        let c = paydirt::mint(1);
+        let uuid = |v: [u8; 16]| paydirt::format_id(&v).unwrap();
+        let name = |v: &Value| uuid(id(&v["id"]));
+        let older = "2020-01-01T00:00:00Z";
+        let newer = "2022-01-01T00:00:00Z";
+        let sample =
+            |t, domain, at| trail_sample(t, t, None, paydirt::mint(domain), domain, at, "Add");
+        let ar = sample(a, 7, older);
+        let ah = sample(a, 2, older);
+        let br = sample(b, 7, older);
+        let bh = sample(b, 2, older);
+        let cr = sample(c, 7, older);
+        let late = sample(c, 7, newer);
+        let ch = sample(c, 2, older);
+        db.seed(vec![
+            ar.clone(),
+            ah.clone(),
+            br.clone(),
+            bh.clone(),
+            cr.clone(),
+            late.clone(),
+            ch.clone(),
+        ])
+        .unwrap();
+        let manage = |db: &mut Store, tenant: &str, mut v: Value| {
+            v["tenant"] = json!(tenant);
+            db.manage_trail(&vault, None, serde_json::from_value(v).unwrap())
+        };
+        manage(&mut db,"deployment",json!({"action":"policy","policy":{"default":{"retain_ms":0,"discard":true},"by":{"robot":{}}}})).unwrap();
+        manage(
+            &mut db,
+            &uuid(b),
+            json!({"action":"policy","policy":{"default":{"retain_ms":0,"destroy_ms":0}}}),
+        )
+        .unwrap();
+        manage(
+            &mut db,
+            &uuid(c),
+            json!({"action":"policy","policy":{"default":{"retain_ms":0}}}),
+        )
+        .unwrap();
+        let dry = db.sweep_trail(&vault, true).unwrap();
+        assert_eq!(dry[&uuid(a)].removed, vec![name(&ah.1)]);
+        assert_eq!(dry[&uuid(b)].removed.len(), 2);
+        assert_eq!(dry[&uuid(c)].archived.len(), 3);
+        assert!(vault.trail_receipts().unwrap().is_empty());
+        assert!(!root.exists());
+        let real = db.sweep_trail(&vault, false).unwrap();
+        assert_eq!(real[&uuid(a)].removed, dry[&uuid(a)].removed);
+        assert_eq!(real[&uuid(b)].removed, dry[&uuid(b)].removed);
+        assert_eq!(real[&uuid(c)].archived, dry[&uuid(c)].archived);
+        assert_eq!(db.read_tenant_trail(&vault, a).unwrap().len(), 1);
+        assert_eq!(
+            db.read_tenant_trail(&vault, a).unwrap()[0]["id"],
+            ar.1["id"]
+        );
+        assert!(db.read_tenant_trail(&vault, b).unwrap().is_empty());
+        assert!(
+            db.read_tenant_trail(&vault, c)
+                .unwrap()
+                .iter()
+                .all(|r| r["action"] == "Add")
+        );
+        let receipt_dir = root.join(".maintenance-receipts");
+        let receipts = vault.trail_receipts().unwrap();
+        assert_eq!(
+            receipts
+                .iter()
+                .filter(|r| r.act == "destroy" && r.tenant == uuid(b) && r.place == "archive")
+                .map(|r| r.rows)
+                .sum::<usize>(),
+            2
+        );
+        assert_eq!(
+            receipts
+                .iter()
+                .filter(|r| r.act == "discard" && r.tenant == uuid(a) && r.place == "database")
+                .count(),
+            1
+        );
+        let purge = json!({"action":"purge_kind","kind":"robot","before":newer});
+        let mut preview = purge.clone();
+        preview["dry_run"] = json!(true);
+        assert_eq!(
+            manage(&mut db, &uuid(c), preview).unwrap().removed,
+            [name(&cr.1)]
+        );
+        // Fail publication after SQL commits. A new process must publish the receipt exactly once.
+        let saved = dir.path().join("saved");
+        std::fs::rename(&receipt_dir, &saved).unwrap();
+        std::fs::write(&receipt_dir, b"unavailable").unwrap();
+        assert!(manage(&mut db, &uuid(c), purge.clone()).is_err());
+        std::fs::remove_file(&receipt_dir).unwrap();
+        std::fs::rename(saved, &receipt_dir).unwrap();
+        let mut db = fixture.open(url, &fixture.policies, false);
+        assert!(manage(&mut db, &uuid(c), purge).unwrap().removed.is_empty());
+        let remain = db.read_tenant_trail(&vault, c).unwrap();
+        assert_eq!(remain.len(), 2);
+        assert!(remain.iter().any(|r| r["id"] == ch.1["id"]));
+        assert!(remain.iter().any(|r| r["id"] == late.1["id"]));
+        let rs = vault.trail_receipts().unwrap();
+        let purges: Vec<_> = rs.iter().filter(|r| r.act == "purge").collect();
+        assert_eq!(purges.len(), 1);
+        let r = purges[0];
+        assert_eq!(
+            (&r.tenant, r.rows, r.place.as_str(), r.kind.as_str()),
+            (&uuid(c), 1, "archive", "app.Robot")
+        );
+        let file = receipt_dir.join(format!("{}.json", r.id));
+        let mut altered: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        altered["receipt"]["rows"] = json!(200);
+        std::fs::write(file, serde_json::to_vec(&altered).unwrap()).unwrap();
+        assert!(vault.trail_receipts().is_err());
+    });
+}
+
+#[test]
+fn transactional_subject_erasure_and_tenant_departure() {
+    use paydirt_store::archive_files::Archive;
+    backends(|fixture, url, _| {
+        let mut db = fixture.open(url, &fixture.policies, false);
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Archive::open(dir.path(), &[31; 32]).unwrap();
+        let a = paydirt::mint(1);
+        let b = paydirt::mint(1);
+        let who = paydirt::mint(7);
+        let other = paydirt::mint(7);
+        let at = "2020-01-01T00:00:00Z";
+        let make = |owner, actor, counter, object, action| {
+            trail_sample(owner, actor, counter, object, 7, at, action)
+        };
+        let added = make(a, a, None, who, "Add");
+        let patched = make(a, a, None, who, "Patch");
+        let neighbor = make(a, a, None, other, "Add");
+        let system = make(a, [0; 16], None, other, "Add");
+        let shared = make(a, b, None, other, "Move");
+        let theirs = make(b, b, Some(a), other, "Move");
+        let uuid = |v: [u8; 16]| paydirt::format_id(&v).unwrap();
+        let manage = |db: &mut Store, owner, mut r: Value| {
+            r["tenant"] = json!(uuid(owner));
+            db.manage_trail(&vault, None, serde_json::from_value(r).unwrap())
+        };
+        db.seed(vec![added.clone()]).unwrap();
+        manage(
+            &mut db,
+            a,
+            json!({"action":"policy","policy":{"default":{"retain_ms":0}}}),
+        )
+        .unwrap();
+        assert_eq!(
+            manage(&mut db, a, json!({"action":"collect"}))
+                .unwrap()
+                .archived
+                .len(),
+            1
+        );
+        manage(&mut db, a, json!({"action":"policy","policy":{}})).unwrap();
+        db.seed(vec![
+            patched.clone(),
+            neighbor.clone(),
+            system.clone(),
+            shared.clone(),
+            theirs.clone(),
+        ])
+        .unwrap();
+        let inspect = |db: &mut Store, sample: &Value| {
+            db.read_tenant_trail(&vault, a)
+                .unwrap()
+                .into_iter()
+                .find(|r| r["id"] == sample["id"])
+                .unwrap()
+        };
+        let original = inspect(&mut db, &patched.1);
+        let rolled = db.transaction(&Scope::Internal, |tx| {
+            let plan = tx.forget_trail_in(a, &[who, who])?;
+            assert_eq!(plan.blanked, [uuid(id(&patched.1["id"]))]);
+            assert_eq!(plan.owed, [uuid(who)]);
+            Err::<(), _>(paydirt_store::Fault::invalid("rollback"))
+        });
+        assert!(rolled.is_err());
+        assert_eq!(inspect(&mut db, &patched.1), original);
+        assert!(
+            manage(&mut db, a, json!({"action":"inspect"}))
+                .unwrap()
+                .owed
+                .is_empty()
+        );
+        db.transaction(&Scope::Internal, |tx| tx.forget_trail_in(a, &[who]))
+            .unwrap();
+        let online = inspect(&mut db, &patched.1);
+        assert_eq!(
+            (online["value"].as_str(), online["patch"].as_str()),
+            (Some(""), Some(""))
+        );
+        for k in ["id", "actorId", "action", "objectId", "dateCreated"] {
+            assert_eq!(online[k], original[k]);
+        }
+        assert_eq!(inspect(&mut db, &added.1)["value"], added.1["value"]);
+        assert_eq!(
+            manage(&mut db, a, json!({"action":"inspect"}))
+                .unwrap()
+                .owed,
+            [uuid(who)]
+        );
+        let mut db = fixture.open(url, &fixture.policies, false);
+        assert_eq!(
+            manage(&mut db, a, json!({"action":"retry"}))
+                .unwrap()
+                .blanked,
+            [uuid(id(&added.1["id"]))]
+        );
+        assert_eq!(inspect(&mut db, &added.1)["value"], "");
+        assert_eq!(inspect(&mut db, &neighbor.1)["value"], neighbor.1["value"]);
+        manage(
+            &mut db,
+            a,
+            json!({"action":"policy","policy":{"held":["*"]}}),
+        )
+        .unwrap();
+        assert!(manage(&mut db, a, json!({"action":"purge"})).is_err());
+        manage(&mut db, a, json!({"action":"policy","policy":{}})).unwrap();
+        let dry = manage(&mut db, a, json!({"action":"purge","dry_run":true})).unwrap();
+        let real = manage(&mut db, a, json!({"action":"purge"})).unwrap();
+        assert_eq!(real.removed, dry.removed);
+        assert_eq!(real.blanked, dry.blanked);
+        assert_eq!(real.removed.len(), 4);
+        assert_eq!(real.blanked, [uuid(id(&shared.1["id"]))]);
+        assert_eq!(inspect(&mut db, &shared.1)["value"], "");
+        assert_eq!(inspect(&mut db, &theirs.1)["value"], theirs.1["value"]);
+    });
+}
