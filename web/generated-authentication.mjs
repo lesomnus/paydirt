@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import {createServer} from "node:http";
 import {generateKeyPairSync,randomBytes,sign} from "node:crypto";
 import {spawn,execFileSync} from "node:child_process";
-import {mkdtemp,writeFile,rm} from "node:fs/promises";
+import {mkdtemp,readFile,writeFile,rm} from "node:fs/promises";
+import {chromium} from "playwright";
+import {createServer as viteServer} from "vite";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {setTimeout as delay} from "node:timers/promises";
@@ -54,5 +56,39 @@ try{
  await denied(await call("Who",null,session),"unauthenticated");
  const short=await call("Login",jwt(),{},{value:1});await delay(1100);
  await denied(await call("Who",null,{cookie:short.headers.get("set-cookie").split(";")[0]}),"unauthenticated");
+ const sdk=await viteServer({server:{port:0,host:"127.0.0.1",proxy:{"/app.":{target:"http://"+address}}},logLevel:"error",plugins:[{
+   name:"local-session-check",
+   resolveId(id){if(id==="/auth-sdk.js")return id},
+   load(id){if(id==="/auth-sdk.js")return `
+     import {Store} from "/upstream/ts/src/store/index.ts";
+     import {Queries} from "/upstream/ts/src/query/query.ts";
+     import {createConnectTransport} from "@connectrpc/connect-web";
+     import {createFileRegistry,fromBinary} from "@bufbuild/protobuf";
+     import {FileDescriptorSetSchema} from "@bufbuild/protobuf/wkt";
+     export async function who(identity,bytes){
+       const service=createFileRegistry(fromBinary(FileDescriptorSetSchema,new Uint8Array(bytes))).getService("app.RobotService");
+       const store=Store.open([],{name:"fleet",identity});
+       const q=new Queries(store,createConnectTransport({baseUrl:location.origin,useBinaryFormat:true}),[],{services:[service]});
+       try{return (await q.call(service.method.who,{})).value}finally{q.close()}
+     }`;}
+ }]});
+ let browser;
+ try{
+   await sdk.listen();browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH});
+   const page=await browser.newPage();
+   await page.route("**/auth-check",route=>route.fulfill({body:"<!doctype html><title>Session test</title>",contentType:"text/html"}));
+   await page.goto("http://127.0.0.1:"+sdk.httpServer.address().port+"/auth-check");
+   const bytes=Array.from(await readFile(join(process.env.CELL_PROJECT,"generated/storage/descriptors.binpb")));
+   const results=await page.evaluate(async({token,bytes})=>{
+     const request=(rpc,auth)=>fetch("/app.RobotService/"+rpc,{method:"POST",headers:{"content-type":"application/json",...(auth?{authorization:"Bearer "+auth}:{})},body:'{"value":30}'});
+     const login=await request("Login",token);if(!login.ok)throw Error(await login.text());
+     const {who}=await import("/auth-sdk.js");
+     const ok=await who("oidc:user",bytes);
+     async function status(identity){try{await who(identity,bytes);return 0}catch(e){return e.code}}
+     const mismatch=await status("other");const visible=document.cookie;
+     await request("Logout");return [ok,mismatch,visible,await status("oidc:user")];
+   },{token:jwt(),bytes});
+   assert.deepEqual(results,[2,16,"",16]);
+ }finally{await browser?.close();await sdk.close()}
  console.log("Verified OIDC audience, expiry, rotated keys, remote grants and browser cookie sessions end to end.");
 }finally{if(child){const ended=new Promise(r=>child.once("exit",r));child.kill();await ended}await stop(provider);await rm(tmp,{recursive:true,force:true})}
