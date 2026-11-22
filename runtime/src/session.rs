@@ -127,7 +127,9 @@ impl Store {
                     id: id.clone(),
                     frame,
                 })?;
-                if matches!(origin.method.as_str(), "Add" | "AddMany") {
+                if matches!(origin.method.as_str(), "Add" | "AddMany")
+                    && self.model.entity(&origin.entity).is_ok()
+                {
                     let preflight = Call {
                         entity: origin.entity.clone(),
                         method: if origin.method == "Add" {
