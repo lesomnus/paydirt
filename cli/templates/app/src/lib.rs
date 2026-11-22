@@ -36,3 +36,9 @@ pub fn router(database: transport::Database, name: String) -> connectrpc::Router
 
 #[cfg(target_arch = "wasm32")]
 mod worker;
+
+/// Register application background work before starting the native listener.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn workers(_database: &transport::Database) -> Result<paydirt::spin::Workers, String> {
+    Ok(paydirt::spin::Workers::default())
+}

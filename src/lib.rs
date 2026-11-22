@@ -1,6 +1,8 @@
 //! Core types shared by native and WebAssembly Payday applications.
 pub mod page;
 pub mod rbac;
+#[cfg(all(feature = "watch-postgres", not(target_arch = "wasm32")))]
+pub mod spin;
 pub mod tenant;
 
 use uuid::Uuid;

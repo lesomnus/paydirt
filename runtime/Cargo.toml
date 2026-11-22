@@ -5,6 +5,7 @@ edition = "2024"
 license = "Apache-2.0"
 
 [features]
+workers = ["dep:tokio","dep:tempfile","paydirt/watch-postgres"]
 postgres = ["diesel/postgres"]
 sqlite = ["diesel/sqlite"]
 
@@ -21,6 +22,10 @@ heck = "0.5"
 chrono = { version = "0.4", features = ["wasmbind"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = {version="1",features=["macros","time"],optional=true}
+tempfile = {version="3",optional=true}
 
 [dev-dependencies]
 tempfile = "3"
