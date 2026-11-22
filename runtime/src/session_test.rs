@@ -26,6 +26,7 @@ fn exercise(url: &str) {
     )
     .unwrap();
     let frame = Frame {
+        account: None,
         tenant: tenant.to_vec(),
         actor: Some(actor.to_vec()),
         caller: None,
