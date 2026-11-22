@@ -34,12 +34,25 @@ pub fn generate(work: &Path) -> Result<()> {
     let image: Value = serde_json::from_slice(&fs::read(dest)?)?;
     let mut policies = BTreeMap::new();
     let mut apps = BTreeMap::new();
+    let mut event_types = BTreeMap::new();
     for file in image["file"].as_array().ok_or("expected files")? {
         let package = file["package"].as_str().unwrap_or_default();
         if let Some(app) = file["options"].get("[payday.app]") {
             apps.insert(package, app);
         }
         for message in file["messageType"].as_array().into_iter().flatten() {
+            if let Some(kinds) = message["options"]["[payday.event]"]["kinds"].as_array() {
+                for kind in kinds {
+                    let kind = kind.as_str().ok_or("invalid event kind")?;
+                    let name = message["name"].as_str().ok_or("missing event type")?;
+                    if event_types
+                        .insert(kind, format!("{package}.{name}"))
+                        .is_some()
+                    {
+                        return Err(format!("duplicate event kind {kind}").into());
+                    }
+                }
+            }
             let Some(entity) = message["options"].get("[payday.entity]") else {
                 continue;
             };
@@ -77,6 +90,9 @@ pub fn generate(work: &Path) -> Result<()> {
             && let Some(app) = name.rsplit_once('.').and_then(|(p, _)| apps.get(p))
         {
             policy["application"] = (*app).clone();
+            if !event_types.is_empty() {
+                policy["application"]["eventTypes"] = json!(event_types);
+            }
         }
     }
     fs::write(
