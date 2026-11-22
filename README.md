@@ -100,7 +100,7 @@ successful transaction in the SQLite Worker returns change metadata to that brok
 | --- | --- |
 | `{"broker":"memory"}` | Subscribers and writers share one server process. |
 | `{"broker":"postgres"}` | Replicas share a PostgreSQL database. A subscriber listens on `payday_watch`. Set `dsn` to select a different broker database. |
-| `{"broker":"nats","dsn":"nats://localhost:4222","namespace":"fleet"}` | Core NATS routes by deployment, service, key and notification audience. All replicas of a deployment use the same namespace. |
+| `{"broker":"nats","dsn":"nats://localhost:4222","namespace":"fleet"}` | Core NATS routes by deployment, service, key and notification audience. All replicas of a deployment use the same namespace. Broker credentials need publish and subscribe within that namespace, including its two-token sync subjects used to confirm a subscription before sending the initial snapshot. |
 | `{"broker":"none"}` | Live subscriptions return FailedPrecondition. |
 
 Subscriptions are installed before the initial snapshot or notification Ready.
