@@ -1530,6 +1530,23 @@ pub trait HolderCalls: crate::services::r#app::HolderService {
                 "invalid downstream response",
             ))
     }
+    fn list_all<'a>(
+        &'a self,
+        ctx: &'a RequestContext,
+        request: &crate::proto::r#app::r#HolderListRequest,
+    ) -> impl ::paydirt::page::Stream<
+        Item = Result<crate::proto::r#app::Holder, ::connectrpc::ConnectError>,
+    > + 'a {
+        ::paydirt::page::all(
+            request,
+            |q| &mut q.after,
+            move |q| async move {
+                let page = self.list_owned(ctx, q).await?;
+                Ok((page.items, page.next))
+            },
+            || ::connectrpc::ConnectError::internal("repeated continuation token"),
+        )
+    }
     async fn list_owned(
         &self,
         ctx: &RequestContext,
@@ -1684,6 +1701,23 @@ pub trait RobotCalls: crate::services::r#app::RobotService {
                 "invalid downstream response",
             ))
     }
+    fn list_all<'a>(
+        &'a self,
+        ctx: &'a RequestContext,
+        request: &crate::proto::r#app::r#RobotListRequest,
+    ) -> impl ::paydirt::page::Stream<
+        Item = Result<crate::proto::r#app::Robot, ::connectrpc::ConnectError>,
+    > + 'a {
+        ::paydirt::page::all(
+            request,
+            |q| &mut q.after,
+            move |q| async move {
+                let page = self.list_owned(ctx, q).await?;
+                Ok((page.items, page.next))
+            },
+            || ::connectrpc::ConnectError::internal("repeated continuation token"),
+        )
+    }
     async fn list_owned(
         &self,
         ctx: &RequestContext,
@@ -1750,6 +1784,23 @@ pub trait TenantCalls: crate::services::r#app::TenantService {
             .map_err(|_| connectrpc::ConnectError::internal(
                 "invalid downstream response",
             ))
+    }
+    fn list_all<'a>(
+        &'a self,
+        ctx: &'a RequestContext,
+        request: &crate::proto::r#app::r#TenantListRequest,
+    ) -> impl ::paydirt::page::Stream<
+        Item = Result<crate::proto::r#app::Tenant, ::connectrpc::ConnectError>,
+    > + 'a {
+        ::paydirt::page::all(
+            request,
+            |q| &mut q.after,
+            move |q| async move {
+                let page = self.list_owned(ctx, q).await?;
+                Ok((page.items, page.next))
+            },
+            || ::connectrpc::ConnectError::internal("repeated continuation token"),
+        )
     }
     async fn list_owned(
         &self,
