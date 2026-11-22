@@ -23,6 +23,10 @@ try {
   assert.equal(run("trail-row","app.Cell",cellId).digest,"matches");
   run("trail",JSON.stringify({tenant:uuid,action:"policy",policy:{by:{cell:{retain_ms:0}}}}));
   assert.equal(run("trail",JSON.stringify({tenant:uuid,action:"collect"})).archived.length,1);
+  const review=run("trail-check","review");
+  assert.equal(review.database_checkpoint,1);assert.equal(review.archive_checkpoint,1);
+  assert.equal(run("trail-check","verify").k,1);
+  assert.throws(()=>run("trail-check",JSON.stringify({of:review.of,by:"operator",why:"tested",restored:1})));
   delete env.PAYDIRT_ARCHIVE_KEY;
   const report=run("trail-scan","app.Cell");
   assert.equal(report.archived,1);assert.deepEqual(report.findings,{});

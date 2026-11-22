@@ -199,7 +199,7 @@ impl Transaction<'_> {
         );
         Ok((self.db.exec(q)? == 1).then_some(next))
     }
-    pub(crate) fn manifest_rows(&mut self) -> Result<Vec<Record>> {
+    pub fn archive_records(&mut self) -> Result<Vec<Record>> {
         let (e, _) = self.manifest_entity()?;
         let e = e.clone();
         let mut q = Query::new("");

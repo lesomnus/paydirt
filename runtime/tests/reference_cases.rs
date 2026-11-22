@@ -601,32 +601,17 @@ fn original_signed_manifest_rows_and_reviewed_restore() {
                 raw(r#"CREATE TABLE manifest_backup AS SELECT * FROM "pd_app__Archived""#);
             }
         }
-        let rows = db
-            .call(
-                &Scope::Internal,
-                Call {
-                    entity: "app.Archived".into(),
-                    method: "List".into(),
-                    request: json!({}),
-                },
-            )
+        let records = db
+            .transaction(&Scope::Internal, |tx| tx.archive_records())
             .unwrap();
-        let records = rows["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|v| v["namespace"].as_str().is_some_and(|v| !v.is_empty()))
-            .collect::<Vec<_>>();
         assert!(records.len() >= 3);
         for row in records {
-            assert!(paydirt::has_domain(&id(&row["id"]), 5));
-            assert_eq!(row["state"], "present");
-            assert_eq!(row["labels"]["Kind"], "robot");
-            assert!(
-                !row["signature"].as_str().unwrap().is_empty()
-                    && !row["signedBy"].as_str().unwrap().is_empty()
-            );
-            assert!(row["since"].as_u64().unwrap() > 0);
+            assert!(paydirt::has_domain(&row.id, 5));
+            assert_eq!(row.state, paydirt_store::manifest::State::Present);
+            assert_eq!(row.labels["Kind"], "robot");
+            let signature = row.signature.unwrap();
+            assert!(!signature.sig.is_empty() && !signature.key.is_empty());
+            assert!(row.since > 0);
         }
         raw(
             r#"DELETE FROM "pd_app__Archived"; INSERT INTO "pd_app__Archived" SELECT * FROM manifest_backup"#,
@@ -783,5 +768,71 @@ fn original_signed_transition_is_whole_or_unchanged() {
             assert!(result.is_none());
             assert_eq!(get(&mut db).state, State::Erased);
         }
+    });
+}
+
+#[test]
+fn original_manifest_and_access_rows_use_the_app_declared_domains() {
+    use paydirt_store::{access::Observation, archive_files::Archive, audit_content::Options};
+    backends(|fixture, url, _| {
+        let mut policies = fixture.policies.clone();
+        policies["app.Access"]["entity"]["domain"] = json!(106);
+        policies["app.Archived"]["entity"]["domain"] = json!(105);
+        let mut db = fixture
+            .open(url, &policies, false)
+            .with_trail(
+                Options {
+                    access: true,
+                    reads: true,
+                    ..Default::default()
+                },
+                &fixture.descriptors,
+                &fixture.schema,
+            )
+            .unwrap();
+        let tenant = provision(&mut db);
+        let holder = paydirt::mint(2);
+        db.handle(Packet::Observe(Observation{
+            frame:serde_json::from_value(json!({"actor":holder,"tenant":tenant,"action":"/app.HolderService/List"})).unwrap(),
+            request:json!({}),input:"app.HolderListRequest".into(),output:"app.HolderListResponse".into(),
+            answer:Some(json!({"items":[{"id":STANDARD.encode(holder),"tenant":{"id":STANDARD.encode(tenant)}}]})),result:"ok".into(),reason:None,written:Default::default(),
+        })).unwrap();
+        let sel = paydirt_store::trail_page::Selection {
+            only: [106].into(),
+            ..Default::default()
+        };
+        let access = db
+            .transaction(&Scope::Internal, |tx| tx.trail_page(&sel, None, None, 10))
+            .unwrap();
+        assert_eq!(access.len(), 1);
+        assert!(paydirt::has_domain(&access[0].cursor.key, 106));
+        assert_eq!(access[0].document["domain"], 106);
+        let root = tempfile::tempdir().unwrap();
+        let vault = Archive::open(root.path().join("archive"), &[14; 32]).unwrap();
+        let recipient = Archive::open(root.path().join("export"), &[83; 32]).unwrap();
+        let mut manage = |mut req: Value| {
+            req["tenant"] = json!(paydirt::format_id(&tenant).unwrap());
+            db.manage_trail(
+                &vault,
+                Some(&recipient),
+                serde_json::from_value(req).unwrap(),
+            )
+            .unwrap()
+        };
+        manage(json!({"action":"policy","policy":{"by":{"access":{"retain_ms":0}}}}));
+        assert_eq!(manage(json!({"action":"collect"})).archived.len(), 1);
+        let bundle = manage(
+            json!({"action":"export","operator":"reader","recipient":"holder","reason":"review"}),
+        )
+        .bundle
+        .unwrap();
+        let doc: Value = serde_json::from_slice(&recipient.read(&bundle).unwrap()).unwrap();
+        assert_eq!(doc["rows"][0]["id"], STANDARD.encode(access[0].cursor.key));
+        let manifest = db
+            .transaction(&Scope::Internal, |tx| tx.archive_records())
+            .unwrap();
+        assert_eq!(manifest.len(), 1);
+        assert!(paydirt::has_domain(&manifest[0].id, 105));
+        assert_eq!(manifest[0].labels["Kind"], "access");
     });
 }

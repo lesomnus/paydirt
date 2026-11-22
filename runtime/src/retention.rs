@@ -179,7 +179,8 @@ CREATE TABLE IF NOT EXISTS paydirt_trail_archive (id TEXT PRIMARY KEY, doc TEXT 
 CREATE TABLE IF NOT EXISTS paydirt_trail_owed (id TEXT PRIMARY KEY, doc TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS paydirt_trail_removed (id TEXT PRIMARY KEY, doc TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS paydirt_trail_gc (id TEXT PRIMARY KEY, doc TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS paydirt_trail_format (id TEXT PRIMARY KEY, doc TEXT NOT NULL);";
+CREATE TABLE IF NOT EXISTS paydirt_trail_format (id TEXT PRIMARY KEY, doc TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS paydirt_checkpoint_pending (id TEXT PRIMARY KEY, doc TEXT NOT NULL);";
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 enum Obligation {
@@ -500,27 +501,34 @@ impl Store {
             return Err(Fault::invalid("not a tenant ID"));
         }
         let dry = request.dry_run;
-        let out = self.transaction(&Scope::Internal, |tx| {
-            let report = run_pass(tx, files, recipient, &request, tenant, dry)?;
-            if !dry
-                && files.notary.is_some()
-                && matches!(
-                    request.action,
-                    Action::Collect
-                        | Action::Purge
-                        | Action::Retire
-                        | Action::Forget { .. }
-                        | Action::Retry
-                )
-                && (!report.archived.is_empty()
-                    || !report.removed.is_empty()
-                    || !report.blanked.is_empty())
-            {
+        let maintenance = !dry
+            && files.notary.is_some()
+            && matches!(
+                request.action,
+                Action::Collect
+                    | Action::Purge
+                    | Action::Retire
+                    | Action::Forget { .. }
+                    | Action::Retry
+            );
+        let (out, publish) = self.transaction(&Scope::Internal, |tx| {
+            tx.lock_trail()?;
+            if maintenance && tx.pending_checkpoint()?.is_some() {
                 tx.checkpoint(files, true, None)?;
             }
-            Ok(report)
+            let report = run_pass(tx, files, recipient, &request, tenant, dry)?;
+            let publish = maintenance
+                && (!report.archived.is_empty()
+                    || !report.removed.is_empty()
+                    || !report.blanked.is_empty());
+            if publish {
+                tx.prepare_checkpoint(files)?;
+            }
+            Ok((report, publish))
         })?;
-
+        if publish {
+            self.attest_trail(files, true)?;
+        }
         if !dry
             && !matches!(
                 request.action,
@@ -1030,7 +1038,7 @@ impl Transaction<'_> {
             self.check_archive_entry(f, &e, "erased")?;
             removed.insert(e.blob()?);
         }
-        for row in self.manifest_rows()? {
+        for row in self.archive_records()? {
             row.verify(f.notary.as_ref())?;
             let blob = crate::attestation::Blob {
                 namespace: row.namespace,
@@ -1167,6 +1175,46 @@ impl Transaction<'_> {
         e.sign(f, "present")?;
         self.trail_set("paydirt_trail_archive", &e.id, Some(&e))
     }
+    fn pending_checkpoint(&mut self) -> Result<Option<(u64, String)>> {
+        Ok(self
+            .trail_docs::<(u64, String)>("paydirt_checkpoint_pending")?
+            .into_iter()
+            .next())
+    }
+    fn membership_hash(members: &BTreeSet<Blob>) -> Result<String> {
+        Ok(Archive::digest(&serde_json::to_vec(members).map_err(bad)?))
+    }
+    // Commit the intended set before publishing to a witness outside SQL.
+    fn prepare_checkpoint(&mut self, f: &Archive) -> Result<()> {
+        let (review, history, (current, _)) = self.compare_checkpoint(f, true)?;
+        if review.database_checkpoint != review.archive_checkpoint {
+            if self.pending_matches(&review, &history, &current)? {
+                return Ok(());
+            }
+            return Err(bad(format!(
+                "manifest counter is behind or ahead; review {}",
+                review.of
+            )));
+        }
+        if history.head.is_none() || history.latest != current {
+            let pending = (review.database_checkpoint, Self::membership_hash(&current)?);
+            self.trail_set("paydirt_checkpoint_pending", "deployment", Some(&pending))?;
+        }
+        Ok(())
+    }
+    fn pending_matches(
+        &mut self,
+        r: &Review,
+        history: &History,
+        current: &BTreeSet<Blob>,
+    ) -> Result<bool> {
+        Ok(
+            r.database_checkpoint.checked_add(1) == Some(r.archive_checkpoint)
+                && current == &history.latest
+                && self.pending_checkpoint()?
+                    == Some((r.database_checkpoint, Self::membership_hash(current)?)),
+        )
+    }
     fn checkpoint(
         &mut self,
         f: &Archive,
@@ -1189,7 +1237,9 @@ impl Transaction<'_> {
                 self.adopt_checkpoint_blob(f, blob)?;
                 current.insert(blob.clone());
             }
-        } else if review.database_checkpoint != review.archive_checkpoint {
+        } else if review.database_checkpoint != review.archive_checkpoint
+            && !(advance && self.pending_matches(&review, &history, &current)?)
+        {
             return Err(bad(format!(
                 "manifest counter {} differs from the archive at {}: review {}",
                 review.database_checkpoint, review.archive_checkpoint, review.of
@@ -1208,12 +1258,16 @@ impl Transaction<'_> {
         if advance && let Some(head) = &result {
             self.set_checkpoint_counter(head.k)?;
             self.trail_set("paydirt_trail_format", "typed", Some(&true))?;
+            self.trail_clear("paydirt_checkpoint_pending", "deployment")?;
         }
         Ok(result)
     }
 }
 impl Store {
     pub fn attest_trail(&mut self, f: &Archive, advance: bool) -> Result<Option<Head>> {
+        if advance {
+            self.transaction(&Scope::Internal, |tx| tx.prepare_checkpoint(f))?;
+        }
         self.transaction(&Scope::Internal, |tx| tx.checkpoint(f, advance, None))
     }
     pub fn review_trail(&mut self, f: &Archive) -> Result<Review> {
