@@ -14,7 +14,10 @@ impl AppDatabase {
         install::<sqlite_wasm_rs::WasmOsCallback>(&OpfsSAHPoolCfg::default(), true)
             .await
             .map_err(|e| JsError::new(&e.to_string()))?;
-        let mut db = Store::open("paydirt.sqlite3", MODEL, POLICIES)?;
+        let mut db = Store::open("paydirt.sqlite3", MODEL, POLICIES)?.with_resources(
+            serde_json::from_str(include_str!("../../../resources.json"))?,
+            include_bytes!("../../../generated/storage/descriptors.binpb"),
+            include_str!("../../../generated/storage/admission.json"))?;
         let policies: Policies = serde_json::from_str(POLICIES)?;
         let tenant = policies
             .iter()

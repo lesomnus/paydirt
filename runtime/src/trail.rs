@@ -32,6 +32,26 @@ impl Transaction<'_> {
             .get(&e.name)
             .map(|p| &p.entity)
             .unwrap_or(&Value::Null);
+        let by = format!("/{}Service/{method}", e.name);
+        let mut resource = String::new();
+        if let Some(recorder) = self.resources.filter(|r| r.selected(&e.name)) {
+            let outer = self.frame.map_or(by.as_str(), |f| &f.action);
+            let domain =
+                self.policies
+                    .values()
+                    .find(|p| p.entity["own"] == "OWN_OUTBOX")
+                    .and_then(|p| p.entity["domain"].as_u64())
+                    .ok_or_else(|| Fault::internal("missing outbox domain"))? as u8;
+            resource = recorder.record(
+                &e.name,
+                &by,
+                outer,
+                before,
+                after,
+                value::encoded(&(self.inputs.mint)(domain)),
+                self.inputs.stamp(),
+            )?;
+        }
         if !matches!(policy["own"].as_str(), Some("OWN_AUDIT" | "OWN_OUTBOX"))
             && let Ok(id) = value::bytes(&row[&e.key().map_err(Fault::internal)?.json])
             && let Some(key) = paydirt::format_id(&id)
@@ -39,6 +59,7 @@ impl Transaction<'_> {
             let by = format!("/{}Service/{method}", e.name);
             self.changes.push(paydirt::watch::Change {
                 method: self.frame.map_or_else(|| by.clone(), |f| f.action.clone()),
+                resource: resource.clone(),
                 by,
                 key,
                 routes: Some(Vec::new()),
@@ -72,13 +93,17 @@ impl Transaction<'_> {
         if let Some(id) = &frame.caller_tenant {
             audit["callerTenantId"] = value::encoded(id)
         }
-        let outbox = json!({"actorId":actor,"tenantId":tenant,"method":frame.action,"by":by,"objectId":object});
+        let mut outbox = json!({"actorId":actor,"tenantId":tenant,"method":frame.action,"by":by,"objectId":object});
+        if !resource.is_empty() {
+            outbox["event"] = json!(resource)
+        }
         let mut recorder = Transaction {
             admission: None,
             origin: None,
             seen: None,
             changes: self.changes,
             outbox: self.outbox,
+            resources: self.resources,
             topic_policy: self.topic_policy,
             inputs: self.inputs,
             namer: self.namer,

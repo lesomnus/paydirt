@@ -9,6 +9,7 @@ const root=join(process.env.CELL_PROJECT,"sandbox");
 await cp(resolve("upstream/internal/apptest/ts/gen"),join(root,"test-client"),{recursive:true});
 await cp(resolve("generated-notify.js"),join(root,"notify.js"));
 await cp(resolve("generated-past.js"),join(root,"past.js"));
+await cp(resolve("generated-resource.js"),join(root,"resource.js"));
 await cp(resolve("generated-account.js"),join(root,"account.js"));
 await cp(resolve("generated-readings.js"),join(root,"readings.js"));
 await cp(resolve("generated-request-streams.js"),join(root,"request-streams.js"));
@@ -27,7 +28,7 @@ export async function open(principals,withAccounts=false,restricted=false){
   const sandbox=await openSandbox(withAccounts?{...principals,...membership.principals}:principals,"paydirt",{allowGeneralWrites:true,seeds:withAccounts?[...membership.seeds,membership.grant]:[],policy:restricted?membership.policy:undefined});
   const bytes=new Uint8Array(await (await fetch("./pkg/descriptors.binpb")).arrayBuffer());
   const registry=createFileRegistry(fromBinary(FileDescriptorSetSchema,bytes));const robot=registry.getService("app.RobotService");const holder=registry.getService("app.HolderService");
-  const owned=name=>{const svc=registry.getService("app."+name+"Service");return svc && createClient(svc,sandbox.link.transport)};return {robotService:robot,readings:owned("ComputedReading"),notification:owned("Notification"),accountNotification:owned("NotificationAccount"),event:owned("Event"),fact:owned("Fact"),holder:holder && createClient(holder,sandbox.link.transport),typed:robot && createClient(robot,sandbox.link.transport),robots:createClient(RobotService,sandbox.link.transport),client:createClient(CellService,sandbox.link.transport),close:()=>sandbox.close()};
+  const owned=name=>{const svc=registry.getService("app."+name+"Service");return svc && createClient(svc,sandbox.link.transport)};return {registry,resources:createClient(registry.getService("payday.ResourceService"),sandbox.link.transport),robotService:robot,readings:owned("ComputedReading"),notification:owned("Notification"),accountNotification:owned("NotificationAccount"),event:owned("Event"),fact:owned("Fact"),holder:holder && createClient(holder,sandbox.link.transport),typed:robot && createClient(robot,sandbox.link.transport),robots:createClient(RobotService,sandbox.link.transport),client:createClient(CellService,sandbox.link.transport),close:()=>sandbox.close()};
 }
 `);
 const server=await createServer({root,optimizeDeps:{entries:["index.html","harness.js","request-streams.js"],exclude:["@lesomnus/grpc-dgram"]},server:{hmr:false,host:"127.0.0.1",port:0},logLevel:"error"});
@@ -75,6 +76,9 @@ try{
         const {requestStreams}=await import("/request-streams.js");await requestStreams(app.typed,app.robotService,opts(a),compareGo);
         const {runPair}=await import("/pair.js");
         await runPair(app.typed,opts(a),bytes);
+        const {resourceCases}=await import("/resource.js");
+        await resourceCases(app.registry,app.resources,app.cell,app.typed,opts(a),opts(b),bytes,Uint8Array.from(tenants[b].match(/../g),v=>parseInt(v,16)),false);
+
         if(!(await app.typed.allowance({key:"fleet.browser",lock:true},opts(a))).allowsTwo || (await app.typed.allowance({key:"fleet.browser",lock:true},opts(b))).enabled)throw Error("entitlement tenant or limit mismatch");
         const {exerciseMove}=await import("/moves.js");
         const {queryScenario}=await import("/query.js");

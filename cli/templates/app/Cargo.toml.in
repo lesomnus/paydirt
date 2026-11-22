@@ -9,6 +9,7 @@ crate-type = ["rlib", "cdylib"]
 
 [features]
 client = ["connectrpc/client"]
+resource-cel=["paydirt-store/resource-cel"]
 
 [dependencies]
 base64="0.22"

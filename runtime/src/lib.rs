@@ -18,6 +18,7 @@ pub mod notify;
 pub mod outbox;
 mod past;
 mod relations;
+pub mod resource;
 pub mod secrets;
 mod seen;
 mod session;
@@ -186,6 +187,7 @@ impl Default for Inputs {
     }
 }
 pub struct Store {
+    resources: Option<resource::Recorder>,
     topic_policy: Option<Box<dyn notify::Policy>>,
     inputs: Inputs,
     admission: Option<admission::Rules>,
@@ -211,6 +213,7 @@ impl Store {
             watch::install(tx)
         })?;
         Ok(Self {
+            resources: None,
             topic_policy: None,
             admission: None,
             inputs: Inputs::default(),
@@ -337,6 +340,7 @@ impl Store {
                 seen: Some(&mut seen),
                 changes: &mut changes,
                 outbox: self.outbox,
+                resources: self.resources.as_ref(),
                 topic_policy: self.topic_policy.as_deref(),
                 inputs: &self.inputs,
                 namer: &*self.namer,
@@ -363,6 +367,7 @@ impl Store {
     }
 }
 pub struct Transaction<'a> {
+    resources: Option<&'a resource::Recorder>,
     topic_policy: Option<&'a dyn notify::Policy>,
     admission: Option<&'a admission::Rules>,
     origin: Option<Call>,
@@ -416,3 +421,6 @@ impl Transaction<'_> {
 
 #[cfg(all(test, any(feature = "sqlite", feature = "postgres")))]
 mod session_test;
+
+#[cfg(all(feature = "resource-cel", not(target_arch = "wasm32")))]
+pub mod resource_filter;

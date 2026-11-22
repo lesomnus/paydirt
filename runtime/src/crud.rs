@@ -8,7 +8,7 @@ use serde_json::{Map, Value, json};
 type Object = Map<String, Value>;
 
 impl Transaction<'_> {
-    fn field_type<'a>(&'a self, f: &'a Field) -> Result<&'a Field> {
+    pub(crate) fn field_type<'a>(&'a self, f: &'a Field) -> Result<&'a Field> {
         if f.target.is_empty() {
             return Ok(f);
         }
@@ -510,6 +510,7 @@ impl Transaction<'_> {
                 (self.inputs.clock)(),
             )?)
             .map_err(|e| Fault::internal(e.to_string())),
+            "$resource_visible" => self.visible_resource(e, req),
             "$event" => self.say(e, req),
             "$state" => self.past_state(e, req),
             "Add" => self.insert(e, req),

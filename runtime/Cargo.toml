@@ -5,11 +5,15 @@ edition = "2024"
 license = "Apache-2.0"
 
 [features]
+resource-cel=["dep:cel"]
+
 workers = ["dep:tokio","dep:tempfile","paydirt/watch-postgres"]
 postgres = ["diesel/postgres"]
 sqlite = ["diesel/sqlite"]
 
 [dependencies]
+buffa-reflect={version="0.9.2",default-features=false,features=["serde"]}
+
 paydirt = { path = ".." }
 paydirt-model = { path = "../model" }
 diesel = { version = "=2.3.14", default-features = false }
@@ -24,6 +28,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+cel={version="0.16",optional=true,default-features=false}
 tokio = {version="1",features=["macros","time"],optional=true}
 tempfile = {version="3",optional=true}
 

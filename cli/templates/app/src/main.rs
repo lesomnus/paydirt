@@ -82,7 +82,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let config: Config = serde_json::from_slice(&fs::read("app.json")?)?;
         let broker = config.watch.connect(&url).await?;
         let mut store =
-            paydirt_store::Store::open(&url, MODEL, POLICIES)?.with_outbox(config.watch.outbox);
+            __APP_CRATE__::resource::record(paydirt_store::Store::open(&url, MODEL, POLICIES)?)?.with_outbox(config.watch.outbox);
         let call = paydirt_store::Call {
             entity: entity.clone(),
             method: method.clone(),
@@ -105,7 +105,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
     let principals = std::env::var("PAYDIRT_PRINCIPALS").unwrap_or_else(|_| "{}".into());
     let broker = config.watch.connect(&url).await?;
-    let store = paydirt_store::Store::open(&url, MODEL, POLICIES)?.with_outbox(config.watch.outbox);
+    let store = __APP_CRATE__::resource::record(paydirt_store::Store::open(&url, MODEL, POLICIES)?)?.with_outbox(config.watch.outbox);
     let mut db = Database::from_store(store, &principals)?
         .with_broker(broker.clone())
         .allow_general_writes(config.allow_general_writes);
