@@ -245,6 +245,18 @@ impl Transaction<'_> {
                 row.as_object_mut().unwrap().remove(&f.json);
                 continue;
             }
+            if !f.is_column() {
+                let image = self.edge_image(
+                    e,
+                    f,
+                    &row[&e.key().map_err(Fault::invalid)?.json],
+                    &select[&f.json],
+                )?;
+                if !image.is_null() {
+                    row[&f.json] = image;
+                }
+                continue;
+            }
             if !f.target.is_empty()
                 && select[&f.json].is_object()
                 && let Some(reference) = row.get(&f.json)
@@ -312,12 +324,13 @@ impl Transaction<'_> {
             params.join(",")
         );
         self.db.exec(q)?;
+        self.write_edges(e, &id, &req, true)?;
         // The postimage must belong to the caller as well. Failure rolls back the insert.
         let row = self.lookup(e, &json!({&key.json:id}), false)?;
         self.record(e, "Add", None, Some(&row))?;
         self.image(e, row, &Value::Null)
     }
-    fn patch(&mut self, e: &Entity, req: &Value) -> Result<Value> {
+    pub(crate) fn patch(&mut self, e: &Entity, req: &Value, method: &str) -> Result<Value> {
         let row = self.lookup(e, &req["ref"], true)?;
         let mut q = Query::new("");
         let mut sets = Vec::new();
@@ -382,8 +395,11 @@ impl Transaction<'_> {
                 return Err(Fault::missing());
             }
         }
+        let edges_changed = self.write_edges(e, &row[&key.json], req, false)?;
         let updated = self.lookup(e, &reference, false)?;
-        self.record(e, "Patch", Some(&row), Some(&updated))?;
+        if !sets.is_empty() || edges_changed {
+            self.record(e, method, Some(&row), Some(&updated))?;
+        }
         self.image(e, updated, &Value::Null)
     }
     fn erase(&mut self, e: &Entity, reference: &Value) -> Result<Value> {
@@ -401,6 +417,9 @@ impl Transaction<'_> {
             q.param(value::bind(key, &row[&key.json])?, self.db.dialect())
         ));
         let table = quote(&e.table());
+        if e.erased().is_none() {
+            self.detach_links(e, &row[&key.json])?;
+        }
         q.sql = if let Some(stamp) = e.erased() {
             format!(
                 "UPDATE {table} AS r SET {}={} WHERE {}",
@@ -457,7 +476,8 @@ impl Transaction<'_> {
                 let row = self.lookup(e, &req["ref"], false)?;
                 self.image(e, row, &req["select"])
             }
-            "Patch" => self.patch(e, req),
+            "Patch" => self.patch(e, req, "Patch"),
+            "Apply" => self.apply(e, req),
             "Erase" => self.erase(e, req),
             _ => Err(Fault::unsupported(format!("{}.{}", e.name, method))),
         }
