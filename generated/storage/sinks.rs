@@ -1,5 +1,765 @@
+#[path = "intercept.rs"]
+pub mod intercept;
 use crate::transport::Database;
 use ::connectrpc::{RequestContext, Response, Router, ServiceRequest, ServiceResult};
+impl<
+    N: crate::services::r#app::AccessService,
+> crate::services::r#app::AccessServiceLayer<N> for crate::storage::intercept::Layer {
+    fn get<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::AccessGetRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<crate::proto::app::Access> + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.AccessService/Get", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.get(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#Access, _>(reply)
+        }
+    }
+    fn list<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::AccessListRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
+                crate::proto::app::AccessListResponse,
+            > + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.AccessService/List", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.list(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#AccessListResponse, _>(reply)
+        }
+    }
+}
+impl<
+    N: crate::services::r#app::ArchivedService,
+> crate::services::r#app::ArchivedServiceLayer<N> for crate::storage::intercept::Layer {}
+impl<
+    N: crate::services::r#app::AuditService,
+> crate::services::r#app::AuditServiceLayer<N> for crate::storage::intercept::Layer {
+    fn add<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::AuditAddRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<crate::proto::app::Audit> + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.AuditService/Add", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.add(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#Audit, _>(reply)
+        }
+    }
+    fn get<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::AuditGetRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<crate::proto::app::Audit> + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.AuditService/Get", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.get(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#Audit, _>(reply)
+        }
+    }
+    fn patch<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::AuditPatchRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<crate::proto::app::Audit> + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.AuditService/Patch", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.patch(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#Audit, _>(reply)
+        }
+    }
+    fn apply<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::AuditApplyRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<crate::proto::app::Audit> + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.AuditService/Apply", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.apply(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#Audit, _>(reply)
+        }
+    }
+    fn erase<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::AuditRef>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
+                crate::proto::app::AuditEraseResponse,
+            > + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.AuditService/Erase", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.erase(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#AuditEraseResponse, _>(reply)
+        }
+    }
+    fn list<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::AuditListRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
+                crate::proto::app::AuditListResponse,
+            > + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.AuditService/List", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.list(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#AuditListResponse, _>(reply)
+        }
+    }
+}
+impl<
+    N: crate::services::r#app::TenantService,
+> crate::services::r#app::TenantServiceLayer<N> for crate::storage::intercept::Layer {
+    fn add<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::TenantAddRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<crate::proto::app::Tenant> + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.TenantService/Add", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.add(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#Tenant, _>(reply)
+        }
+    }
+    fn get<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::TenantGetRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<crate::proto::app::Tenant> + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.TenantService/Get", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.get(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#Tenant, _>(reply)
+        }
+    }
+    fn patch<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::TenantPatchRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<crate::proto::app::Tenant> + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.TenantService/Patch", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.patch(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#Tenant, _>(reply)
+        }
+    }
+    fn apply<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::TenantApplyRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<crate::proto::app::Tenant> + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.TenantService/Apply", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.apply(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#Tenant, _>(reply)
+        }
+    }
+    fn erase<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::TenantRef>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
+                crate::proto::app::TenantEraseResponse,
+            > + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.TenantService/Erase", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.erase(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#TenantEraseResponse, _>(reply)
+        }
+    }
+    fn list<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::TenantListRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
+                crate::proto::app::TenantListResponse,
+            > + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.TenantService/List", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.list(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#TenantListResponse, _>(reply)
+        }
+    }
+}
+impl<
+    N: crate::services::r#app::HolderService,
+> crate::services::r#app::HolderServiceLayer<N> for crate::storage::intercept::Layer {
+    fn add<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::HolderAddRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<crate::proto::app::Holder> + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.HolderService/Add", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.add(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#Holder, _>(reply)
+        }
+    }
+    fn get<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::HolderGetRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<crate::proto::app::Holder> + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.HolderService/Get", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.get(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#Holder, _>(reply)
+        }
+    }
+    fn patch<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::HolderPatchRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<crate::proto::app::Holder> + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.HolderService/Patch", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.patch(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#Holder, _>(reply)
+        }
+    }
+    fn apply<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::HolderApplyRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<crate::proto::app::Holder> + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.HolderService/Apply", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.apply(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#Holder, _>(reply)
+        }
+    }
+    fn erase<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::HolderRef>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
+                crate::proto::app::HolderEraseResponse,
+            > + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.HolderService/Erase", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.erase(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#HolderEraseResponse, _>(reply)
+        }
+    }
+    fn list<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::HolderListRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
+                crate::proto::app::HolderListResponse,
+            > + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.HolderService/List", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.list(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#HolderListResponse, _>(reply)
+        }
+    }
+    fn watch(
+        &self,
+        next: &N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::HolderWatchRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            ::connectrpc::ServiceStream<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::HolderWatchResponse,
+                > + Send + use<N>,
+            >,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.HolderService/Watch", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.watch(call.ctx.clone(), request).await;
+            call.stream::<crate::proto::r#app::r#HolderWatchResponse, _>(reply)
+        }
+    }
+}
+impl<
+    N: crate::services::r#app::OutboxService,
+> crate::services::r#app::OutboxServiceLayer<N> for crate::storage::intercept::Layer {}
+impl<N: crate::services::r#app::OwedService> crate::services::r#app::OwedServiceLayer<N>
+for crate::storage::intercept::Layer {}
+impl<
+    N: crate::services::r#app::RowSealService,
+> crate::services::r#app::RowSealServiceLayer<N> for crate::storage::intercept::Layer {}
+impl<N: crate::services::r#app::CellService> crate::services::r#app::CellServiceLayer<N>
+for crate::storage::intercept::Layer {
+    fn add<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::CellAddRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<crate::proto::app::Cell> + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.CellService/Add", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.add(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#Cell, _>(reply)
+        }
+    }
+    fn get<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::CellGetRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<crate::proto::app::Cell> + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.CellService/Get", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.get(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#Cell, _>(reply)
+        }
+    }
+    fn patch<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::CellPatchRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<crate::proto::app::Cell> + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.CellService/Patch", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.patch(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#Cell, _>(reply)
+        }
+    }
+    fn apply<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::CellApplyRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<crate::proto::app::Cell> + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.CellService/Apply", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.apply(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#Cell, _>(reply)
+        }
+    }
+    fn erase<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::CellRef>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
+                crate::proto::app::CellEraseResponse,
+            > + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.CellService/Erase", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.erase(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#CellEraseResponse, _>(reply)
+        }
+    }
+}
+impl<
+    N: crate::services::r#app::RobotService,
+> crate::services::r#app::RobotServiceLayer<N> for crate::storage::intercept::Layer {
+    fn add<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::RobotAddRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<crate::proto::app::Robot> + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.RobotService/Add", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.add(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#Robot, _>(reply)
+        }
+    }
+    fn add_many<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::RobotAddManyRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
+                crate::proto::app::RobotAddManyResponse,
+            > + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.RobotService/AddMany", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.add_many(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#RobotAddManyResponse, _>(reply)
+        }
+    }
+    fn get<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::RobotGetRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<crate::proto::app::Robot> + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.RobotService/Get", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.get(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#Robot, _>(reply)
+        }
+    }
+    fn patch<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::RobotPatchRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<crate::proto::app::Robot> + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.RobotService/Patch", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.patch(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#Robot, _>(reply)
+        }
+    }
+    fn apply<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::RobotApplyRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<crate::proto::app::Robot> + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.RobotService/Apply", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.apply(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#Robot, _>(reply)
+        }
+    }
+    fn erase<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::RobotRef>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
+                crate::proto::app::RobotEraseResponse,
+            > + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.RobotService/Erase", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.erase(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#RobotEraseResponse, _>(reply)
+        }
+    }
+    fn list<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::RobotListRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
+                crate::proto::app::RobotListResponse,
+            > + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.RobotService/List", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.list(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#RobotListResponse, _>(reply)
+        }
+    }
+    fn watch(
+        &self,
+        next: &N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::RobotWatchRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            ::connectrpc::ServiceStream<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::RobotWatchResponse,
+                > + Send + use<N>,
+            >,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.RobotService/Watch", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.watch(call.ctx.clone(), request).await;
+            call.stream::<crate::proto::r#app::r#RobotWatchResponse, _>(reply)
+        }
+    }
+    fn r#move<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::app::RobotMoveRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<crate::proto::app::Robot> + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/app.RobotService/Move", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.r#move(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#app::r#Robot, _>(reply)
+        }
+    }
+}
+impl<
+    N: crate::services::r#payday::GrantService,
+> crate::services::r#payday::GrantServiceLayer<N> for crate::storage::intercept::Layer {
+    fn watch(
+        &self,
+        next: &N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<
+            '_,
+            crate::proto::payday::GrantWatchRequest,
+        >,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            ::connectrpc::ServiceStream<
+                impl ::connectrpc::Encodable<
+                    crate::proto::payday::GrantWatchResponse,
+                > + Send + use<N>,
+            >,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/payday.GrantService/Watch", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.watch(call.ctx.clone(), request).await;
+            call.stream::<crate::proto::r#payday::r#GrantWatchResponse, _>(reply)
+        }
+    }
+    fn list<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::payday::GrantListRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
+                crate::proto::payday::GrantListResponse,
+            > + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/payday.GrantService/List", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.list(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#payday::r#GrantListResponse, _>(reply)
+        }
+    }
+}
+impl<
+    N: crate::services::r#payday::ResourceService,
+> crate::services::r#payday::ResourceServiceLayer<N>
+for crate::storage::intercept::Layer {
+    fn watch(
+        &self,
+        next: &N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<'_, crate::proto::payday::WatchRequest>,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            ::connectrpc::ServiceStream<
+                impl ::connectrpc::Encodable<
+                    crate::proto::payday::WatchEvent,
+                > + Send + use<N>,
+            >,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/payday.ResourceService/Watch", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.watch(call.ctx.clone(), request).await;
+            call.stream::<crate::proto::r#payday::r#WatchEvent, _>(reply)
+        }
+    }
+}
+impl<
+    N: crate::services::r#payday::TokenService,
+> crate::services::r#payday::TokenServiceLayer<N> for crate::storage::intercept::Layer {
+    fn introspect<'a>(
+        &'a self,
+        next: &'a N,
+        ctx: ::connectrpc::RequestContext,
+        request: ::connectrpc::ServiceRequest<
+            '_,
+            crate::proto::payday::TokenIntrospectRequest,
+        >,
+    ) -> impl ::std::future::Future<
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
+                crate::proto::payday::TokenIntrospectResponse,
+            > + Send + use<'a, N>,
+        >,
+    > + Send {
+        async move {
+            let mut call = self.enter("/payday.TokenService/Introspect", ctx)?;
+            call.receive(request.bytes())?;
+            let reply = next.introspect(call.ctx.clone(), request).await;
+            call.unary::<crate::proto::r#payday::r#TokenIntrospectResponse, _>(reply)
+        }
+    }
+}
 mod sink_app_cell {
     use super::*;
     pub struct Sink(pub Database);
@@ -1963,6 +2723,9 @@ pub trait TenantCalls: crate::services::r#app::TenantService {
 }
 impl<N: crate::services::r#app::TenantService> TenantCalls for N {}
 pub trait Layers {
+    fn interceptors(&self) -> crate::storage::intercept::Layer {
+        Default::default()
+    }
     fn public_methods(&self) -> &'static [&'static str] {
         &[]
     }
@@ -1993,7 +2756,12 @@ pub trait Layers {
 }
 pub fn mount(router: Router, db: Database, layers: &impl Layers) -> Router {
     let next = Next(db.clone());
+    let interceptors = layers.interceptors().public();
     let core = layers.app_cell(next.app_cell());
+    let core = crate::services::r#app::CellServiceOverlay {
+        next: core,
+        layer: interceptors.clone(),
+    };
     let audit = crate::services::r#app::CellServiceOverlay {
         next: core,
         layer: Audit(db.clone()),
@@ -2010,6 +2778,10 @@ pub fn mount(router: Router, db: Database, layers: &impl Layers) -> Router {
         router,
     );
     let core = layers.app_holder(next.app_holder());
+    let core = crate::services::r#app::HolderServiceOverlay {
+        next: core,
+        layer: interceptors.clone(),
+    };
     let audit = crate::services::r#app::HolderServiceOverlay {
         next: core,
         layer: Audit(db.clone()),
@@ -2026,6 +2798,10 @@ pub fn mount(router: Router, db: Database, layers: &impl Layers) -> Router {
         router,
     );
     let core = layers.app_robot(next.app_robot());
+    let core = crate::services::r#app::RobotServiceOverlay {
+        next: core,
+        layer: interceptors.clone(),
+    };
     let audit = crate::services::r#app::RobotServiceOverlay {
         next: core,
         layer: Audit(db.clone()),
@@ -2042,6 +2818,10 @@ pub fn mount(router: Router, db: Database, layers: &impl Layers) -> Router {
         router,
     );
     let core = layers.app_tenant(next.app_tenant());
+    let core = crate::services::r#app::TenantServiceOverlay {
+        next: core,
+        layer: interceptors.clone(),
+    };
     let audit = crate::services::r#app::TenantServiceOverlay {
         next: core,
         layer: Audit(db.clone()),

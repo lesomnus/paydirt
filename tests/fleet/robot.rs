@@ -9,6 +9,25 @@ pub struct Fleet(pub Next);
 
 #[allow(refining_impl_trait)]
 impl<N: RobotService> RobotServiceLayer<N> for Fleet {
+    async fn reveal(
+        &self,
+        _: &N,
+        _: RequestContext,
+        _: ServiceRequest<'_, StreamNumber>,
+    ) -> ServiceResult<Robot> {
+        Response::ok(crate::interceptors::row())
+    }
+    async fn reveal_stream(
+        &self,
+        _: &N,
+        _: RequestContext,
+        _: ServiceRequest<'_, StreamNumber>,
+    ) -> ServiceResult<connectrpc::ServiceStream<Robot>> {
+        Response::ok(Box::pin(futures_util::stream::iter([
+            Ok(crate::interceptors::row()),
+            Ok(crate::interceptors::row()),
+        ])))
+    }
     async fn r#move(
         &self,
         next: &N,
