@@ -83,6 +83,30 @@ pub fn generate(work: &Path) -> Result<()> {
     let mut commands = String::new();
     let mut layers = String::new();
     let mut mount = String::new();
+    // Read resources have service contracts but no ORM entity or SQL sink. Their
+    // provider owns filtering, pagination and authorization of each snapshot.
+    let descriptor: Value = serde_json::from_slice(&fs::read(work.join("resolved.json"))?)?;
+    for file in descriptor["file"].as_array().ok_or("missing files")? {
+        let package = file["package"].as_str().unwrap_or_default();
+        for message in file["messageType"].as_array().into_iter().flatten() {
+            if message["options"].get("[payday.resource]").is_none() {
+                continue;
+            }
+            let short = message["name"]
+                .as_str()
+                .ok_or("missing read resource name")?;
+            let svc = format!("crate::services::{}::{short}Service", module(package));
+            let provider = format!("{}_{}", package.replace('.', "__"), short).to_snake_case();
+            writeln!(
+                layers,
+                "fn {provider}(&self) -> impl {svc} {{ {svc}Unimplemented }}"
+            )?;
+            writeln!(
+                mount,
+                "let router={svc}Ext::register(::std::sync::Arc::new(layers.{provider}()),router);"
+            )?;
+        }
+    }
     for (name, policy) in policies {
         let methods = policy["methods"].as_object().ok_or("missing methods")?;
         if methods.is_empty() {
