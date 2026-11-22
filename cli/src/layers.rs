@@ -13,7 +13,7 @@ use syn::{
 struct Captures<'a>(&'a [CapturedParam]);
 
 impl VisitMut for Captures<'_> {
-    fn visit_precise_capture_mut(&mut self, capture: &mut PreciseCapture) {
+    fn visit_precise_capture_mut(&mut self, capture: &mut syn::PreciseCapture) {
         let mut args = Punctuated::new();
         for param in &capture.params {
             if matches!(param, CapturedParam::Ident(name) if name == "Self") {
