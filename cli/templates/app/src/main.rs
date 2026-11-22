@@ -1,3 +1,4 @@
+mod operator;
 use __APP_CRATE__::{
     router,
     transport::{Database, MODEL, POLICIES},
@@ -19,6 +20,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "paydirt.sqlite3".into());
     let args: Vec<_> = std::env::args().skip(1).collect();
     if !args.is_empty() {
+        // Preserve the host-only provisioning command. Ordinary lowercase verbs use the deployed API.
+        if !matches!(args.as_slice(),[entity,method,_] if entity.contains('.') && method.as_bytes().first().is_some_and(u8::is_ascii_uppercase))
+        {
+            return operator::run(&args).await;
+        }
         let [entity, method, argument] = args.as_slice() else {
             return Err("usage: APP ENTITY METHOD JSON".into());
         };

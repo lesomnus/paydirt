@@ -40,10 +40,39 @@ pub fn generate(work: &Path) -> Result<()> {
     }
     let mut next_methods = String::new();
     let mut adapters = String::new();
+    let mut commands = String::new();
     let mut layers = String::new();
     let mut mount = String::new();
     for (name, policy) in policies {
         let methods = policy["methods"].as_object().ok_or("missing methods")?;
+        for (rpc, meta) in methods {
+            if !matches!(
+                rpc.as_str(),
+                "Get" | "List" | "Add" | "Patch" | "Watch" | "Erase"
+            ) {
+                continue;
+            }
+            let message = |n: &str| module(meta[n].as_str().unwrap().trim_start_matches('.'));
+            let input = message("input");
+            let output = message("output");
+            let types = format!(
+                "_,proto::{input},<proto::{output} as buffa::HasMessageView>::View<'static>"
+            );
+            let service = format!("{name}Service");
+            let args = format!(
+                "client,config,{service:?},{rpc:?},serde_json::from_value(request)?,Default::default()"
+            );
+            let action = if rpc == "Watch" {
+                format!(
+                    "let mut stream=call_server_stream::<{types}>({args}).await?;while let Some(msg)=stream.message::<proto::{output}>().await?{{emit(serde_json::to_value(msg.to_owned_message())?)?;}}"
+                )
+            } else {
+                format!(
+                    "let res=call_unary::<{types}>({args}).await?;emit(serde_json::to_value(res.into_owned())?)?;"
+                )
+            };
+            writeln!(commands, "({name:?},{rpc:?})=>{{{action}}},")?;
+        }
         // Framework-owned services need the account and administrative policies
         // specific to those services before exposing them on a public router.
         if policy["entity"].get("own").is_some() || methods.is_empty() {
@@ -167,6 +196,13 @@ pub fn generate(work: &Path) -> Result<()> {
     writeln!(
         out,
         "struct Gate {{db:Database,public:&'static [&'static str]}} struct Audit(Database); #[derive(Clone)] pub struct Next(pub Database); impl Next {{ {next_methods} }} {adapters} pub trait Layers {{fn public_methods(&self)->&'static [&'static str] {{&[]}} {layers}}} pub fn mount(router: Router, db: Database, layers: &impl Layers) -> Router {{let next=Next(db.clone()); {mount}router}}"
+    )?;
+    let command_file = format!(
+        "async fn dispatch(client:&HttpClient,config:&ClientConfig,entity:&str,rpc:&str,request:Value,mut emit:impl FnMut(Value)->Result<()>)->Result<()>{{use connectrpc::client::{{call_unary,call_server_stream}};match (entity,rpc) {{{commands} _=>return Err(\"unsupported command\".into())}}Ok(())}}"
+    );
+    fs::write(
+        root.join("commands.rs"),
+        prettyplease::unparse(&syn::parse_file(&command_file)?),
     )?;
     let syntax = syn::parse_file(&out)?;
     fs::write(root.join("sinks.rs"), prettyplease::unparse(&syntax))?;

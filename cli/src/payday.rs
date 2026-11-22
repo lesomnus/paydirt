@@ -14,8 +14,8 @@ use std::{
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Schema {
-    package: String,
-    go_package: String,
+    pub(crate) package: String,
+    pub(crate) go_package: String,
 }
 
 const OWN: &[(&str, &str)] = &[

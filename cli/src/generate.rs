@@ -49,7 +49,7 @@ fn buf(work: &Path, template: &str) -> Result<()> {
     Ok(())
 }
 
-fn build(root: &Path, work: &Path) -> Result<()> {
+pub(crate) fn build(root: &Path, work: &Path) -> Result<()> {
     for name in ["buf.yaml", "buf.lock"] {
         let src = root.join(name);
         if name == "buf.yaml" || src.exists() {
