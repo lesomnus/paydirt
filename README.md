@@ -1,0 +1,47 @@
+# Paydirt
+
+Paydirt is an early Rust port of [Payday](https://github.com/lesomnus/payday). The first application implements a subset of Payday's `app.RobotService`. The same Rust handlers serve native Connect RPC with PostgreSQL and browser dRPC with SQLite. Diesel implements the queries on both backends.
+
+## Implemented
+
+- `Add` mints a domain-7 Payday UUIDv8 or validates a supplied ID. `AddMany` writes the entire batch and its change records in one transaction.
+- `Get` accepts an ID or a tenant-qualified alias. `List` supports tenant and robot filters and forward keyset pagination by creation time and ID. Page tokens belong to Paydirt.
+- `Patch` changes an alias. `Erase` soft-deletes a row, releases its alias and reports whether that call erased it.
+- `Watch` resolves up to 32 robot references under one database snapshot, then follows their IDs from the same tenant revision. It sends the initial state unless skipped, committed postimages on changes, and an ID with no value when a previously delivered row is erased. The example polls its transactional change table every 100 ms while idle.
+- A host-provisioned bearer token identifies the caller's tenant. SQL queries scope reads and mutations to that tenant.
+
+The root crate contains the reusable ID and tenant-token primitives. The robot application uses checked-in Buffa, Connect and [protoc-gen-orm-rust](https://github.com/protobuf-orm/protoc-gen-orm-rust) output. The storage implementation and RPC handlers are handwritten for this slice. Further work includes generating the entity write path and migrations, porting Payday's gate, audit and outbox layers, and supporting additional fields, orders, and methods such as `Apply` and `Move`.
+
+## Browser sandbox
+
+The page creates two dedicated Workers and transfers the ends of a private `MessageChannel` to them.
+
+```text
+Payday TypeScript RobotService client
+  → SandboxLink → createDrpcTransport → MessagePort
+  → Rust RobotService Worker (drpc-rs + Connect)
+  → MessagePort → Rust storage Worker (Diesel + SQLite) → OPFS
+```
+
+The database Worker owns the SQLite connection and transaction boundaries. It uses OPFS sync access handles in a secure browser context with one active database Worker per origin for this fixture. The browser interop test imports Payday's upstream generated TypeScript service and `SandboxLink` at commit `53acc135` and the published `@lesomnus/grpc-dgram@0.1.0`. The Rust Worker uses its own startup code and `dialWorker`. Both test clients send binary protobuf.
+
+## Run the interoperability test
+
+Install Rust with `wasm32-unknown-unknown`, Clang and LLVM's archiver, the PostgreSQL client development library, Node 24+, and `wasm-bindgen-cli` 0.2.130. Set `DATABASE_URL` to a disposable PostgreSQL database. The test creates its tables and uses fresh tenant identities on each run.
+
+```sh
+rustup target add wasm32-unknown-unknown
+cargo install --locked wasm-bindgen-cli --version 0.2.130
+cargo test --workspace --locked
+cargo build --locked -p paydirt-robot --features native-server --bin robot-server
+scripts/wasm.sh
+scripts/upstream.sh
+cd web
+npm ci
+npx playwright install chromium
+npm test
+```
+
+The test runs the same suite against native HTTP and the browser MessagePort. It covers cross-tenant access, duplicate-key rollback, a subscription that follows a renamed robot through erasure, cancellation, and cursor pagination. For SQLite it also reloads the page, recreates both Workers, and reads the same row by ID. The native executable accepts `PAYDIRT_LISTEN`, `DATABASE_URL` and `PAYDIRT_PRINCIPALS` (a JSON map of bearer tokens to hex tenant IDs).
+
+To regenerate Rust bindings, run `buf generate` with `protoc-gen-buffa`, `protoc-gen-buffa-packaging`, `protoc-gen-connect-rust` and `protoc-gen-orm-rust` on the path. The upstream TypeScript fixture can also be extracted from a local Payday checkout with `PAYDAY_CHECKOUT=/path/to/payday scripts/upstream.sh`.

@@ -1,0 +1,50 @@
+// Wire-compatible subset of Payday's internal/apptest at 53acc135.
+edition = "2023";
+package app;
+import "orm.proto";
+import "google/protobuf/timestamp.proto";
+
+message Tenant { bytes id = 1 [features.field_presence = IMPLICIT]; }
+message TenantRef { oneof key { bytes id = 1; string alias = 4; } }
+message Robot {
+  option (orm.message) = {rpc: {crud: true} indexes: [
+    {name: "slug", unique: true, refs: [{name: "alias", number: 4}, {name: "tenant", number: 2}]}
+  ]};
+  bytes id = 1 [(orm.field) = {type: TYPE_UUID, key: true}, features.field_presence = IMPLICIT];
+  Tenant tenant = 2 [(orm.edge) = {immutable: true}];
+  string alias = 4 [features.field_presence = IMPLICIT];
+  google.protobuf.Timestamp date_updated = 13;
+  google.protobuf.Timestamp date_created = 15;
+}
+message RobotRef { oneof key { bytes id = 1; RobotRefBySlug slug = 4; } }
+message RobotRefBySlug { string alias = 4; TenantRef tenant = 2; }
+message RobotAddRequest { bytes id = 1; TenantRef tenant = 2; string alias = 4 [features.field_presence = IMPLICIT]; }
+message RobotAddManyRequest { repeated RobotAddRequest items = 1; }
+message RobotAddManyResponse { repeated Robot items = 1; }
+message RobotPatchRequest { RobotRef ref = 1; string alias = 8; }
+message RobotEraseResponse { bool erased = 1; }
+message RobotGetRequest { RobotRef ref = 1; RobotSelect select = 2; }
+message RobotSelect { bool alias = 4; }
+message RobotFilter { RobotRef ref = 1; TenantRef tenant = 2; }
+enum RobotListOrder { ROBOT_LIST_ORDER_UNSPECIFIED = 0; ROBOT_LIST_ORDER_ALIAS = 1; ROBOT_LIST_ORDER_ALIAS_DESC = 2; }
+message RobotListRequest {
+  repeated RobotFilter filters = 1;
+  int32 size = 2 [features.field_presence = IMPLICIT];
+  string after = 3 [features.field_presence = IMPLICIT];
+  bool reverse = 4 [features.field_presence = IMPLICIT];
+  RobotListOrder order = 5 [features.field_presence = IMPLICIT];
+}
+message RobotListResponse { repeated Robot items = 1; string next = 2 [features.field_presence = IMPLICIT]; }
+message RobotWatchRequest { repeated RobotFilter filters = 1; bool skip_snapshot = 2 [features.field_presence = IMPLICIT]; }
+message RobotWatchItem { bytes id = 1; Robot value = 2; string action = 3 [features.field_presence = IMPLICIT]; }
+message RobotWatchResponse { repeated RobotWatchItem items = 1; }
+
+service RobotService {
+  rpc Add(RobotAddRequest) returns (Robot);
+  rpc AddMany(RobotAddManyRequest) returns (RobotAddManyResponse);
+  rpc Patch(RobotPatchRequest) returns (Robot);
+  rpc Erase(RobotRef) returns (RobotEraseResponse);
+  rpc Get(RobotGetRequest) returns (Robot);
+  rpc List(RobotListRequest) returns (RobotListResponse);
+  rpc Watch(RobotWatchRequest) returns (stream RobotWatchResponse);
+}

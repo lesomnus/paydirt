@@ -1,0 +1,43 @@
+name: check
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  robot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: paydirt
+          POSTGRES_DB: paydirt
+        ports:
+          - 5432:5432
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:paydirt@127.0.0.1:5432/paydirt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: rustup target add wasm32-unknown-unknown
+      - run: cargo fmt --all --check && cargo test --locked --workspace
+      - run: cargo build --locked -p paydirt-robot --features native-server --bin robot-server
+      - name: Build service and storage workers
+        run: |
+          archive=wasm-bindgen-0.2.130-x86_64-unknown-linux-musl
+          curl -fsSLo "$RUNNER_TEMP/$archive.tgz" "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.130/$archive.tar.gz"
+          echo "9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f  $RUNNER_TEMP/$archive.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$archive.tgz" -C "$RUNNER_TEMP"
+          PATH="$RUNNER_TEMP/$archive:$PATH" scripts/wasm.sh
+      - run: scripts/upstream.sh
+      - name: Exercise both backends from Chromium
+        working-directory: web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npm test

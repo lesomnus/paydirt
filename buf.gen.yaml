@@ -1,0 +1,17 @@
+version: v2
+plugins:
+  - local: protoc-gen-buffa
+    out: robot/src/generated/messages
+    opt: [json=true, views=true]
+  - local: protoc-gen-buffa-packaging
+    out: robot/src/generated/messages
+    strategy: all
+  - local: protoc-gen-connect-rust
+    out: robot/src/generated/services
+    opt: [buffa_module=crate::proto,gate_client_feature]
+  - local: protoc-gen-buffa-packaging
+    out: robot/src/generated/services
+    strategy: all
+    opt: [filter=services]
+  - local: protoc-gen-orm-rust
+    out: robot/src/generated/orm

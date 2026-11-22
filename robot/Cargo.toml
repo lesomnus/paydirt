@@ -1,0 +1,43 @@
+[package]
+name = "paydirt-robot"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[[bin]]
+name = "robot-server"
+path = "src/bin/server.rs"
+required-features = ["native-server"]
+
+[dependencies]
+paydirt-robot-protocol = { path = "protocol" }
+paydirt = { path = ".." }
+buffa = { version = "=0.8.1", features = ["json"] }
+buffa-types = { version = "=0.8.1", features = ["json"] }
+connectrpc = { version = "=0.8.2", default-features = false, features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hex = "0.4"
+async-stream = "0.3"
+futures-timer = { version = "3", features = ["wasm-bindgen"] }
+web-time = "1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+paydirt-storage = { path = "../storage" }
+connectrpc = { version = "=0.8.2", default-features = false, features = ["server"] }
+tokio = { version = "1", features = ["macros","rt-multi-thread"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+drpc-rs = { git = "https://github.com/lesomnus/drpc-rs", rev = "2e9d63e2c21a908b88c3569c9c8d785b3b33893c" }
+wasm-bindgen = "=0.2.130"
+web-sys = { version = "0.3", features = ["MessagePort"] }
+js-sys = "0.3"
+wasm-bindgen-futures = "0.4"
+send_wrapper = { version = "0.6", features = ["futures"] }
+
+[features]
+native-server = []
+client = ["connectrpc/client"]

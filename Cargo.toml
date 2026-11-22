@@ -1,0 +1,20 @@
+[workspace]
+members = ["robot", "robot/protocol", "storage"]
+resolver = "3"
+
+[package]
+name = "paydirt"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Rust runtime for Payday applications"
+repository = "https://github.com/lesomnus/paydirt"
+
+[dependencies]
+uuid = { version = "1", features = ["v7", "js"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = "debuginfo"
