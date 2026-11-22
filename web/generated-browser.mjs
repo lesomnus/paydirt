@@ -9,6 +9,7 @@ const root=join(process.env.CELL_PROJECT,"sandbox");
 await cp(resolve("upstream/internal/apptest/ts/gen"),join(root,"test-client"),{recursive:true});
 await cp(resolve("generated-notify.js"),join(root,"notify.js"));
 await cp(resolve("generated-past.js"),join(root,"past.js"));
+await cp(resolve("generated-past-ops.js"),join(root,"past-ops.js"));
 await cp(resolve("generated-resource.js"),join(root,"resource.js"));
 await cp(resolve("generated-account.js"),join(root,"account.js"));
 await cp(resolve("generated-readings.js"),join(root,"readings.js"));
@@ -76,6 +77,7 @@ try{
         const {requestStreams}=await import("/request-streams.js");await requestStreams(app.typed,app.robotService,opts(a),compareGo);
         const {runPair}=await import("/pair.js");
         await runPair(app.typed,opts(a),bytes);
+        const {operationCases}=await import("/past-ops.js");await operationCases(app.typed,app.event,opts(a),opts(b),bytes);
         const {resourceCases}=await import("/resource.js");
         await resourceCases(app.registry,app.resources,app.client,app.typed,opts(a),opts(b),bytes,Uint8Array.from(other.match(/../g),v=>parseInt(v,16)),false,app.resourceHeaders);
 

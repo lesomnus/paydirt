@@ -9,3 +9,5 @@ message RobotRenamePairRequest {
 message RobotAllowanceRequest { string key=1; bool lock=2; }
 message RobotAllowanceResponse { bool enabled=1; bool allows_two=2; }
 message InvitationCount { int32 mine = 1; int32 selected = 2; }
+message RobotJournalRequest { bytes id=1 [features.field_presence = IMPLICIT]; bytes subject=2 [features.field_presence = IMPLICIT]; bool fail=3 [features.field_presence = IMPLICIT]; bool redact=4 [features.field_presence = IMPLICIT]; }
+message RobotJournalReply { bool done=1 [features.field_presence = IMPLICIT]; bytes root=2 [features.field_presence = IMPLICIT]; bytes child=3 [features.field_presence = IMPLICIT]; bytes detached=4 [features.field_presence = IMPLICIT]; string sentence=5 [features.field_presence = IMPLICIT]; }

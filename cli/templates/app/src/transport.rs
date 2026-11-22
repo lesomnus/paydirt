@@ -1,3 +1,5 @@
+#[path = "past.rs"]
+pub mod past;
 #[path = "access.rs"]
 pub mod access;
 #[path = "presence.rs"]
@@ -755,7 +757,7 @@ impl Database {
             ctx,
             entity,
             "$event",
-            &serde_json::json!({"kind":kind,"value":value,"before":before,"after":after}),
+            &serde_json::json!({"kind":kind,"value":value,"cause":past::cause(ctx),"before":before,"after":after}),
         )
         .await
     }

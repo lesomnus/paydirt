@@ -17,6 +17,166 @@ impl Drop for Active {
 
 #[allow(refining_impl_trait)]
 impl<N: RobotService> RobotServiceLayer<N> for Pair {
+    async fn journal(
+        &self,
+        _: &N,
+        ctx: RequestContext,
+        req: ServiceRequest<'_, RobotJournalRequest>,
+    ) -> ServiceResult<RobotJournalReply> {
+        use crate::transport::past::{Begin, Options, detach};
+        let req = req.to_owned_message();
+        let id: [u8; 16] = req
+            .id
+            .as_slice()
+            .try_into()
+            .map_err(|_| connectrpc::ConnectError::invalid_argument("event ID required"))?;
+        if req.redact {
+            self.0.0.redact_event(&ctx, "app.Robot", id).await?;
+            return Response::ok(Default::default());
+        }
+        let subject = req
+            .subject
+            .as_slice()
+            .try_into()
+            .map_err(|_| connectrpc::ConnectError::invalid_argument("subject required"))?;
+        let payload = RobotMoved {
+            robot: req.subject.clone(),
+            ..Default::default()
+        };
+        let begin = self
+            .0
+            .0
+            .begin_event(
+                &ctx,
+                "app.Robot",
+                &payload,
+                Options {
+                    id: Some(id),
+                    subject: Some(subject),
+                    reason: "manual review".into(),
+                    occurred: Some("2026-11-01T00:00:00Z".parse().unwrap()),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        let Begin::Started(root) = begin else {
+            return Response::ok(RobotJournalReply {
+                done: true,
+                root: id.to_vec(),
+                ..Default::default()
+            });
+        };
+        let make = || Options {
+            subject: Some(subject),
+            ..Default::default()
+        };
+        let Begin::Started(child) = self
+            .0
+            .0
+            .begin_event(root.context(), "app.Robot", &payload, make())
+            .await?
+        else {
+            unreachable!()
+        };
+        let Begin::Started(detached) = self
+            .0
+            .0
+            .begin_event(&detach(root.context()), "app.Robot", &payload, make())
+            .await?
+        else {
+            unreachable!()
+        };
+        if req.fail {
+            return Err(connectrpc::ConnectError::aborted("roll back operation"));
+        }
+        Response::ok(RobotJournalReply {
+            root: id.to_vec(),
+            child: child.id.to_vec(),
+            detached: detached.id.to_vec(),
+            ..Default::default()
+        })
+    }
+    async fn describe(
+        &self,
+        _: &N,
+        ctx: RequestContext,
+        req: ServiceRequest<'_, RobotJournalRequest>,
+    ) -> ServiceResult<RobotJournalReply> {
+        use crate::storage::EventCalls;
+        use crate::transport::past::Catalog;
+        use base64::{Engine, engine::general_purpose::STANDARD};
+        let req = req.to_owned_message();
+        let event = self
+            .0
+            .app_event()
+            .get_owned(
+                &ctx,
+                EventGetRequest {
+                    r#ref: EventRef {
+                        key: Some(event_ref::Key::Id(req.id)),
+                        ..Default::default()
+                    }
+                    .into(),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        let mut catalog = Catalog::new("en");
+        for lang in ["en", "ko"] {
+            let layer = self.0.clone();
+            catalog.add("robot.move", lang, move |reading, row| {
+                let layer = layer.clone();
+                async move {
+                    let id = STANDARD.decode(row["subjectId"].as_str().unwrap()).unwrap();
+                    let robot = layer
+                        .app_robot()
+                        .get_owned(
+                            &reading.ctx,
+                            RobotGetRequest {
+                                r#ref: RobotRef {
+                                    key: Some(robot_ref::Key::Id(id)),
+                                    ..Default::default()
+                                }
+                                .into(),
+                                ..Default::default()
+                            },
+                        )
+                        .await?;
+                    let at = row["dateOccurred"]
+                        .as_str()
+                        .unwrap()
+                        .parse::<chrono::DateTime<chrono::Utc>>()
+                        .unwrap()
+                        .with_timezone(&reading.zone);
+                    Ok(format!(
+                        "{} {} {}",
+                        reading.language,
+                        robot.alias,
+                        at.format("%H:%M")
+                    ))
+                }
+            });
+        }
+        catalog
+            .validate(&["robot.move"])
+            .map_err(connectrpc::ConnectError::internal)?;
+        let pref = ctx
+            .header("accept-language")
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or("en");
+        let sentence = catalog
+            .describe(
+                &ctx,
+                serde_json::to_value(event).unwrap(),
+                pref,
+                "Asia/Seoul".parse().unwrap(),
+            )
+            .await?;
+        Response::ok(RobotJournalReply {
+            sentence,
+            ..Default::default()
+        })
+    }
     async fn export_robot(
         &self,
         next: &N,

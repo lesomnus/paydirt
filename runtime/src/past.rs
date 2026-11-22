@@ -161,42 +161,101 @@ impl Transaction<'_> {
             .map(|r| self.decode_row(e, r))
             .collect()
     }
-    pub(crate) fn say(&mut self, e: &Entity, req: &Value) -> Result<Value> {
+    pub(crate) fn begin_event(&mut self, e: &Entity, req: &Value) -> Result<Value> {
         let frame = self
             .frame
             .ok_or_else(|| Fault::precondition("events require an application transaction"))?;
-        let (before, after) = (&req["before"], &req["after"]);
-        let subject = &after["id"];
-        if !before.is_null() && before["id"] != *subject {
-            return Err(Fault::invalid("event contains two different subjects"));
+        if frame.tenant.is_empty() {
+            return Err(Fault::precondition("events require a tenant"));
         }
-        let row = self.lookup(e, &json!({"id":subject}), true)?;
-        let tenant = self.object_tenant(e, &row)?;
-        let mut data = json!({"tenant":{"id":tenant},"kind":req["kind"],"subjectId":subject,"traceId":value::encoded(&frame.trace),"value":req["value"]});
-        let kind = req["kind"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .ok_or_else(|| Fault::invalid("event kind required"))?;
-        let app = &self
+        let tenant = value::encoded(&frame.tenant);
+        let event = self.owned_entity("OWN_EVENT")?.clone();
+        let defs = &self
             .policies
             .values()
             .find(|p| p.entity["own"] == "OWN_HOLDER")
             .ok_or_else(|| Fault::internal("missing application schema"))?
-            .application;
-        let expected = app["eventTypes"][kind]
-            .as_str()
-            .ok_or_else(|| Fault::invalid("undeclared event kind"))?;
-        if req["value"]["@type"]
+            .application["eventTypes"];
+        let full = req["value"]["@type"]
             .as_str()
             .and_then(|s| s.rsplit('/').next())
-            != Some(expected)
-        {
-            return Err(Fault::invalid(
-                "event payload disagrees with its declared kind",
-            ));
-        }
+            .ok_or_else(|| Fault::invalid("event payload required"))?;
+        let kinds = defs
+            .as_object()
+            .into_iter()
+            .flat_map(|v| v.iter())
+            .filter(|(_, n)| n.as_str() == Some(full))
+            .map(|(k, _)| k.as_str())
+            .collect::<Vec<_>>();
+        let kind = match req["kind"].as_str().filter(|k| !k.is_empty()) {
+            Some(k) if kinds.contains(&k) => k,
+            None if kinds.len() == 1 => kinds[0],
+            _ => {
+                return Err(Fault::invalid(
+                    "expected a declared event kind for this payload",
+                ));
+            }
+        };
+        let mut data = json!({"tenant":{"id":tenant},"kind":kind,"traceId":value::encoded(&frame.trace),"value":req["value"],"reason":req["reason"].as_str().unwrap_or_default()});
         if let Some(actor) = &frame.actor {
             data["actorId"] = value::encoded(actor)
+        }
+        if let Some(key) = req.get("id").filter(|v| !v.is_null()) {
+            let bytes = value::bytes(key)?;
+            let domain = self.policies[&event.name].entity["domain"]
+                .as_u64()
+                .unwrap() as u8;
+            crate::domain::Domains::from_policies(self.policies)?.check_id(&bytes, domain)?;
+            self.past_lock(&bytes)?;
+            if !self
+                .matching(
+                    &event,
+                    &[("id", key), ("tenant", &json!({"id":tenant}))],
+                    false,
+                )?
+                .is_empty()
+            {
+                return Ok(json!({"done":true,"id":key}));
+            }
+            data["id"] = key.clone();
+        }
+        if let Some(subject) = req.get("subject").filter(|v| !v.is_null()) {
+            let bytes = value::bytes(subject)?;
+            crate::domain::Domains::from_policies(self.policies)?.check_id(
+                &bytes,
+                self.policies[&e.name].entity["domain"]
+                    .as_u64()
+                    .ok_or_else(|| Fault::invalid("subject entity has no domain"))?
+                    as u8,
+            )?;
+            match self.lookup(
+                e,
+                &json!({&e.key().map_err(Fault::internal)?.json:subject}),
+                true,
+            ) {
+                Ok(row) => {
+                    if self.object_tenant(e, &row)? != tenant {
+                        return Err(Fault::missing());
+                    }
+                }
+                Err(err) if err.code == "not_found" => {
+                    let mut q = Query::new("");
+                    let k = q.param(crate::driver::Bind::Bytes(bytes), self.db.dialect());
+                    q.sql = format!(
+                        "SELECT '1' AS value FROM {} WHERE {}={k}",
+                        quote(&e.table()),
+                        quote(&e.key().map_err(Fault::internal)?.column())
+                    );
+                    if !self.db.rows(q)?.is_empty() {
+                        return Err(Fault::missing());
+                    }
+                }
+                Err(err) => return Err(err),
+            }
+            data["subjectId"] = subject.clone();
+        }
+        if let Some(cause) = req.get("cause").filter(|v| !v.is_null()) {
+            data["causeId"] = cause.clone();
         }
         let start = req
             .get("dateStart")
@@ -204,11 +263,55 @@ impl Transaction<'_> {
             .cloned()
             .unwrap_or_else(|| self.inputs.stamp());
         time(&start)?;
-        data["dateOccurred"] = start.clone();
+        data["dateOccurred"] = start;
+        self.insert(&event, &data)
+    }
+    pub(crate) fn past_lock(&mut self, id: &[u8]) -> Result<()> {
+        if self.db.dialect() == paydirt_model::Dialect::Postgres {
+            let key: i64 = i64::from_be_bytes(
+                id.get(..8)
+                    .ok_or_else(|| Fault::invalid("invalid operation UUID"))?
+                    .try_into()
+                    .unwrap(),
+            ) ^ i64::from_be_bytes(
+                id.get(8..16)
+                    .ok_or_else(|| Fault::invalid("invalid operation UUID"))?
+                    .try_into()
+                    .unwrap(),
+            );
+            let mut q = Query::new("");
+            let p = q.param(crate::driver::Bind::Big(key), self.db.dialect());
+            q.sql = format!("SELECT '1' AS value FROM pg_advisory_xact_lock({p})");
+            self.db.rows(q)?;
+        }
+        Ok(())
+    }
+    pub(crate) fn event_facts(
+        &mut self,
+        e: &Entity,
+        event_id: &Value,
+        req: &Value,
+    ) -> Result<Value> {
+        let event_schema = self.owned_entity("OWN_EVENT")?.clone();
+        let event = self.lookup(&event_schema, &json!({"id":event_id}), false)?;
+        let (before, after) = (&req["before"], &req["after"]);
+        let subject = &after["id"];
+        if !before.is_null() && before["id"] != *subject {
+            return Err(Fault::invalid("event contains different subjects"));
+        }
+        let row = self.lookup(e, &json!({"id":subject}), true)?;
+        let tenant = self.object_tenant(e, &row)?;
+        if tenant != event["tenant"]["id"] {
+            return Err(Fault::missing());
+        }
+        let start = req
+            .get("dateStart")
+            .filter(|v| !v.is_null())
+            .cloned()
+            .unwrap_or_else(|| event["dateOccurred"].clone());
+        time(&start)?;
         let changes = changes(e, &self.policies[&e.name], before, after)?;
         let fact = self.owned_entity("OWN_FACT")?.clone();
-        let event = self.owned_entity("OWN_EVENT")?.clone();
-        let event = self.insert(&event, &data)?;
         for ((n, key), val) in changes {
             let existing = self.matching(
                 &fact,
@@ -230,6 +333,16 @@ impl Transaction<'_> {
         }
         Ok(event)
     }
+    pub(crate) fn say(&mut self, e: &Entity, req: &Value) -> Result<Value> {
+        let mut op = req.clone();
+        op["subject"] = req["after"]["id"].clone();
+        let event = self.begin_event(e, &op)?;
+        if event["done"] == true {
+            return Ok(event);
+        }
+        self.event_facts(e, &event["id"], req)
+    }
+
     pub(crate) fn past_state(&mut self, e: &Entity, req: &Value) -> Result<Value> {
         let subject = self.lookup(e, &req["ref"], false)?;
         let fact = self.owned_entity("OWN_FACT")?.clone();
@@ -298,5 +411,21 @@ mod tests {
         assert_eq!(state(4, Some(7)), Some(json!("A")));
         assert_eq!(state(5, Some(7)), Some(json!("B")));
         assert_eq!(state(16, None), None);
+    }
+}
+
+impl Transaction<'_> {
+    pub(crate) fn redact_reason(&mut self, req: &Value) -> Result<Value> {
+        let event = self.owned_entity("OWN_EVENT")?.clone();
+        let row = self.lookup(&event, &req["ref"], true)?;
+        if row["reason"].as_str().unwrap_or_default().is_empty() {
+            return Ok(Value::Null);
+        }
+        self.patch(
+            &event,
+            &json!({"ref":req["ref"],"reason":"","dateUpdated":row["dateUpdated"]}),
+            "Redact",
+        )?;
+        Ok(Value::Null)
     }
 }

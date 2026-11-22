@@ -26,6 +26,7 @@ pub mod naming;
 pub mod notify;
 pub mod outbox;
 mod past;
+pub mod past_expiry;
 mod relations;
 pub mod resource;
 pub mod secrets;

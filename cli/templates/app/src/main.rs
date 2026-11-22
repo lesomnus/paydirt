@@ -71,6 +71,14 @@ struct Config {
 async fn main() -> Result<(), Box<dyn Error>> {
     let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "paydirt.sqlite3".into());
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if let [command, tenant, config]=args.as_slice() && command=="past-expire" {
+        #[derive(Deserialize)]
+        struct Expiry {window:paydirt_store::past_expiry::Window,#[serde(default)]dry_run:bool}
+        let req:Expiry=serde_json::from_str(config)?;
+        let mut store=__APP_CRATE__::resource::record(paydirt_store::Store::open(&url,MODEL,POLICIES)?)?;
+        println!("{}",serde_json::to_string(&store.expire_past(paydirt::parse_id(tenant).ok_or("invalid tenant UUID")?,&req.window,req.dry_run)?)?);
+        return Ok(());
+    }
     if let [command, entity, id]=args.as_slice() && command=="trail-row" {
         let mut store=__APP_CRATE__::resource::record(paydirt_store::Store::open(&url,MODEL,POLICIES)?)?;
         let f=store.verify_object(entity,paydirt::parse_id(id).ok_or("invalid row UUID")?)?;
