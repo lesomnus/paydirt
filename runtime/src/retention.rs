@@ -40,6 +40,8 @@ struct Entry {
     table: String,
     #[serde(default)]
     digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    signature: Option<crate::attestation::Signature>,
 }
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
@@ -115,6 +117,7 @@ const TABLES: &str =
     "CREATE TABLE IF NOT EXISTS paydirt_trail_policy (id TEXT PRIMARY KEY, doc TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS paydirt_trail_archive (id TEXT PRIMARY KEY, doc TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS paydirt_trail_owed (id TEXT PRIMARY KEY, doc TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS paydirt_trail_removed (id TEXT PRIMARY KEY, doc TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS paydirt_trail_gc (id TEXT PRIMARY KEY, doc TEXT NOT NULL);";
 impl Transaction<'_> {
     fn lock_trail(&mut self) -> Result<()> {
@@ -204,6 +207,7 @@ impl Transaction<'_> {
                         owners,
                         table: name.clone(),
                         digest: None,
+                        signature: None,
                     },
                     row,
                 ));
@@ -350,11 +354,11 @@ fn run_pass(
     let mut waiting = BTreeSet::new();
     let mut exported = Vec::new();
     let mut rows = tx.live_trail(&tenant)?;
-    for entry in tx
-        .trail_docs::<Entry>("paydirt_trail_archive")?
-        .into_iter()
-        .filter(|e| e.tenant == tenant)
-    {
+    for entry in tx.trail_docs::<Entry>("paydirt_trail_archive")?.into_iter() {
+        entry.validate(files, "present")?;
+        if entry.tenant != tenant {
+            continue;
+        }
         let digest = entry
             .digest
             .as_deref()
@@ -416,6 +420,7 @@ fn run_pass(
             out.removed.push(e.id.clone());
             if !dry {
                 if let Some(old) = &e.digest {
+                    tx.removal(files, &e)?;
                     tx.trail_clear("paydirt_trail_archive", &e.id)?;
                     tx.trail_set("paydirt_trail_gc", old, Some(old))?;
                 } else {
@@ -449,9 +454,13 @@ fn run_pass(
         }
         if !dry && (transfer || archived && blank) {
             let hash = files.stage(&serde_json::to_vec(&row).map_err(bad)?)?;
+            if e.digest.is_some() {
+                tx.removal(files, &e)?;
+            }
             if let Some(old) = e.digest.replace(hash) {
                 tx.trail_set("paydirt_trail_gc", &old, Some(&old))?;
             }
+            e.sign(files, "present")?;
             tx.trail_set("paydirt_trail_archive", &e.id, Some(&e))?;
             if transfer {
                 tx.alter_live(&e, false)?;
@@ -489,6 +498,7 @@ fn run_pass(
     ) {
         for o in owed.difference(&waiting) {
             if !dry {
+                tx.forget_seal(&paydirt::parse_id(o).ok_or_else(|| bad("invalid subject"))?)?;
                 tx.trail_clear("paydirt_trail_owed", &format!("{tenant}/{o}"))?;
             }
         }
@@ -497,4 +507,89 @@ fn run_pass(
         out.owed = owed.into_iter().collect();
     }
     Ok(out)
+}
+
+impl Entry {
+    fn blob(&self) -> Result<crate::attestation::Blob> {
+        self.digest
+            .as_ref()
+            .map(|d| crate::attestation::Blob::of(&self.tenant, d))
+            .ok_or_else(|| bad("archive entry has no digest"))
+    }
+    fn statement(&self, state: &str) -> Result<Vec<u8>> {
+        let labels = [
+            ("kind".into(), self.kind.clone()),
+            ("table".into(), self.table.clone()),
+            ("created".into(), self.created.clone()),
+            (
+                "owners".into(),
+                serde_json::to_string(&self.owners).map_err(bad)?,
+            ),
+        ]
+        .into();
+        Ok(crate::attestation::manifest_statement(
+            &self.id,
+            &self.tenant,
+            &self.blob()?.digest,
+            "archive",
+            state,
+            &labels,
+        ))
+    }
+    fn sign(&mut self, f: &Archive, state: &str) -> Result<()> {
+        self.signature = f
+            .notary
+            .as_ref()
+            .map(|n| n.sign(&self.statement(state)?))
+            .transpose()?;
+        Ok(())
+    }
+    fn validate(&self, f: &Archive, state: &str) -> Result<()> {
+        match (&f.notary, &self.signature) {
+            (Some(n), Some(s)) => n.verify(&self.statement(state)?, s),
+            (None, None) => Ok(()),
+            _ => Err(bad("archive signature or verification key missing")),
+        }
+    }
+}
+impl Transaction<'_> {
+    fn removal(&mut self, f: &Archive, e: &Entry) -> Result<()> {
+        if f.notary.is_some() {
+            let mut tombstone = e.clone();
+            tombstone.sign(f, "erased")?;
+            self.trail_set(
+                "paydirt_trail_removed",
+                &format!("{}/{}", e.tenant, e.digest.as_deref().unwrap()),
+                Some(&tombstone),
+            )?;
+        }
+        Ok(())
+    }
+}
+impl Store {
+    pub fn attest_trail(
+        &mut self,
+        f: &Archive,
+        advance: bool,
+    ) -> Result<Option<crate::attestation::Head>> {
+        let n = f
+            .notary
+            .as_ref()
+            .ok_or_else(|| bad("checkpoint requires a configured signer and witness"))?;
+        self.transaction(&Scope::Internal, |tx| {
+            tx.lock_trail()?;
+            let mut current = BTreeSet::new();
+            let mut removed = BTreeSet::new();
+            for e in tx.trail_docs::<Entry>("paydirt_trail_archive")? {
+                e.validate(f, "present")?;
+                f.read(e.digest.as_deref().ok_or_else(|| bad("missing digest"))?)?;
+                current.insert(e.blob()?);
+            }
+            for e in tx.trail_docs::<Entry>("paydirt_trail_removed")? {
+                e.validate(f, "erased")?;
+                removed.insert(e.blob()?);
+            }
+            n.check_chain(&f.root, current, removed, advance)
+        })
+    }
 }

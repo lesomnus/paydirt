@@ -106,6 +106,9 @@ impl Transaction<'_> {
         if !resource.is_empty() {
             outbox["event"] = json!(resource)
         }
+        if p["trail"].get("off").is_none() {
+            self.sign_write(e, after, &mut audit)?;
+        }
         let mut recorder = Transaction {
             admission: None,
             origin: None,

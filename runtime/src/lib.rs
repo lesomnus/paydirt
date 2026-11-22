@@ -6,11 +6,14 @@ pub mod admission;
 mod apply;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod archive_files;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod attestation;
 pub mod audit_content;
 pub mod auth;
 mod crud;
 pub mod domain;
 pub mod header;
+pub mod integrity;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod retention;
 pub use paydirt_model;

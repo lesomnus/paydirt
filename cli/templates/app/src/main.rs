@@ -71,12 +71,23 @@ struct Config {
 async fn main() -> Result<(), Box<dyn Error>> {
     let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "paydirt.sqlite3".into());
     let args: Vec<_> = std::env::args().skip(1).collect();
-    if let [command, argument] = args.as_slice() && command=="trail" {
+    if let [command, entity, id]=args.as_slice() && command=="trail-row" {
+        let mut store=__APP_CRATE__::resource::record(paydirt_store::Store::open(&url,MODEL,POLICIES)?)?;
+        let f=store.verify_object(entity,paydirt::parse_id(id).ok_or("invalid row UUID")?)?;
+        println!("{}",serde_json::to_string(&f)?);
+        return Ok(());
+    }
+    if let [command, argument] = args.as_slice() && matches!(command.as_str(),"trail"|"trail-check") {
         use paydirt_store::archive_files::Archive;
-        let archive=|dir:&str,key:&str|->Result<Archive,Box<dyn Error>>{Ok(Archive::open(std::env::var(dir)?,&hex::decode(std::env::var(key)?)?)?)};
+        let archive=Archive::from_environment;
         let vault=archive("PAYDIRT_ARCHIVE_DIR","PAYDIRT_ARCHIVE_KEY")?;
         let export=std::env::var_os("PAYDIRT_EXPORT_DIR").map(|_|archive("PAYDIRT_EXPORT_DIR","PAYDIRT_EXPORT_KEY")).transpose()?;
-        let mut store=paydirt_store::Store::open(&url,MODEL,POLICIES)?;
+        let mut store=__APP_CRATE__::resource::record(paydirt_store::Store::open(&url,MODEL,POLICIES)?)?;
+        if command=="trail-check"{
+            let advance=match argument.as_str(){"checkpoint"=>true,"verify"=>false,_=>return Err("expected verify or checkpoint".into())};
+            println!("{}",serde_json::to_string(&store.attest_trail(&vault,advance)?)?);
+            return Ok(());
+        }
         println!("{}",serde_json::to_string(&store.manage_trail(&vault,export.as_ref(),serde_json::from_str(argument)?)?)?);
         return Ok(())
     }

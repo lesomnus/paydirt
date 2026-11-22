@@ -20,15 +20,18 @@ diesel = { version = "=2.3.14", default-features = false }
 base64 = "0.22"
 hex = "0.4"
 hmac="0.12"
+subtle="2.6"
 sha2="0.10"
 getrandom={version="0.4",features=["wasm_js"]}
 heck = "0.5"
-chrono = { version = "0.4", features = ["wasmbind"] }
+chrono = { version = "0.4", features = ["wasmbind","serde"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = {version="1",features=["raw_value"]}
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ring="0.17"
+flate2="1"
+spki={version="0.7",features=["std"]}
 cel={version="0.16",optional=true,default-features=false}
 tokio = {version="1",features=["macros","time"],optional=true}
 tempfile = {version="3",optional=true}

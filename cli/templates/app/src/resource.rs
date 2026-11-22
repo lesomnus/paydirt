@@ -26,6 +26,11 @@ pub fn record(store: paydirt_store::Store) -> paydirt_store::Result<paydirt_stor
     let options = serde_json::from_str(include_str!("../resources.json"))
         .map_err(|e| paydirt_store::Fault::invalid(e.to_string()))?;
     let store=store.with_trail(crate::transport::access::OPTIONS.clone(),DESCRIPTORS,ADMISSION_SCHEMA)?;
+    #[cfg(not(target_arch="wasm32"))]
+    let store=match std::env::var("PAYDIRT_AUDIT_KEY"){
+        Ok(v)=>store.with_audit_keys(paydirt_store::integrity::Keys::new(hex::decode(v).map_err(|_|paydirt_store::Fault::invalid("invalid audit key"))?,Vec::new(),Default::default())?)?,
+        Err(std::env::VarError::NotPresent)=>store,Err(e)=>return Err(paydirt_store::Fault::invalid(e.to_string()))
+    };
     store.with_resources(options, DESCRIPTORS, ADMISSION_SCHEMA)
 }
 pub fn mount(router: Router, db: Database) -> Router {
