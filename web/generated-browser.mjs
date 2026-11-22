@@ -77,7 +77,7 @@ try{
         const {runPair}=await import("/pair.js");
         await runPair(app.typed,opts(a),bytes);
         const {resourceCases}=await import("/resource.js");
-        await resourceCases(app.registry,app.resources,app.cell,app.typed,opts(a),opts(b),bytes,Uint8Array.from(tenants[b].match(/../g),v=>parseInt(v,16)),false);
+        await resourceCases(app.registry,app.resources,app.client,app.typed,opts(a),opts(b),bytes,Uint8Array.from(other.match(/../g),v=>parseInt(v,16)),false);
 
         if(!(await app.typed.allowance({key:"fleet.browser",lock:true},opts(a))).allowsTwo || (await app.typed.allowance({key:"fleet.browser",lock:true},opts(b))).enabled)throw Error("entitlement tenant or limit mismatch");
         const {exerciseMove}=await import("/moves.js");
