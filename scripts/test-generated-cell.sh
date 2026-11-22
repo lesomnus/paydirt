@@ -34,6 +34,7 @@ cargo build --quiet --manifest-path "$CELL_PROJECT/Cargo.toml"
 export PAYDIRT_TEST_MOVE=1 CELL_SQLITE_PATH="$work/fleet.sqlite3"
 node generated-cell.mjs
 node generated-replicas.mjs
+node generated-serving.mjs
 node generated-grant-follower.mjs
 if [[ "${PAYDIRT_TEST_WASM:-0}" == 1 ]]; then
   "${PAYDIRT_BIN:-$repo/target/debug/paydirt}" sandbox init "$CELL_PROJECT"

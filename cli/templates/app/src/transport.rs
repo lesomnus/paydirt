@@ -228,6 +228,8 @@ pub fn error(mut f: Fault) -> ConnectError {
 
 #[derive(Clone)]
 pub struct Database {
+    #[cfg(not(target_arch = "wasm32"))]
+    rate: Option<Arc<paydirt_server::Limiter>>,
     capture_origin: bool,
     broker: Option<Arc<dyn Broker>>,
     principals: Arc<HashMap<String, Principal>>,
@@ -275,6 +277,7 @@ impl Database {
             })
             .map_err(|e| e.to_string())?;
         Ok(Self {
+            rate: None,
             capture_origin,
             principals,
             lock: Default::default(),
@@ -393,7 +396,24 @@ impl Database {
         self.account_header = header;
         Ok(self)
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn with_rate(mut self, limiter: paydirt_server::Limiter) -> Self {
+        self.rate = Some(Arc::new(limiter));
+        self
+    }
     pub async fn authorize(
+        &self,
+        ctx: RequestContext,
+        entity: &str,
+        method: &str,
+        public: bool,
+        direct: bool,
+        account_method: bool,
+    ) -> Result<RequestContext, ConnectError> {
+        self.authorize_cost(ctx, entity, method, public, direct, account_method, 1)
+            .await
+    }
+    pub async fn authorize_cost(
         &self,
         mut ctx: RequestContext,
         entity: &str,
@@ -401,6 +421,7 @@ impl Database {
         public: bool,
         direct: bool,
         account_method: bool,
+        cost: usize,
     ) -> Result<RequestContext, ConnectError> {
         let action = format!("/{entity}Service/{method}");
         #[cfg(target_arch = "wasm32")]
@@ -504,6 +525,19 @@ impl Database {
                 "an account makes this call as itself",
             ));
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(limiter) = &self.rate {
+            let tenant = if frame.tenant.is_empty() {
+                frame.account.as_deref().unwrap_or_default()
+            } else {
+                &frame.tenant
+            };
+            if !tenant.is_empty() {
+                limiter.charge(tenant, cost)?;
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        let _ = cost;
         if let Some(policy) = &self.policy {
             let (revision, snapshot) = policy.pin();
             if !account_method && !name.as_deref().is_some_and(|n| snapshot.allows(n, &action)) {
