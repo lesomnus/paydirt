@@ -17,7 +17,7 @@ impl AppDatabase {
         let mut db = Store::open("paydirt.sqlite3", MODEL, POLICIES)?.with_resources(
             serde_json::from_str(include_str!("../../../resources.json"))?,
             include_bytes!("../../../generated/storage/descriptors.binpb"),
-            include_str!("../../../generated/storage/admission.json"))?;
+            include_str!("../../../generated/storage/admission.json"))?.with_trail(serde_json::from_str(include_str!("../../../trail.json"))?, include_bytes!("../../../generated/storage/descriptors.binpb"),include_str!("../../../generated/storage/admission.json"))?;
         let policies: Policies = serde_json::from_str(POLICIES)?;
         let tenant = policies
             .iter()

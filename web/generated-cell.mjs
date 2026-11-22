@@ -1,3 +1,4 @@
+import {accessCases} from "./generated-access.mjs";
 import {resourceCases} from "./generated-resource.js";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
@@ -52,6 +53,7 @@ try {
     const allowedSet=Buffer.from(primary.id);allowedSet[9]=10;
     principals.both={tenant:primary.id.toString("hex"),tenants:clients.map(p=>p.id.toString("hex"))};
     principals.grouped={tenant:primary.id.toString("hex"),sets:[allowedSet.toString("hex")],methods:["/app.*/*"]};
+    for(const [name,tenant] of [["audit-review",primary.id],["other-review",other.id]])principals[name]={tenant:tenant.toString("hex"),methods:["/app.AccessService/*","/app.AuditService/*"]};
     principals.reader={tenant:primary.id.toString("hex"),methods:["/app.RobotService/Get"]};
     const tenantNames=clients.map(p=>p.id.toString("hex"));
     const membership=accounts(tenantNames);
@@ -87,6 +89,7 @@ try {
         const holder=createClient(createFileRegistry(descriptors).getService("app.HolderService"),createConnectTransport({baseUrl,useBinaryFormat:true}));
         const registry=createFileRegistry(descriptors);
         const resources=createClient(registry.getService("payday.ResourceService"),createConnectTransport({baseUrl,useBinaryFormat:true}));
+        await accessCases(registry,baseUrl,typed,cell,own,foreign,primary.id,other.id);
         await resourceCases(registry,resources,cell,typed,own,foreign,primary.id,other.id,true);
         await accountCases(holder,typed,tenantNames);
         const revealed=await typed.reveal({},own);

@@ -1,3 +1,5 @@
+#[path = "access.rs"]
+pub mod access;
 #[path = "presence.rs"]
 pub mod presence;
 #[cfg(not(target_arch = "wasm32"))]
@@ -13,6 +15,7 @@ use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 
 pub const ADMISSION_SCHEMA: &str = include_str!("../generated/storage/admission.json");
 pub const MODEL: &str = include_str!("../generated/storage/model.json");
+static TRAIL_POLICIES:std::sync::LazyLock<paydirt_store::Policies>=std::sync::LazyLock::new(||serde_json::from_str(POLICIES).expect("service policies"));
 pub const POLICIES: &str = include_str!("../generated/storage/policies.json");
 /// The current and former names from this application's schema.
 pub fn domains() -> &'static paydirt_store::domain::Domains {
@@ -504,6 +507,11 @@ impl Database {
         if let Some(key) = resolved {
             ctx.extensions_mut().insert(ResolvedKey(key));
         }
+        access::Attempt::frame(&ctx,&principal.frame,&action);
+        let private = ["OWN_AUDIT","OWN_ACCESS"].contains(&TRAIL_POLICIES.get(entity).and_then(|p|p.entity["own"].as_str()).unwrap_or(""));
+        if private && (self.policy.is_none() && principal.methods.is_none() || !access::OPTIONS.reads) {
+            return Err(ConnectError::permission_denied("explicit trail read grant required"));
+        }
         if principal.methods.as_ref().is_some_and(|allowed| {
             !allowed
                 .iter()
@@ -600,6 +608,7 @@ impl Database {
         {
             frame.trace = trace;
         }
+        access::Attempt::frame(&ctx,&frame,&frame.action);
         ctx.extensions_mut().insert(frame);
         Ok(ctx)
     }
@@ -638,6 +647,7 @@ impl Database {
         let guard = Guard {
             db: self.clone(),
             id: Some(id.clone()),
+            access:ctx.extensions().get::<access::Attempt>().cloned(),
             _permit: permit,
         };
         self.send(match origin {
@@ -980,6 +990,7 @@ impl Database {
 }
 
 pub struct Guard {
+    access:Option<access::Attempt>,
     db: Database,
     id: Option<String>,
     _permit: async_lock::MutexGuardArc<()>,
@@ -988,6 +999,7 @@ impl Guard {
     pub async fn finish(mut self, commit: bool) -> Result<(), ConnectError> {
         let id = self.id.take().expect("active transaction");
         let value = self.db.send(Packet::Finish { id, commit }).await?;
+        if let Some(a)=&self.access { a.committed(&value) }
         if let Some(broker) = &self.db.broker {
             if !value.is_null() {
                 let event = serde_json::from_value(value)
