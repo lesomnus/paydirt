@@ -48,6 +48,8 @@ impl<N: SettingService> SettingServiceLayer<N> for Core {
     }
 }
 RS
+# The application explicitly exposes both new RPCs to unauthenticated clients.
+sed -i 's|"/app.SettingService/Get"|"/app.SettingService/Get","/app.SettingService/Describe","/app.SettingService/Pending"|' src/lib.rs
 cp src/core.rs ../original-core.rs
 cp src/sink.rs ../original-sink.rs
 "$bin" gen

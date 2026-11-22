@@ -4,6 +4,7 @@ const loaded = init();
 let endpoint;
 let principals;
 let name;
+let generalWrites;
 const nonce = new Uint32Array(1);
 do { crypto.getRandomValues(nonce); } while (!nonce[0]);
 
@@ -13,6 +14,7 @@ self.onmessage = async ({ data, ports: [port] }) => {
     if (data.principals) {
       principals = JSON.stringify(data.principals);
       name = data.name;
+      generalWrites = data.generalWrites;
       self.paydirtQuery = payload => new Promise((resolve, reject) => {
         const reply = new MessageChannel();
         const timeout = setTimeout(() => {
@@ -29,7 +31,7 @@ self.onmessage = async ({ data, ports: [port] }) => {
       });
       self.postMessage({ ready: true });
     } else if (data.drpc === "serve") {
-      endpoint = new AppPort(port, nonce[0], principals, name);
+      endpoint = new AppPort(port, nonce[0], principals, name, generalWrites);
     }
   } catch (err) {
     self.postMessage({ error: String(err) });

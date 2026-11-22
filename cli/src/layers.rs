@@ -48,6 +48,11 @@ impl VisitMut for OwnedResponse {
     }
 }
 
+pub(crate) fn concrete_signature(mut sig: syn::Signature) -> syn::Signature {
+    Captures(&[]).visit_signature_mut(&mut sig);
+    sig
+}
+
 fn layer(service: &ItemTrait) -> Result<File> {
     let name = &service.ident;
     let hooks = format_ident!("{name}Layer");
