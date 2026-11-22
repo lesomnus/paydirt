@@ -39,6 +39,10 @@ struct Entry {
     owners: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     namespace: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    proof: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ciphertext: Option<String>,
     table: String,
     #[serde(default)]
     digest: Option<String>,
@@ -290,6 +294,8 @@ impl Transaction<'_> {
                             .into(),
                         owners,
                         namespace: None,
+                        proof: None,
+                        ciphertext: None,
                         table: name.clone(),
                         digest: None,
                         signature: None,
@@ -558,6 +564,24 @@ fn run_pass(
             if let Some(old) = e.digest.replace(hash) {
                 tx.trail_set("paydirt_trail_gc", &old, Some(&old))?;
             }
+            if files.notary.is_some() && row.get("objectId").is_some() {
+                let proof: serde_json::Map<_, _> = [
+                    "id",
+                    "objectId",
+                    "tenantId",
+                    "dateCreated",
+                    "domain",
+                    "action",
+                    "digest",
+                    "digestFields",
+                ]
+                .into_iter()
+                .filter_map(|name| row.get(name).map(|value| (name.to_string(), value.clone())))
+                .collect();
+                e.proof = Some(Value::Object(proof));
+                e.ciphertext =
+                    Some(files.ciphertext_digest(e.digest.as_deref().expect("staged digest"))?);
+            }
             e.sign(files, "present")?;
             tx.trail_set("paydirt_trail_archive", &e.id, Some(&e))?;
             if transfer {
@@ -627,6 +651,15 @@ impl Entry {
             ),
         ]
         .into();
+        if let Some(hash) = &self.ciphertext {
+            labels.insert("ciphertext_sha256".into(), hash.clone());
+        }
+        if let Some(proof) = &self.proof {
+            labels.insert(
+                "row_digest".into(),
+                serde_json::to_string(proof).map_err(bad)?,
+            );
+        }
         if self.namespace.is_some() {
             labels.insert("filed_under".into(), self.tenant.clone());
         }
@@ -694,5 +727,51 @@ impl Store {
             }
             n.check_chain(&f.root, current, removed, advance)
         })
+    }
+}
+
+impl Transaction<'_> {
+    pub(crate) fn archived_digests(
+        &mut self,
+        files: &Archive,
+        kind: &str,
+        object: Option<[u8; 16]>,
+    ) -> Result<Vec<Value>> {
+        self.lock_trail()?;
+        let mut rows = Vec::new();
+        let encoded = object.map(|id| value::encoded(&id));
+        for e in self.trail_docs::<Entry>("paydirt_trail_archive")? {
+            e.validate(files, "present")?;
+            if e.kind != kind {
+                continue;
+            }
+            let row = if let (Some(_), Some(proof)) = (&files.notary, &e.proof) {
+                if files.ciphertext_digest(
+                    e.digest
+                        .as_deref()
+                        .ok_or_else(|| bad("missing archive digest"))?,
+                )? != *e
+                    .ciphertext
+                    .as_ref()
+                    .ok_or_else(|| bad("missing ciphertext digest"))?
+                {
+                    return Err(bad("signed ciphertext digest mismatch"));
+                }
+                proof.clone()
+            } else {
+                serde_json::from_slice(
+                    &files.read(
+                        e.digest
+                            .as_deref()
+                            .ok_or_else(|| bad("missing archive digest"))?,
+                    )?,
+                )
+                .map_err(bad)?
+            };
+            if encoded.as_ref().is_none_or(|id| &row["objectId"] == id) {
+                rows.push(row);
+            }
+        }
+        Ok(rows)
     }
 }

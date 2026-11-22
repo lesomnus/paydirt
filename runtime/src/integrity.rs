@@ -20,6 +20,10 @@ pub struct Keys {
 pub enum Verdict {
     Matches,
     Differs,
+    NoDigest,
+    NoSeal,
+    Missing,
+    NotOnTrail,
     Forged,
     UnknownKey,
     Retired,
@@ -410,33 +414,383 @@ pub struct Finding {
     pub digest: Verdict,
     pub seal: Option<Verdict>,
 }
+
+#[derive(serde::Serialize, Debug, Default)]
+pub struct KindReport {
+    pub checked: usize,
+    pub archived: usize,
+    pub findings: BTreeMap<String, Finding>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skipped: Option<String>,
+}
+pub(crate) fn order(row: &Value) -> Result<(chrono::DateTime<chrono::Utc>, [u8; 16])> {
+    let time = row["dateCreated"]
+        .as_str()
+        .ok_or_else(|| Fault::internal("missing audit date"))?
+        .parse()
+        .map_err(|_| Fault::internal("invalid audit date"))?;
+    Ok((time, id(&row["id"])?))
+}
+type Heads = BTreeMap<[u8; 16], (Value, bool)>;
+fn consider(heads: &mut Heads, row: Value, archived: bool) -> Result<()> {
+    let object = id(&row["objectId"])?;
+    if let Some((existing, _)) = heads.get(&object)
+        && order(existing)? >= order(&row)?
+    {
+        return Ok(());
+    }
+    heads.insert(object, (row, archived));
+    Ok(())
+}
+impl Transaction<'_> {
+    fn owned_kind(&self, kind: &str) -> Result<&Entity> {
+        let (name, _) = self
+            .policies
+            .iter()
+            .find(|(_, p)| p.entity["own"] == kind)
+            .ok_or_else(|| Fault::precondition(format!("missing {kind} schema")))?;
+        self.model.entity(name).map_err(Fault::internal)
+    }
+    fn online_heads(&mut self, name: &str, object: Option<[u8; 16]>) -> Result<Heads> {
+        let audit = self.owned_kind("OWN_AUDIT")?.clone();
+        let domain = self
+            .policies
+            .get(name)
+            .and_then(|p| p.entity["domain"].as_i64())
+            .ok_or_else(|| Fault::invalid("expected an entity with a domain"))?;
+        let mut heads = Heads::new();
+        let mut cursor = None;
+        loop {
+            let mut q = Query::new("");
+            let dialect = self.db.dialect();
+            let bound = q.param(Bind::Big(domain), dialect);
+            let mut predicate = format!("r.f19={bound}");
+            if let Some(id) = object {
+                let key = q.param(Bind::Bytes(id.to_vec()), dialect);
+                predicate.push_str(&format!(" AND r.f11={key}"));
+            }
+            if let Some((stamp, key)) = &cursor {
+                let at = q.param(
+                    value::bind(audit.field("date_created").map_err(Fault::internal)?, stamp)?,
+                    dialect,
+                );
+                let id = q.param(
+                    value::bind(audit.key().map_err(Fault::internal)?, key)?,
+                    dialect,
+                );
+                predicate.push_str(&format!(" AND (r.f15,r.f1)>({at},{id})"));
+            }
+            let direction = if object.is_some() { "DESC" } else { "ASC" };
+            let limit = if object.is_some() { 1 } else { 256 };
+            q.sql = format!(
+                "SELECT {} AS value FROM {} r WHERE {predicate} ORDER BY r.f15 {direction},r.f1 {direction} LIMIT {limit}",
+                self.project_sql(&audit)?,
+                quote(&audit.table())
+            );
+            let rows = self.db.rows(q)?;
+            let count = rows.len();
+            for raw in rows {
+                let row = self.decode_row(&audit, &raw)?;
+                cursor = Some((row["dateCreated"].clone(), row["id"].clone()));
+                consider(&mut heads, row, false)?;
+            }
+            if object.is_some() || count < limit {
+                break;
+            }
+        }
+        Ok(heads)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn heads(
+        &mut self,
+        name: &str,
+        object: Option<[u8; 16]>,
+        archive: Option<&crate::archive_files::Archive>,
+    ) -> Result<Heads> {
+        let mut heads = self.online_heads(name, object)?;
+        if let Some(files) = archive {
+            for row in self.archived_digests(files, name, object)? {
+                consider(&mut heads, row, true)?;
+            }
+        }
+        Ok(heads)
+    }
+    fn inspect_sum(&mut self, e: &Entity, object: [u8; 16], audit: &Value) -> Result<Finding> {
+        let rec = self
+            .trail
+            .ok_or_else(|| Fault::precondition("trail recorder required"))?;
+        let keys = rec
+            .keys
+            .as_ref()
+            .ok_or_else(|| Fault::precondition("verification keys required"))?;
+        let (at, key) = order(audit)?;
+        let line = Line {
+            id: key,
+            micros: at.timestamp_micros(),
+            action: audit["action"]
+                .as_str()
+                .ok_or_else(|| Fault::internal("missing audit action"))?,
+        };
+        let sum = audit["digest"]
+            .as_str()
+            .map(|_| value::bytes(&audit["digest"]))
+            .transpose()?
+            .unwrap_or_default();
+        if sum.is_empty() {
+            return Ok(Finding {
+                digest: Verdict::NoDigest,
+                seal: None,
+            });
+        }
+        let current = match self.lookup(
+            e,
+            &json!({&e.key().map_err(Fault::internal)?.json:value::encoded(&object)}),
+            false,
+        ) {
+            Ok(r) => Some(r),
+            Err(v) if v.code == "not_found" => None,
+            Err(e) => return Err(e),
+        };
+        let check = |sum: &[u8], fields: &Value, seal: bool| -> Result<Verdict> {
+            let covered: Vec<u32> = serde_json::from_value(fields.clone())
+                .map_err(|e| Fault::precondition(e.to_string()))?;
+            let wire = current
+                .as_ref()
+                .map(|row| rec.covered_wire(&e.name, row, &covered))
+                .transpose()?;
+            let verdict = keys.check(
+                sum,
+                &object,
+                &line,
+                wire.as_ref().map(|w| (covered.as_slice(), w.as_slice())),
+                seal,
+            );
+            Ok(if verdict == Verdict::Differs && current.is_none() {
+                Verdict::Missing
+            } else {
+                verdict
+            })
+        };
+        let digest = check(&sum, &audit["digestFields"], false)?;
+        let seal = if sum.get(1) == Some(&1) && (current.is_some() || sum.len() > 42) {
+            let table = self.owned_kind("OWN_ROW_SEAL")?.clone();
+            let mut q = Query::new("");
+            let key = q.param(Bind::Bytes(object.to_vec()), self.db.dialect());
+            q.sql = format!(
+                "SELECT {} AS value FROM {} r WHERE r.f1={key}",
+                self.project_sql(&table)?,
+                quote(&table.table())
+            );
+            Some(if let Some(row) = self.db.rows(q)?.pop() {
+                let s = self.decode_row(&table, &row)?;
+                check(&value::bytes(&s["sum"])?, &s["fields"], true)?
+            } else {
+                Verdict::NoSeal
+            })
+        } else {
+            None
+        };
+        Ok(Finding { digest, seal })
+    }
+}
 impl Store {
     pub fn verify_object(&mut self, name: &str, object: [u8; 16]) -> Result<Finding> {
-        self.transaction(&crate::Scope::Internal,|tx|{
-            let rec=tx.trail.ok_or_else(||Fault::precondition("trail recorder required"))?;
-            let keys=rec.keys.as_ref().ok_or_else(||Fault::precondition("verification keys required"))?;
-            let e=tx.model.entity(name).map_err(Fault::invalid)?;
-            let owned=|kind:&str|->Result<&Entity>{
-                let name=tx.policies.iter().find(|(_,p)|p.entity["own"]==kind).map(|(n,_)|n).ok_or_else(||Fault::internal("missing verification schema"))?;
-                tx.model.entity(name).map_err(Fault::internal)
-            };
-            let audit=owned("OWN_AUDIT")?;let seal=owned("OWN_ROW_SEAL")?;
-            let mut q=Query::new("");let p=q.param(Bind::Bytes(object.to_vec()),tx.db.dialect());q.sql=format!("SELECT {} AS value FROM {} r WHERE r.f11={p} ORDER BY r.f15 DESC,r.f1 DESC LIMIT 1",tx.project_sql(audit)?,quote(&audit.table()));
-            let raw=tx.db.rows(q)?.pop().ok_or_else(Fault::missing)?;let a=tx.decode_row(audit,&raw)?;
-            let line=Line{id:id(&a["id"])?,micros:a["dateCreated"].as_str().ok_or_else(||Fault::internal("missing line time"))?.parse::<chrono::DateTime<chrono::Utc>>().map_err(|e|Fault::internal(e.to_string()))?.timestamp_micros(),action:a["action"].as_str().ok_or_else(||Fault::internal("missing line action"))?};
-            let sum=value::bytes(&a["digest"])?;
-            let current=match tx.lookup(e,&json!({&e.key().map_err(Fault::internal)?.json:value::encoded(&object)}),false){Ok(r)=>Some(r),Err(v)if v.code=="not_found"=>None,Err(e)=>return Err(e)};
-            let check=|sum:&[u8],fields:&Value,seal:bool|->Result<Verdict>{
-                let covered:Vec<u32>=serde_json::from_value(fields.clone()).map_err(|e|Fault::precondition(e.to_string()))?;
-                let wire=current.as_ref().map(|row|rec.covered_wire(name,row,&covered)).transpose()?;
-                Ok(keys.check(sum,&object,&line,wire.as_ref().map(|w|(covered.as_slice(),w.as_slice())),seal))
-            };
-            let digest=check(&sum,&a["digestFields"],false)?;
-            let seal_result=if sum.get(1)==Some(&1){
-                let mut q=Query::new("");let p=q.param(Bind::Bytes(object.to_vec()),tx.db.dialect());q.sql=format!("SELECT {} AS value FROM {} r WHERE r.f1={p}",tx.project_sql(seal)?,quote(&seal.table()));
-                Some(if let Some(row)=tx.db.rows(q)?.pop(){let s=tx.decode_row(seal,&row)?;check(&value::bytes(&s["sum"])?,&s["fields"],true)?}else{Verdict::Differs})
-            }else{None};
-            Ok(Finding{digest,seal:seal_result})
+        self.transaction(&crate::Scope::Internal, |tx| {
+            let e = tx.model.entity(name).map_err(Fault::invalid)?;
+            let (head, _) = tx
+                .online_heads(name, Some(object))?
+                .remove(&object)
+                .ok_or_else(Fault::missing)?;
+            tx.inspect_sum(e, object, &head)
         })
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn verify_object_with_archive(
+        &mut self,
+        name: &str,
+        object: [u8; 16],
+        archive: Option<&crate::archive_files::Archive>,
+    ) -> Result<Finding> {
+        self.transaction(&crate::Scope::Internal, |tx| {
+            let e = tx.model.entity(name).map_err(Fault::invalid)?;
+            let (head, _) = tx
+                .heads(name, Some(object), archive)?
+                .remove(&object)
+                .ok_or_else(Fault::missing)?;
+            tx.inspect_sum(e, object, &head)
+        })
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn check_kind(
+        &mut self,
+        name: &str,
+        archive: Option<&crate::archive_files::Archive>,
+    ) -> Result<KindReport> {
+        self.transaction(&crate::Scope::Internal, |tx| {
+            let e = tx.model.entity(name).map_err(Fault::invalid)?;
+            let policy = tx
+                .policies
+                .get(name)
+                .ok_or_else(|| Fault::invalid("unknown audit kind"))?;
+            let mut report = KindReport::default();
+            let key = e.key().map_err(Fault::invalid)?;
+            if let Some(why) = policy.entity["trail"].get("off") {
+                report.skipped = Some(
+                    why.as_str()
+                        .map(str::to_string)
+                        .unwrap_or_else(|| why.to_string()),
+                );
+                return Ok(report);
+            }
+            if key.kind != "UUID" || policy.entity["domain"].as_u64().is_none() {
+                report.skipped = Some("entity does not have a Payday identifier".into());
+                return Ok(report);
+            }
+            let mut heads = tx.heads(name, None, archive)?;
+            let mut cursor = None;
+            loop {
+                let mut q = Query::new("");
+                let mut filters = tx.wall(e, &mut q)?;
+                let column = format!("r.{}", quote(&key.column()));
+                if let Some(id) = cursor {
+                    let bound = q.param(Bind::Bytes(id), tx.db.dialect());
+                    filters.push(format!("{column}>{bound}"));
+                }
+                if filters.is_empty() {
+                    filters.push("TRUE".into());
+                }
+                q.sql = format!(
+                    "SELECT {} AS value FROM {} r WHERE {} ORDER BY {column} LIMIT 256",
+                    tx.project_sql(e)?,
+                    quote(&e.table()),
+                    filters.join(" AND ")
+                );
+                let rows = tx.db.rows(q)?;
+                let count = rows.len();
+                cursor = None;
+                for raw in rows {
+                    let row = tx.decode_row(e, &raw)?;
+                    let object = id(&row[&key.json])?;
+                    heads.entry(object).or_insert((Value::Null, false));
+                    cursor = Some(object.to_vec());
+                }
+                if count < 256 {
+                    break;
+                }
+            }
+            for (object, (row, archived)) in heads {
+                report.checked += 1;
+                report.archived += usize::from(archived);
+                let finding = if row.is_null() {
+                    Finding {
+                        digest: Verdict::NotOnTrail,
+                        seal: None,
+                    }
+                } else {
+                    tx.inspect_sum(e, object, &row)?
+                };
+                if !matches!(finding.digest, Verdict::Matches | Verdict::Retired)
+                    || finding.seal.is_some_and(|s| {
+                        !matches!(s, Verdict::Matches | Verdict::Forgotten | Verdict::Retired)
+                    })
+                {
+                    report.findings.insert(
+                        paydirt::format_id(&object).expect("sixteen-byte id"),
+                        finding,
+                    );
+                }
+            }
+            Ok(report)
+        })
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Transaction<'_> {
+    /// A host explicitly accepts the current value (or absence) as a new signed act.
+    pub fn record_objects(
+        &mut self,
+        name: &str,
+        objects: &[[u8; 16]],
+        action: &str,
+        erased: bool,
+    ) -> Result<usize> {
+        self.record_objects_with_archive(name, objects, action, erased, None)
+    }
+    pub fn record_objects_with_archive(
+        &mut self,
+        name: &str,
+        objects: &[[u8; 16]],
+        action: &str,
+        erased: bool,
+        archive: Option<&crate::archive_files::Archive>,
+    ) -> Result<usize> {
+        let result = self.record_current_objects(name, objects, action, erased, archive);
+        if let Err(err) = &result {
+            self.failed = Some(err.clone());
+        }
+        result
+    }
+    fn record_current_objects(
+        &mut self,
+        name: &str,
+        objects: &[[u8; 16]],
+        action: &str,
+        erased: bool,
+        archive: Option<&crate::archive_files::Archive>,
+    ) -> Result<usize> {
+        if !matches!(self.scope, crate::Scope::Internal) {
+            return Err(Fault::denied("record requires a host transaction"));
+        }
+        if action.trim().is_empty() {
+            return Err(Fault::invalid("the act being recorded must be named"));
+        }
+        let entity = self.model.entity(name).map_err(Fault::invalid)?;
+        let policy = self
+            .policies
+            .get(name)
+            .ok_or_else(|| Fault::invalid("unknown audit kind"))?;
+        if policy.entity["trail"].get("off").is_some() {
+            return Ok(0);
+        }
+        let domain = policy.entity["domain"]
+            .as_u64()
+            .and_then(|n| u8::try_from(n).ok())
+            .ok_or_else(|| Fault::invalid("expected a domain"))?;
+        if self.trail.and_then(|r| r.keys.as_ref()).is_none() {
+            return Err(Fault::precondition("record requires digest keys"));
+        }
+        let audit = self.owned_kind("OWN_AUDIT")?.clone();
+        let objects: BTreeSet<_> = objects.iter().copied().collect();
+        for &object in &objects {
+            if !paydirt::has_domain(&object, domain) {
+                return Err(Fault::invalid("identifier belongs to another kind"));
+            }
+            let row = match self.lookup(
+                entity,
+                &json!({&entity.key().map_err(Fault::internal)?.json:value::encoded(&object)}),
+                true,
+            ) {
+                Ok(_) if erased => return Err(Fault::precondition("object still exists")),
+                Ok(row) => Some(row),
+                Err(f) if f.code == "not_found" && erased => None,
+                Err(f) => return Err(f),
+            };
+            let tenant = match &row {
+                Some(r) => self.object_tenant(entity, r)?,
+                None => {
+                    let (latest, _) = self
+                        .heads(name, Some(object), archive)?
+                        .remove(&object)
+                        .ok_or_else(|| Fault::precondition("no prior audit for absent object"))?;
+                    latest["tenantId"].clone()
+                }
+            };
+            let mut line = json!({"tenantId":tenant,"objectId":value::encoded(&object),"action":action,"domain":domain,
+                "actorTenantId":value::encoded(&[0;16]),"actorId":value::encoded(&[0;16]),"traceId":value::encoded(&[0;16])});
+            self.sign_write(entity, row.as_ref(), &mut line)?;
+            self.insert(&audit, &line)?;
+        }
+        Ok(objects.len())
     }
 }
