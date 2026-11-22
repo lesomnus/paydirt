@@ -16,7 +16,8 @@ fn io(e: std::io::Error) -> Fault {
     Fault::unavailable(e.to_string())
 }
 pub struct Archive {
-    root: PathBuf,
+    pub(crate) root: PathBuf,
+    pub(crate) notary: Option<crate::attestation::Notary>,
     key: aead::LessSafeKey,
 }
 impl Archive {
@@ -25,6 +26,7 @@ impl Archive {
             .map_err(|_| Fault::invalid("expected a 32-byte archive key"))?;
         Ok(Self {
             root: root.as_ref().into(),
+            notary: None,
             key: aead::LessSafeKey::new(key),
         })
     }

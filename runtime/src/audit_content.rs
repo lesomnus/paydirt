@@ -24,6 +24,7 @@ pub struct Options {
     pub reads: bool,
 }
 pub struct Recorder {
+    pub(crate) keys: Option<crate::integrity::Keys>,
     pub(crate) options: Options,
     pub(crate) pool: DescriptorPool,
     pub(crate) sensitive: BTreeMap<String, BTreeSet<u32>>,
@@ -57,6 +58,7 @@ impl Store {
             })
             .collect();
         self.trail = Some(Recorder {
+            keys: None,
             options,
             pool,
             sensitive,

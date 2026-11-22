@@ -77,6 +77,13 @@ fn exercise(url: &str, dir: &Path) {
     let vault = Archive::open(&folder, &[17; 32]).unwrap();
     let destination = dir.join("export");
     let recipient = Archive::open(&destination, &[44; 32]).unwrap();
+    let vault = vault.with_notary(paydirt_store::attestation::Notary::new(
+        Box::new(paydirt_store::attestation::Ed25519::from_seed(&[72; 32]).unwrap()),
+        Default::default(),
+        Box::new(paydirt_store::attestation::DirectoryWitness(
+            dir.join("witness"),
+        )),
+    ));
     let run = |store: &mut Store, t: &str, req| pass(store, &vault, &recipient, t, req).unwrap();
     run(
         &mut store,
@@ -115,6 +122,8 @@ fn exercise(url: &str, dir: &Path) {
         dry.archived,
         run(&mut store, &tenant, json!({"action":"collect"})).archived
     );
+    assert_eq!(store.attest_trail(&vault, true).unwrap().unwrap().k, 1);
+    assert!(store.attest_trail(&vault, false).is_ok());
     let inspect = run(&mut store, &other, json!({"action":"inspect"}));
     assert_eq!(inspect.inventory.values().next().unwrap(), "online");
     assert!(
@@ -182,7 +191,16 @@ fn exercise(url: &str, dir: &Path) {
         preview.removed,
         run(&mut store, &tenant, json!({"action":"purge"})).removed
     );
-    assert_eq!(fs::read_dir(folder).unwrap().count(), 0);
+    assert_eq!(
+        fs::read_dir(folder)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().unwrap().is_file())
+            .count(),
+        0
+    );
+    store.attest_trail(&vault, true).unwrap();
+    store.attest_trail(&vault, false).unwrap();
     assert_eq!(
         run(&mut store, &other, json!({"action":"inspect"}))
             .inventory
