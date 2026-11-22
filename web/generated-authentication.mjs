@@ -56,22 +56,7 @@ try{
  await denied(await call("Who",null,session),"unauthenticated");
  const short=await call("Login",jwt(),{},{value:1});await delay(1100);
  await denied(await call("Who",null,{cookie:short.headers.get("set-cookie").split(";")[0]}),"unauthenticated");
- const sdk=await viteServer({server:{port:0,host:"127.0.0.1",proxy:{"/app.":{target:"http://"+address}}},logLevel:"error",plugins:[{
-   name:"local-session-check",
-   resolveId(id){if(id==="/auth-sdk.js")return id},
-   load(id){if(id==="/auth-sdk.js")return `
-     import {Store} from "/upstream/ts/src/store/index.ts";
-     import {Queries} from "/upstream/ts/src/query/query.ts";
-     import {createConnectTransport} from "@connectrpc/connect-web";
-     import {createFileRegistry,fromBinary} from "@bufbuild/protobuf";
-     import {FileDescriptorSetSchema} from "@bufbuild/protobuf/wkt";
-     export async function who(identity,bytes){
-       const service=createFileRegistry(fromBinary(FileDescriptorSetSchema,new Uint8Array(bytes))).getService("app.RobotService");
-       const store=Store.open([],{name:"fleet",identity});
-       const q=new Queries(store,createConnectTransport({baseUrl:location.origin,useBinaryFormat:true}),[],{services:[service]});
-       try{return (await q.call(service.method.who,{})).value}finally{q.close()}
-     }`;}
- }]});
+ const sdk=await viteServer({server:{port:0,host:"127.0.0.1",proxy:{"/app.":{target:"http://"+address}}},logLevel:"error"});
  let browser;
  try{
    await sdk.listen();browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH});
@@ -82,7 +67,7 @@ try{
    const results=await page.evaluate(async({token,bytes})=>{
      const request=(rpc,auth)=>fetch("/app.RobotService/"+rpc,{method:"POST",headers:{"content-type":"application/json",...(auth?{authorization:"Bearer "+auth}:{})},body:'{"value":30}'});
      const login=await request("Login",token);if(!login.ok)throw Error(await login.text());
-     const {who}=await import("/auth-sdk.js");
+     const {who}=await import("/generated-auth-sdk.js");
      const ok=await who("oidc:user",bytes);
      async function status(identity){try{await who(identity,bytes);return 0}catch(e){return e.code}}
      const mismatch=await status("other");const visible=document.cookie;
