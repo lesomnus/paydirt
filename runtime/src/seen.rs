@@ -20,17 +20,25 @@ impl Transaction<'_> {
             .and_then(|v| v.get(key_name))
             .and_then(Value::as_str);
         let Some(key) = key.filter(|_| self.seen.is_some()) else {
-            return self.lookup(e, reference, false);
+            return self.read_reference(e, reference);
         };
         let entry = (e.name.clone(), key.to_owned());
         if let Some(row) = self.seen.as_deref().and_then(|cache| cache.0.get(&entry)) {
             return Ok(row.clone());
         }
-        let row = self.lookup(e, reference, false)?;
+        let row = self.read_reference(e, reference)?;
         if let Some(cache) = self.seen.as_mut() {
             cache.0.insert(entry, row.clone());
         }
         Ok(row)
+    }
+    fn read_reference(&mut self, entity: &Entity, reference: &Value) -> Result<Value> {
+        #[cfg(not(target_arch = "wasm32"))]
+        let timer = paydirt::slow::Timer::start();
+        let row = self.lookup(entity, reference, false);
+        #[cfg(not(target_arch = "wasm32"))]
+        timer.finish(|| format!("/{}Service/Get", entity.name).into());
+        row
     }
     // A change to an owning edge can change a descendant's visibility through a
     // multi-hop tenant path even if the descendant itself wasn't updated.

@@ -2,6 +2,8 @@
 pub mod environment;
 pub mod page;
 pub mod rbac;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod slow;
 #[cfg(all(feature = "watch-postgres", not(target_arch = "wasm32")))]
 pub mod spin;
 pub mod tenant;

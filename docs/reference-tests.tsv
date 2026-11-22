@@ -284,19 +284,19 @@ secret_test.go	63	TestASecretThatIsNotBytesIsNotAnsweredWith	tracked			101
 secret_test.go	102	TestTheWriteHalfStillWorks	tracked			101
 secret_test.go	129	TestASecretIsNotInTheTrail	verified	connect/sqlite+postgres	web/generated-access.mjs#L26	
 secret_test.go	219	TestASecretIsNotStreamed	verified	connect/sqlite+postgres	web/generated-cell.mjs#L101	
-seen_test.go	74	TestATransactionAsksAboutARowOnce	verified	store/sqlite+postgres	runtime/src/seen.rs#L101	
-seen_test.go	118	TestWhatOneFrameSawIsNotAnotherFramesAnswer	verified	store/sqlite+postgres	runtime/src/seen.rs#L129	
+seen_test.go	74	TestATransactionAsksAboutARowOnce	verified	store/sqlite+postgres	runtime/src/seen.rs#L109	
+seen_test.go	118	TestWhatOneFrameSawIsNotAnotherFramesAnswer	verified	store/sqlite+postgres	runtime/src/seen.rs#L137	
 seen_test.go	146	TestTheSinkComparesWhatItRemembers	tracked			102
-seen_test.go	189	TestARowWrittenInTheTransactionIsAskedAboutAgain	verified	store/sqlite+postgres	runtime/src/seen.rs#L105	
+seen_test.go	189	TestARowWrittenInTheTransactionIsAskedAboutAgain	verified	store/sqlite+postgres	runtime/src/seen.rs#L113	
 serve_test.go	25	TestTheAppIsWhatTheAppWrote	verified	connect/sqlite+postgres	web/generated-cell.mjs#L114	
 serve_test.go	56	TestServes	verified	connect/sqlite+postgres	web/generated-cell.mjs#L77	
 session_test.go	112	TestAPageSignsInAndIsServedAsSomebody	verified	connect/cookies-sqlite	web/generated-authentication.mjs#L57	
 session_test.go	138	TestSigningOutStopsTheNextCall	verified	connect/cookies-sqlite	web/generated-authentication.mjs#L60	
 session_test.go	165	TestACookieForSomebodyWhoIsNotThereIsRefused	tracked			106
-slow_test.go	29	TestTheSlowLogNamesTheCallThatWasSlow	tracked			107
-slow_test.go	68	TestASlowLogSaysNothingAboutACallThatWasNot	tracked			107
-slow_test.go	91	TestASlowLogChangesNothingAboutTheAnswer	tracked			107
-slow_test.go	119	TestTheServedStackHasTheInterceptorInIt	tracked			107
+slow_test.go	29	TestTheSlowLogNamesTheCallThatWasSlow	verified	connect/sqlite	web/generated-slow.mjs#L51	
+slow_test.go	68	TestASlowLogSaysNothingAboutACallThatWasNot	verified	connect/sqlite	web/generated-slow.mjs#L54	
+slow_test.go	91	TestASlowLogChangesNothingAboutTheAnswer	verified	connect/sqlite	web/generated-slow.mjs#L44	
+slow_test.go	119	TestTheServedStackHasTheInterceptorInIt	verified	connect/sqlite	web/generated-slow.mjs#L50	
 stale_test.go	23	TestAPatchWhoseVersionMovedIsRefused	verified	store/sqlite+postgres	runtime/tests/entity.rs#L107	
 stamp_test.go	23	TestAStampIsWrittenByTheServer	tracked			102
 stamp_test.go	53	TestAStampIsNotTheCallersToWrite	verified	connect/sqlite+postgres	web/generated-tenancy.mjs#L27	

@@ -56,6 +56,8 @@ impl Layer {
             method,
             ctx,
             done: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            started: Some(paydirt::slow::Timer::start()),
         })
     }
 }
@@ -64,6 +66,8 @@ pub(crate) struct Call {
     method: &'static str,
     pub ctx: RequestContext,
     done: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    started: Option<paydirt::slow::Timer>,
 }
 impl Call {
     fn finish(&mut self, err: Option<&ConnectError>) {
@@ -135,6 +139,10 @@ impl Call {
             let public = self.output(&reply.body)?;
             Ok(reply.map_body(|original| Body { original, public }))
         });
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(timer) = self.started.take() {
+            timer.finish(|| self.method.into());
+        }
         self.finish(res.as_ref().err());
         res
     }
