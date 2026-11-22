@@ -39,7 +39,9 @@ pub fn generate(work: &Path) -> Result<()> {
     for file in image["file"].as_array().ok_or("expected files")? {
         let package = file["package"].as_str().unwrap_or_default();
         if let Some(app) = file["options"].get("[payday.app]") {
-            apps.insert(package, app);
+            let mut config = app.clone();
+            config["goPackage"] = file["options"]["goPackage"].clone();
+            apps.insert(package, config);
         }
         for message in file["messageType"].as_array().into_iter().flatten() {
             if message["options"].get("[payday.notification]").is_some() {
