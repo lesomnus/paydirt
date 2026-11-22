@@ -18,6 +18,7 @@ pub static OPTIONS: LazyLock<Options> = LazyLock::new(|| {
 pub struct Attempt {
     frame: Arc<Mutex<Option<Frame>>>,
     written: Arc<Mutex<BTreeSet<String>>>,
+    named: Arc<Mutex<std::collections::BTreeMap<String,BTreeSet<String>>>>,
     pub(super) refused: Arc<Mutex<std::collections::BTreeMap<String, BTreeSet<String>>>>,
     request: Value,
     reason: Option<String>,
@@ -117,7 +118,10 @@ impl Attempt {
                 .as_deref()
                 .is_some_and(|a| a.starts_with("shell:"));
         let refused = std::mem::take(&mut *self.refused.lock().unwrap());
-        let packet = if !refused.is_empty() {
+        let named=std::mem::take(&mut *self.named.lock().unwrap());
+        let packet = if !named.is_empty() {
+            Packet::ObservedNames{observation,named,refused,buffered}
+        } else if !refused.is_empty() {
             Packet::RefusedWrites {
                 observation,
                 subjects: refused,
@@ -136,6 +140,11 @@ impl Attempt {
             db.schedule_access_flush(ms);
         }
         Ok(())
+    }
+    pub(super) fn named(ctx:&RequestContext, tenant:&[u8;16], subject:&[u8;16]) {
+        if let Some(a)=ctx.extensions().get::<Self>() {
+            a.named.lock().unwrap().entry(STANDARD.encode(tenant)).or_default().insert(STANDARD.encode(subject));
+        }
     }
     pub async fn failed(&self, db: &Database, err: ConnectError) -> ConnectError {
         let _ = self.record(db, None, err.code.as_str()).await;

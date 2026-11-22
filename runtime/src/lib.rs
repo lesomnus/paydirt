@@ -31,6 +31,8 @@ pub mod notify;
 pub mod outbox;
 mod past;
 pub mod past_expiry;
+mod past_facts;
+mod past_values;
 mod relations;
 pub mod resource;
 pub mod secrets;
@@ -345,6 +347,9 @@ impl Store {
     pub fn seed(&mut self, rows: Vec<(String, Value)>) -> Result<()> {
         self.transaction(&Scope::Internal, |tx| {
             for (name, row) in rows {
+                if tx.policies.get(&name).is_some_and(|p| p.past_write("Add")) {
+                    return Err(Fault::denied("a past is written by the past package"));
+                }
                 let e = tx.model.entity(&name).map_err(Fault::invalid)?;
                 let key = &e.key().map_err(Fault::invalid)?.json;
                 let id = row
@@ -452,6 +457,10 @@ pub struct Transaction<'a> {
     failed: Option<Fault>,
 }
 impl Policy {
+    fn past_write(&self, method: &str) -> bool {
+        matches!(self.entity["own"].as_str(), Some("OWN_EVENT" | "OWN_FACT"))
+            && matches!(method, "Add" | "AddMany" | "Patch" | "Apply" | "Erase")
+    }
     fn deployment_method(&self, method: &str) -> bool {
         match self.entity["own"].as_str() {
             Some("OWN_TENANT") => matches!(method, "Add" | "AddMany" | "Erase"),
@@ -464,6 +473,15 @@ impl Policy {
 }
 impl Transaction<'_> {
     pub fn call(&mut self, call: Call) -> Result<Value> {
+        if self
+            .policies
+            .get(&call.entity)
+            .is_some_and(|p| p.past_write(&call.method))
+        {
+            let fault = Fault::denied("a past is written by the past package");
+            self.failed = Some(fault.clone());
+            return Err(fault);
+        }
         if !matches!(self.scope, Scope::Internal)
             && self
                 .policies

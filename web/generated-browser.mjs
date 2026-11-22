@@ -29,7 +29,7 @@ export async function open(principals,withAccounts=false,restricted=false){
   const sandbox=await openSandbox(withAccounts?{...principals,...membership.principals}:principals,"paydirt",{allowGeneralWrites:true,seeds:withAccounts?[...membership.seeds,membership.grant]:[],policy:restricted?membership.policy:undefined});
   const bytes=new Uint8Array(await (await fetch("./pkg/descriptors.binpb")).arrayBuffer());
   const registry=createFileRegistry(fromBinary(FileDescriptorSetSchema,bytes));const robot=registry.getService("app.RobotService");const holder=registry.getService("app.HolderService");
-  const owned=name=>{const svc=registry.getService("app."+name+"Service");return svc && createClient(svc,sandbox.link.transport)};return {registry,resourceHeaders,resources:createClient(registry.getService("payday.ResourceService"),sandbox.link.transport),robotService:robot,readings:owned("ComputedReading"),notification:owned("Notification"),accountNotification:owned("NotificationAccount"),event:owned("Event"),fact:owned("Fact"),holder:holder && createClient(holder,sandbox.link.transport),typed:robot && createClient(robot,sandbox.link.transport),robots:createClient(RobotService,sandbox.link.transport),client:createClient(CellService,sandbox.link.transport),close:()=>sandbox.close()};
+  const owned=name=>{const svc=registry.getService("app."+name+"Service");return svc && createClient(svc,sandbox.link.transport)};return {registry,resourceHeaders,resources:createClient(registry.getService("payday.ResourceService"),sandbox.link.transport),robotService:robot,readings:owned("ComputedReading"),notification:owned("Notification"),accountNotification:owned("NotificationAccount"),event:owned("Event"),access:owned("Access"),fact:owned("Fact"),holder:holder && createClient(holder,sandbox.link.transport),typed:robot && createClient(robot,sandbox.link.transport),robots:createClient(RobotService,sandbox.link.transport),client:createClient(CellService,sandbox.link.transport),close:()=>sandbox.close()};
 }
 `);
 const server=await createServer({root,optimizeDeps:{entries:["index.html","harness.js","request-streams.js"],exclude:["@lesomnus/grpc-dgram"]},server:{hmr:false,host:"127.0.0.1",port:0},logLevel:"error"});
@@ -49,6 +49,7 @@ try{
   const [[first,tenant],[second]]=Object.entries(tenants);
   const actor=Buffer.from(tenant,"hex");actor[9]=2;
   tenants.represented={tenant,actor:actor.toString("hex"),caller:actor.toString("hex"),caller_tenant:tenant};
+  tenants["audit-review"]={tenant,methods:["/app.AccessService/*","/app.AuditService/*"]};
   tenants.reader={tenant,methods:["/app.RobotService/Get"]};
   const check=async({tenants,id,move,compareGo})=>{
     const {open}=await import("/harness.js");const app=await open(tenants,move);
@@ -77,7 +78,7 @@ try{
         const {requestStreams}=await import("/request-streams.js");await requestStreams(app.typed,app.robotService,opts(a),compareGo);
         const {runPair}=await import("/pair.js");
         await runPair(app.typed,opts(a),bytes);
-        const {operationCases}=await import("/past-ops.js");await operationCases(app.typed,app.event,opts(a),opts(b),bytes);
+        const {operationCases}=await import("/past-ops.js");await operationCases(app.typed,app.event,app.fact,app.access,opts(a),opts(b),bytes);
         const {resourceCases}=await import("/resource.js");
         await resourceCases(app.registry,app.resources,app.client,app.typed,opts(a),opts(b),bytes,Uint8Array.from(other.match(/../g),v=>parseInt(v,16)),false,app.resourceHeaders);
 

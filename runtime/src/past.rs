@@ -1,37 +1,18 @@
 //! Application events and the valid-time and recorded-time history of their subjects.
 use crate::{Fault, Result, Transaction, driver::Query, value};
 use chrono::{DateTime, Utc};
-use paydirt_model::{Entity, Field, quote};
+use paydirt_model::{Entity, quote};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
 type Slot = (u32, String);
-fn time(v: &Value) -> Result<DateTime<Utc>> {
+pub(crate) fn time(v: &Value) -> Result<DateTime<Utc>> {
     v.as_str()
         .and_then(|s| s.parse().ok())
         .ok_or_else(|| Fault::invalid("expected RFC3339 timestamp"))
 }
-fn canonical(f: &Field, v: &Value) -> Result<String> {
-    if v.is_null() {
-        return Ok("null".into());
-    }
-    if !f.target.is_empty() || f.kind == "UUID" {
-        let id = value::bytes(v.get("id").unwrap_or(v))?;
-        return Ok(json!(
-            paydirt::format_id(&id).ok_or_else(|| Fault::invalid("invalid fact UUID"))?
-        )
-        .to_string());
-    }
-    if matches!(
-        f.kind.as_str(),
-        "INT64" | "SINT64" | "SFIXED64" | "UINT64" | "FIXED64"
-    ) && let Some(n) = v.as_str()
-    {
-        return Ok(n.to_owned());
-    }
-    Ok(v.to_string())
-}
 fn changes(
+    desc: Option<&buffa_reflect::MessageDescriptor>,
     entity: &Entity,
     policy: &crate::Policy,
     before: &Value,
@@ -39,7 +20,7 @@ fn changes(
 ) -> Result<BTreeMap<Slot, String>> {
     let mut out = BTreeMap::new();
     for f in &entity.fields {
-        if f.name == entity.key || f.version || f.immutable {
+        if f.name == entity.key || f.version || f.immutable || f.erased || !f.is_column() {
             continue;
         }
         let (a, b) = (&before[&f.json], &after[&f.json]);
@@ -58,7 +39,10 @@ fn changes(
                 .collect();
             for key in keys {
                 if a[key] != b[key] {
-                    out.insert((f.number, key.clone()), b[key].to_string());
+                    out.insert(
+                        (f.number, key.clone()),
+                        super::past_values::translate(desc, f, &b[key], true)?.to_string(),
+                    );
                 }
             }
         } else {
@@ -70,7 +54,7 @@ fn changes(
             } else if private {
                 String::new()
             } else {
-                canonical(f, b)?
+                super::past_values::translate(desc, f, b, true)?.to_string()
             };
             out.insert((f.number, String::new()), v);
         }
@@ -162,6 +146,14 @@ impl Transaction<'_> {
             .collect()
     }
     pub(crate) fn begin_event(&mut self, e: &Entity, req: &Value) -> Result<Value> {
+        let data = self.prepare_event(e, req)?;
+        if data["done"] == true {
+            return Ok(data);
+        }
+        let event = self.owned_entity("OWN_EVENT")?.clone();
+        self.insert(&event, &data)
+    }
+    pub(crate) fn prepare_event(&mut self, e: &Entity, req: &Value) -> Result<Value> {
         let frame = self
             .frame
             .ok_or_else(|| Fault::precondition("events require an application transaction"))?;
@@ -262,9 +254,9 @@ impl Transaction<'_> {
             .filter(|v| !v.is_null())
             .cloned()
             .unwrap_or_else(|| self.inputs.stamp());
-        time(&start)?;
-        data["dateOccurred"] = start;
-        self.insert(&event, &data)
+        data["dateOccurred"] =
+            json!(time(&start)?.to_rfc3339_opts(chrono::SecondsFormat::Micros, true));
+        Ok(data)
     }
     pub(crate) fn past_lock(&mut self, id: &[u8]) -> Result<()> {
         if self.db.dialect() == paydirt_model::Dialect::Postgres {
@@ -294,6 +286,22 @@ impl Transaction<'_> {
     ) -> Result<Value> {
         let event_schema = self.owned_entity("OWN_EVENT")?.clone();
         let event = self.lookup(&event_schema, &json!({"id":event_id}), false)?;
+        let rows = self.prepare_facts(e, &event, req)?;
+        self.write_facts(&rows)?;
+        Ok(event)
+    }
+    pub(crate) fn prepare_facts(
+        &mut self,
+        e: &Entity,
+        event: &Value,
+        req: &Value,
+    ) -> Result<Vec<Value>> {
+        let frame = self
+            .frame
+            .ok_or_else(|| Fault::precondition("facts require an application transaction"))?;
+        if event["tenant"]["id"] != value::encoded(&frame.tenant) {
+            return Err(Fault::missing());
+        }
         let (before, after) = (&req["before"], &req["after"]);
         let subject = &after["id"];
         if !before.is_null() && before["id"] != *subject {
@@ -310,28 +318,13 @@ impl Transaction<'_> {
             .cloned()
             .unwrap_or_else(|| event["dateOccurred"].clone());
         time(&start)?;
-        let changes = changes(e, &self.policies[&e.name], before, after)?;
-        let fact = self.owned_entity("OWN_FACT")?.clone();
-        for ((n, key), val) in changes {
-            let existing = self.matching(
-                &fact,
-                &[
-                    ("subject_id", subject),
-                    ("field_number", &json!(n)),
-                    ("key", &json!(key)),
-                    ("date_start", &start),
-                ],
-                true,
-            )?;
-            for old in existing
-                .into_iter()
-                .filter(|r| r.get("dateSuperseded").is_none())
-            {
-                self.patch(&fact,&json!({"ref":{"id":old["id"]},"dateUpdated":old["dateUpdated"],"dateSuperseded":event["dateCreated"],"supersededBy":event["id"]}),"Patch")?;
-            }
-            self.insert(&fact,&json!({"tenant":{"id":tenant},"subjectId":subject,"eventId":event["id"],"fieldNumber":n,"domain":self.policies[&e.name].entity["domain"],"key":key,"value":val,"dateStart":start}))?;
-        }
-        Ok(event)
+        let desc = self.trail.and_then(|r| r.pool.get_message_by_name(&e.name));
+        let changes = changes(desc.as_ref(), e, &self.policies[&e.name], before, after)?;
+        Ok(changes.into_iter().map(|((n,key),val)| json!({
+            "tenant":{"id":tenant},"subjectId":subject,"eventId":event["id"],"fieldNumber":n,
+            "domain":self.policies[&e.name].entity["domain"],"key":key,"value":val,
+            "dateCreated":event["dateCreated"],"dateStart":start
+        })).collect())
     }
     pub(crate) fn say(&mut self, e: &Entity, req: &Value) -> Result<Value> {
         let mut op = req.clone();
@@ -353,8 +346,27 @@ impl Transaction<'_> {
             .filter(|v| !v.is_null())
             .map(time)
             .transpose()?;
+        let slots = fold(&rows, at, known)?;
+        let desc = self.trail.and_then(|r| r.pool.get_message_by_name(&e.name));
+        let mut state = json!({"id":subject["id"]});
+        for ((number, key), row) in &slots {
+            let Some(f) = e.fields.iter().find(|f| f.number == *number) else {
+                continue;
+            };
+            let Some(raw) = row["value"].as_str().filter(|s| !s.is_empty()) else {
+                continue;
+            };
+            let saved: Value =
+                serde_json::from_str(raw).map_err(|_| Fault::internal("invalid fact value"))?;
+            let v = super::past_values::translate(desc.as_ref(), f, &saved, false)?;
+            if f.collection == "map" {
+                state[&f.json][key] = v;
+            } else {
+                state[&f.json] = v;
+            }
+        }
         Ok(
-            json!({"subject":subject["id"],"facts":fold(&rows,at,known)?.into_values().collect::<Vec<_>>()}),
+            json!({"subject":subject["id"],"facts":slots.into_values().collect::<Vec<_>>(),"values":state}),
         )
     }
 }
@@ -378,12 +390,12 @@ mod tests {
         .unwrap();
         let record =
             json!({"id":"never","name":"public","contacts":{"person":"phone"},"password":"secret"});
-        let slots = changes(&entity, &policy, &Value::Null, &record).unwrap();
+        let slots = changes(None, &entity, &policy, &Value::Null, &record).unwrap();
         assert_eq!(
             slots.into_values().collect::<Vec<_>>(),
             [r#""public""#, "", ""]
         );
-        let clear = changes(&entity, &policy, &record, &Value::Null).unwrap();
+        let clear = changes(None, &entity, &policy, &record, &Value::Null).unwrap();
         assert_eq!(clear[&(25, "".into())], "null");
     }
     #[test]
@@ -417,7 +429,13 @@ mod tests {
 impl Transaction<'_> {
     pub(crate) fn redact_reason(&mut self, req: &Value) -> Result<Value> {
         let event = self.owned_entity("OWN_EVENT")?.clone();
+        let frame = self
+            .frame
+            .ok_or_else(|| Fault::precondition("redaction requires an application transaction"))?;
         let row = self.lookup(&event, &req["ref"], true)?;
+        if row["tenant"]["id"] != value::encoded(&frame.tenant) {
+            return Err(Fault::missing());
+        }
         if row["reason"].as_str().unwrap_or_default().is_empty() {
             return Ok(Value::Null);
         }

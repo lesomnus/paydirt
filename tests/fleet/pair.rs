@@ -3,7 +3,7 @@ use crate::{
     services::app::{RobotService, RobotServiceLayer},
     storage::RobotCalls,
 };
-use connectrpc::{RequestContext, Response, ServiceRequest, ServiceResult};
+use connectrpc::{ConnectError, RequestContext, Response, ServiceRequest, ServiceResult};
 
 pub struct Pair(pub crate::storage::Next);
 
@@ -122,40 +122,71 @@ impl<N: RobotService> RobotServiceLayer<N> for Pair {
             )
             .await?;
         let mut catalog = Catalog::new("en");
+        let legacy_db = self.0.0.clone();
+        catalog.legacy(move |reading, row| {
+            let db = legacy_db.clone();
+            async move {
+                let said = row["said"].as_str().unwrap_or_default();
+                if said.is_empty() {
+                    return Ok(row["kind"].as_str().unwrap_or_default().into());
+                }
+                if !said.contains("{actor}") {
+                    return Ok(said.into());
+                }
+                let id = STANDARD
+                    .decode(row["actorId"].as_str().unwrap_or_default())
+                    .ok()
+                    .and_then(|v| v.try_into().ok())
+                    .ok_or_else(|| ConnectError::invalid_argument("invalid legacy actor"))?;
+                Ok(said.replace("{actor}", &reading.name(&db, "app.Holder", id).await?))
+            }
+        });
         for lang in ["en", "ko"] {
             let layer = self.0.clone();
-            catalog.add("robot.move", lang, move |reading, row| {
-                let layer = layer.clone();
-                async move {
-                    let id = STANDARD.decode(row["subjectId"].as_str().unwrap()).unwrap();
-                    let robot = layer
-                        .app_robot()
-                        .get_owned(
-                            &reading.ctx,
-                            RobotGetRequest {
-                                r#ref: RobotRef {
-                                    key: Some(robot_ref::Key::Id(id)),
-                                    ..Default::default()
-                                }
-                                .into(),
-                                ..Default::default()
-                            },
-                        )
-                        .await?;
-                    let at = row["dateOccurred"]
-                        .as_str()
-                        .unwrap()
-                        .parse::<chrono::DateTime<chrono::Utc>>()
-                        .unwrap()
-                        .with_timezone(&reading.zone);
-                    Ok(format!(
-                        "{} {} {}",
-                        reading.language,
-                        robot.alias,
-                        at.format("%H:%M")
-                    ))
-                }
-            });
+            let second = req.subject.clone();
+            catalog
+                .add_payload::<RobotMoved, _, _>(None, lang, move |reading, row| {
+                    let layer = layer.clone();
+                    let second = second.clone();
+                    async move {
+                        let id = STANDARD.decode(row["subjectId"].as_str().unwrap()).unwrap();
+                        let mut display = reading
+                            .name(
+                                &layer.0,
+                                "app.Robot",
+                                id.try_into()
+                                    .map_err(|_| ConnectError::internal("invalid robot id"))?,
+                            )
+                            .await?;
+                        if !second.is_empty() {
+                            display += &format!(
+                                " + {}",
+                                reading
+                                    .name(
+                                        &layer.0,
+                                        "app.Robot",
+                                        second.try_into().map_err(|_| {
+                                            ConnectError::invalid_argument("invalid second subject")
+                                        })?
+                                    )
+                                    .await?
+                            );
+                        }
+                        let at = row["dateOccurred"]
+                            .as_str()
+                            .unwrap()
+                            .parse::<chrono::DateTime<chrono::Utc>>()
+                            .unwrap()
+                            .with_timezone(&reading.zone);
+                        Ok(format!(
+                            "{} {} {}",
+                            reading.language,
+                            display,
+                            at.format("%H:%M")
+                        ))
+                    }
+                })
+                .map_err(ConnectError::internal)?;
         }
         catalog
             .validate(&["robot.move"])
@@ -165,7 +196,7 @@ impl<N: RobotService> RobotServiceLayer<N> for Pair {
             .and_then(|h| h.to_str().ok())
             .unwrap_or("en");
         let sentence = catalog
-            .describe(
+            .describe_event(
                 &ctx,
                 serde_json::to_value(event).unwrap(),
                 pref,
@@ -173,7 +204,7 @@ impl<N: RobotService> RobotServiceLayer<N> for Pair {
             )
             .await?;
         Response::ok(RobotJournalReply {
-            sentence,
+            sentence: sentence["desc"].as_str().unwrap_or_default().to_owned(),
             ..Default::default()
         })
     }
@@ -446,5 +477,72 @@ impl<N: RobotService> RobotServiceLayer<N> for Pair {
             )
             .await?,
         )
+    }
+}
+
+#[cfg(test)]
+mod catalog_sentences {
+    use super::*;
+    use crate::transport::past::{Catalog, event_types};
+    use serde_json::json;
+    #[tokio::test]
+    async fn each_kind_has_its_own_words_and_falls_back_to_its_default_language() {
+        let mut c = Catalog::new("en");
+        for (kind, lang, words) in [
+            ("correct", "en", "corrected"),
+            ("retract", "en", "retracted"),
+            ("retract", "ko", "되돌림"),
+        ] {
+            c.add(kind, lang, move |_, _| async move { Ok(words.to_owned()) });
+        }
+        let names = ["retract", "correct"];
+        assert_eq!(c.unsaid("ko", &names), ["correct"]);
+        assert_eq!(c.unsaid("fr", &names), ["correct", "retract"]);
+        assert!(c.validate(&names).is_err());
+        let ctx = RequestContext::new(Default::default());
+        let zone = chrono_tz::UTC;
+        assert_eq!(
+            c.describe(&ctx, json!({"kind":"correct"}), "ko", zone)
+                .await
+                .unwrap(),
+            "corrected"
+        );
+        assert_eq!(
+            c.describe(&ctx, json!({"kind":"retract"}), "ko-KR,en;q=0.5", zone)
+                .await
+                .unwrap(),
+            "되돌림"
+        );
+        c.add("correct", "ko", |_, _| async { Ok("고침".into()) });
+        c.validate(&names).unwrap();
+        assert_eq!(
+            c.describe(&ctx, json!({"kind":"correct"}), "ko", zone)
+                .await
+                .unwrap(),
+            "고침"
+        );
+        assert_eq!(event_types()["robot.move"], "app.RobotMoved");
+        let moved=crate::transport::past::payload::<RobotMoved>(&json!({"kind":"robot.move","value":{"@type":"type.googleapis.com/app.RobotMoved","robot":"AQID"}})).unwrap();
+        assert_eq!(moved.robot, [1, 2, 3]);
+        assert!(
+            crate::transport::past::payload::<RobotMoved>(
+                &json!({"kind":"robot.move","value":{"@type":"type.googleapis.com/app.Robot"}})
+            )
+            .is_err()
+        );
+        assert!(
+            c.add_payload::<RobotMoved, _, _>(Some("wrong"), "en", |_, _| async {
+                Ok(String::new())
+            })
+            .is_err()
+        );
+        assert!(
+            c.add_payload::<Robot, _, _>(None, "en", |_, _| async { Ok(String::new()) })
+                .is_err()
+        );
+        let duplicate = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            c.add("correct", "ko", |_, _| async { Ok(String::new()) })
+        }));
+        assert!(duplicate.is_err());
     }
 }

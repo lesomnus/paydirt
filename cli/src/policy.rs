@@ -64,14 +64,22 @@ pub fn generate(work: &Path) -> Result<()> {
                     message["name"].as_str().ok_or("missing payload name")?
                 ));
             }
-            if let Some(kinds) = message["options"]["[payday.event]"]["kinds"].as_array() {
+            if let Some(event) = message["options"].get("[payday.event]") {
+                let full = format!(
+                    "{package}.{}",
+                    message["name"].as_str().ok_or("missing event type")?
+                );
+                let mut kinds = event["kinds"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|k| k.as_str().ok_or("invalid event kind"))
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                if kinds.is_empty() {
+                    kinds.push(&full);
+                }
                 for kind in kinds {
-                    let kind = kind.as_str().ok_or("invalid event kind")?;
-                    let name = message["name"].as_str().ok_or("missing event type")?;
-                    if event_types
-                        .insert(kind, format!("{package}.{name}"))
-                        .is_some()
-                    {
+                    if event_types.insert(kind.to_owned(), full.clone()).is_some() {
                         return Err(format!("duplicate event kind {kind}").into());
                     }
                 }

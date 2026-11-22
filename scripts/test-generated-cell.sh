@@ -34,6 +34,7 @@ cargo build --quiet --features resource-cel --manifest-path "$CELL_PROJECT/Cargo
 export PAYDIRT_TEST_MOVE=1 CELL_SQLITE_PATH="$work/fleet.sqlite3"
 node generated-cell.mjs
 cargo test --quiet --manifest-path "$CELL_PROJECT/Cargo.toml" --bin fleet operator_tests
+cargo test --quiet --manifest-path "$CELL_PROJECT/Cargo.toml" --lib catalog_sentences
 node generated-replicas.mjs
 cargo test --manifest-path "$repo/Cargo.toml" -p paydirt-store --features sqlite,postgres --test notify_policy --test past_expiry
 

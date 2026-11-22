@@ -320,6 +320,20 @@ pub fn generate(work: &Path) -> Result<()> {
                         && method["policy"].get("account").is_none()
                 }
             };
+            if matches!(own, Some("OWN_EVENT" | "OWN_FACT"))
+                && matches!(
+                    rpc.as_str(),
+                    "Add" | "AddMany" | "Patch" | "Apply" | "Erase"
+                )
+            {
+                let (_, output) = types.get(&snake).ok_or("missing history response")?;
+                let output = message_path(output, "crate::proto");
+                writeln!(
+                    gate,
+                    "{sig} {{let _=(next,ctx,{arg});async move {{ Err::<connectrpc::Response<{output}>,_>(connectrpc::ConnectError::permission_denied(\"a past is written by the past package\")) }} }}"
+                )?;
+                continue;
+            }
             if deployment_only {
                 writeln!(
                     gate,

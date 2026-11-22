@@ -327,7 +327,12 @@ impl Transaction<'_> {
             err
         }
     }
-    fn insert_items(&mut self, e: &Entity, items: &[Value], many: bool) -> Result<Vec<Value>> {
+    pub(crate) fn insert_items(
+        &mut self,
+        e: &Entity,
+        items: &[Value],
+        many: bool,
+    ) -> Result<Vec<Value>> {
         if items.is_empty() {
             return Ok(vec![]);
         }
@@ -712,6 +717,11 @@ impl Transaction<'_> {
             "$expire_past" => self.expire_history(req),
             "$begin_event" => self.begin_event(e, req),
             "$event_facts" => self.event_facts(e, &req["event"], req),
+            "$correct_fact" | "$correct_event" => {
+                self.correct_history(req, method == "$correct_event")
+            }
+            "$event_children" => self.event_children(e, req),
+            "$statements" => self.statements(req),
             "$redact_reason" => self.redact_reason(req),
             "$event" => self.say(e, req),
             "$state" => self.past_state(e, req),

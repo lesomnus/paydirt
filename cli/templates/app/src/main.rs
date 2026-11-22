@@ -53,6 +53,11 @@ struct Meter {
     retry_ms: Option<u64>,
 }
 #[derive(Deserialize)]
+struct PastExpiry {
+    window: paydirt_store::past_expiry::Window,
+    every_ms: u64,
+}
+#[derive(Deserialize)]
 struct Operator {actor:String,tenant:String,address:String}
 #[derive(Deserialize)]
 struct Config {
@@ -65,6 +70,7 @@ struct Config {
     rate: Option<paydirt_server::Rate>,
     meter: Option<Meter>,
     notification_expiry_ms: Option<u64>,
+    past_expiry: Option<PastExpiry>,
 
     grant_source: Option<grants::Source>,
     #[serde(default)]
@@ -328,6 +334,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 })
                 .await
                 .map_err(|e| e.to_string())
+            }
+        })?;
+    }
+    if let Some(expiry) = config.past_expiry {
+        if expiry.every_ms == 0 {return Err("past expiry interval must be positive".into());}
+        let url = url.clone();
+        workers.add("payday.past.expire", Placement::Singleton, move |stop| {
+            let url=url.clone();
+            let window=expiry.window.clone();
+            async move {
+                let mut store=__APP_CRATE__::resource::record(paydirt_store::Store::open(&url,MODEL,POLICIES).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+                loop {
+                    if stop.stopped(){return Ok(())}
+                    match store.expire_all_past(|_|Ok(window.clone())) {
+                        Ok(results)=>for (tenant,result) in results {if let Err(e)=result{eprintln!("past expiry for {}: {e}",paydirt::format_id(&tenant).unwrap_or_default())}},
+                        Err(e)=>eprintln!("past expiry: {e}"),
+                    }
+                    tokio::select!{_=stop.cancelled()=>return Ok(()),_=tokio::time::sleep(Duration::from_millis(expiry.every_ms))=>{}}
+                }
             }
         })?;
     }
