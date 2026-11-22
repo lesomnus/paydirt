@@ -18,6 +18,8 @@ source = robot.read_text()
 header = source.split("// This package", 1)[0]
 entities = [re.search(rf"^message {name} \{{.*?^\}}", source, re.M | re.S).group() for name in ["Cell", "Robot", "Pairing", "Reading","RobotMoved"]]
 robot.write_text(header + "option (payday.app) = {accounts: {field: {name: \"account\", number: 12}} past: {event:17, fact:18} entitlements:{domain:43} meters:[{key:\"apptest.robots\" unit:\"{robot}\" count:{of:\"Robot\"}},{key:\"apptest.seats\" unit:\"{seat}\" count:{of:\"Holder\"}},{key:\"apptest.robots.attested\" unit:\"{robot}\" count:{of:\"Robot\" where:[{field:{name:\"date_attested\" number:31} set:true}]}}] notify:{notification:40 receipt:41 accounts:{} keep:{days:90 retry_days:1}}};\n" + "\n\n".join(entities) + "\n")
+with robot.open("a") as source:
+    source.write("\nmessage StreamNumber { int32 value = 1; }\n")
 for rel in ["ext/app/payday/holder_svc.ext.proto", "ext/payday/holder.ext.proto","app/profile.proto"]:
     dest=app / "proto" / rel
     dest.parent.mkdir(exist_ok=True,parents=True)
@@ -26,8 +28,12 @@ copyfile(repo / "tests/fleet/readings.rs", app / "src/readings.rs")
 copyfile(repo / "tests/fleet/robot.rs", app / "src/robot.rs")
 lib = app / "src/lib.rs"
 source = lib.read_text()
-source = "mod readings;\nmod robot;\n" + source.replace("struct App(String);", "struct App(String, storage::Next);")
+copyfile(repo / "tests/fleet/interceptors.rs", app / "src/interceptors.rs")
+source = "mod interceptors;\nmod readings;\nmod robot;\n" + source.replace("struct App(String);", "struct App(String, storage::Next);")
 source = source.replace("impl storage::Layers for App {", """impl storage::Layers for App {
+        fn interceptors(&self) -> storage::intercept::Layer {
+            interceptors::layers()
+        }
         fn app_computed_reading(&self) -> impl services::app::ComputedReadingService {
             readings::PublicReadings
         }
@@ -36,9 +42,10 @@ source = source.replace("impl storage::Layers for App {", """impl storage::Layer
         }""")
 source = source.replace("database, &App(name)", "database.clone(), &App(name, storage::Next(database))")
 # Test the transaction boundary with a second independent user layer.
+copyfile(repo / "tests/fleet/invitation.proto", app / "proto/app/invitation.proto")
 copyfile(repo / "tests/fleet/pair.rs", app / "src/pair.rs")
 overlay = app / "proto/ext/app/robot_svc.ext.proto"
-overlay.write_text(overlay.read_text().replace("service RobotService {", "service RobotService {\n  rpc RenamePair(RobotRenamePairRequest) returns (Robot);\n  rpc Allowance(RobotAllowanceRequest) returns (RobotAllowanceResponse);") + "\n" + (repo / "tests/fleet/pair.proto").read_text())
+overlay.write_text(overlay.read_text().replace("service RobotService {", "service RobotService {\n  rpc Reveal(StreamNumber) returns (Robot);\n  rpc RevealStream(StreamNumber) returns (stream Robot);\n  rpc InFlight(StreamNumber) returns (StreamNumber);\n  rpc Pause(StreamNumber) returns (StreamNumber);\n  rpc Collect(stream StreamNumber) returns (StreamNumber);\n  rpc Converse(stream StreamNumber) returns (stream StreamNumber);\n  rpc RenamePair(RobotRenamePairRequest) returns (Robot);\n  rpc Invited(RobotAllowanceRequest) returns (InvitationCount) { option (payday.method) = {account:{}}; }\n  rpc Allowance(RobotAllowanceRequest) returns (RobotAllowanceResponse);") + "\n" + (repo / "tests/fleet/pair.proto").read_text())
 source = "mod pair;\n" + source.replace("services::app::RobotServiceOverlay { next, layer: robot::Fleet(self.1.clone()) }", """let core=services::app::RobotServiceOverlay { next, layer: robot::Fleet(self.1.clone()) };
             services::app::RobotServiceOverlay { next:core, layer:pair::Pair(self.1.clone()) }""")
 lib.write_text(source)

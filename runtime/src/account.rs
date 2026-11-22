@@ -140,3 +140,64 @@ impl Transaction<'_> {
         }
     }
 }
+
+/// Read predicates attached by an app-owned account-only method to a derived request context.
+#[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize)]
+pub struct AccountReads(std::collections::BTreeMap<String, Vec<ReadFilter>>);
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub enum ReadFilter {
+    /// Compare a persisted UUID field with the authenticated account.
+    AccountField(String),
+    /// Restrict keys to identifiers already resolved by application policy.
+    Ids(Vec<Vec<u8>>),
+}
+impl AccountReads {
+    pub fn allow(mut self, entity: impl Into<String>, filter: ReadFilter) -> Self {
+        self.0.entry(entity.into()).or_default().push(filter);
+        self
+    }
+    pub(crate) fn clauses(
+        &self,
+        e: &paydirt_model::Entity,
+        id: &[u8],
+        q: &mut crate::driver::Query,
+        dialect: paydirt_model::Dialect,
+    ) -> crate::Result<Vec<String>> {
+        use crate::driver::Bind;
+        use paydirt_model::quote;
+        let Some(filters) = self.0.get(&e.name).filter(|f| !f.is_empty()) else {
+            return Ok(vec!["1=0".into()]);
+        };
+        let mut result = Vec::new();
+        for f in filters {
+            match f {
+                ReadFilter::AccountField(field) => {
+                    let field = e.field(field).map_err(crate::Fault::invalid)?;
+                    if !field.is_column() || !matches!(field.kind.as_str(), "BYTES" | "UUID") {
+                        return Err(crate::Fault::invalid(
+                            "account scope requires a persisted identifier field",
+                        ));
+                    }
+                    let param = q.param(Bind::Bytes(id.to_vec()), dialect);
+                    result.push(format!("r.{}={param}", quote(&field.column())));
+                }
+                ReadFilter::Ids(ids) if ids.is_empty() => result.push("1=0".into()),
+                ReadFilter::Ids(ids) => {
+                    if ids.iter().any(|id| id.len() != 16) {
+                        return Err(crate::Fault::invalid("account scope requires UUID keys"));
+                    }
+                    let params = ids
+                        .iter()
+                        .map(|id| q.param(Bind::Bytes(id.clone()), dialect))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    result.push(format!(
+                        "r.{} IN ({params})",
+                        quote(&e.key().map_err(crate::Fault::invalid)?.column())
+                    ));
+                }
+            }
+        }
+        Ok(result)
+    }
+}

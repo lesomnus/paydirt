@@ -83,7 +83,7 @@ impl Schema {
             .chain(overlays.iter().map(|p| work.join("ext").join(p)))
         {
             let text = output(
-                Command::new("buf").arg("format").arg(path),
+                crate::project::buf().arg("format").arg(path),
                 "reading protobuf imports",
             )?;
             for line in text.lines().filter(|l| l.starts_with("import ")) {
@@ -114,7 +114,7 @@ impl Schema {
         }
         let image = work.join("app-options.json");
         output(
-            Command::new("buf")
+            crate::project::buf()
                 .current_dir(work)
                 .args(["build", "--as-file-descriptor-set", "-o"])
                 .arg(&image),
@@ -304,7 +304,7 @@ fn merge(base: &Path, overlay: &Path, user: bool) -> Result<String> {
     if user {
         // Parse/format first: overlays are fragments and may refer to types in the base.
         let text = output(
-            Command::new("buf").arg("format").arg(overlay),
+            crate::project::buf().arg("format").arg(overlay),
             "parsing schema overlay",
         )?;
         if text

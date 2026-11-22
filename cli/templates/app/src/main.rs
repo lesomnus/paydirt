@@ -1,9 +1,10 @@
+mod grants;
 mod operator;
 use __APP_CRATE__::{
     router,
     transport::{Database, MODEL, POLICIES},
 };
-use connectrpc::Server;
+
 use paydirt::watch::{Broker, Memory, nats::Nats, postgres::Postgres};
 use serde::Deserialize;
 use std::{error::Error, fs, sync::Arc, time::Duration};
@@ -48,8 +49,13 @@ struct Meter {
 #[derive(Deserialize)]
 struct Config {
     watch: Watch,
+    #[serde(default)]
+    serving: paydirt_server::Serving,
+    rate: Option<paydirt_server::Rate>,
     meter: Option<Meter>,
     notification_expiry_ms: Option<u64>,
+
+    grant_source: Option<grants::Source>,
     #[serde(default)]
     worker_lease: Option<String>,
     listen: std::net::SocketAddr,
@@ -101,6 +107,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut db = Database::from_store(store, &principals)?
         .with_broker(broker.clone())
         .allow_general_writes(config.allow_general_writes);
+    if let Some(rate) = config.rate {
+        db = db.with_rate(paydirt_server::Limiter::new(rate).map_err(|e| e as Box<dyn Error>)?);
+    }
     if let Ok(path) = std::env::var("PAYDIRT_POLICY_FILE") {
         let refresh = std::env::var("PAYDIRT_POLICY_REFRESH_MS")
             .ok()
@@ -188,6 +197,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
         })?;
     }
+    if let Some(source) = config.grant_source {
+        grants::register(&mut workers, &url, source)?;
+    }
     let lease = match config.worker_lease.as_deref() {
         None | Some("local") => Lease::Local,
         Some("postgres") => Lease::Postgres {
@@ -196,8 +208,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         },
         Some(v) => return Err(format!("unknown worker lease {v}").into()),
     };
-    let listener = Server::bind(addr).await.map_err(|e| e as Box<dyn Error>)?;
-    let routes = router(db, config.service_name);
+    let routes = router(db, config.service_name.clone());
+    let listener = paydirt_server::Host::bind(addr, config.serving, &config.service_name, routes)
+        .await
+        .map_err(|e| e as Box<dyn Error>)?;
     let stop = async {
         #[cfg(unix)]
         {
@@ -211,10 +225,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
     workers
         .run(lease, stop, move |stop| async move {
-            listener
-                .serve_with_graceful_shutdown(routes, async move { stop.cancelled().await })
-                .await
-                .map_err(|e| e.to_string())
+            listener.serve(stop).await.map_err(|e| e.to_string())
         })
         .await
         .map_err(Into::into)

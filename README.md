@@ -114,6 +114,15 @@ and deletion can repeat an event. Rust applications can call `Store::drain_once`
 with a custom `paydirt::watch::Broker`. Existing outbox rows without route
 metadata are delivered to matching service and key subscriptions.
 
+Run `paydirt entity list` to see names, domain numbers and scopes from the
+current schema. `paydirt buf` forwards arguments in the app's Buf workspace
+and respects `PAYDIRT_BUF`. `paydirt versions` reports the active toolchain and
+framework-managed Cargo and page dependencies. Preview manifest changes with
+`paydirt upgrade --dry-run` and apply them with `paydirt upgrade`. Run Cargo
+and the page package manager to refresh their locks after a manifest upgrade.
+`paydirt doctor` checks generated outputs, source declarations, app wiring and
+buildable entry points. It also reports unresolved personal-field decisions.
+
 ### TypeScript clients and application metadata
 
 Install `@bufbuild/protoc-gen-es` in the application or its `ts` directory and run

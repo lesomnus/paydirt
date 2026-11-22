@@ -11,6 +11,7 @@ await cp(resolve("generated-notify.js"),join(root,"notify.js"));
 await cp(resolve("generated-past.js"),join(root,"past.js"));
 await cp(resolve("generated-account.js"),join(root,"account.js"));
 await cp(resolve("generated-readings.js"),join(root,"readings.js"));
+await cp(resolve("generated-request-streams.js"),join(root,"request-streams.js"));
 await cp(resolve("generated-pair.js"),join(root,"pair.js"));
 await cp(resolve("generated-query.js"),join(root,"query.js"));
 await cp(resolve("generated-move.js"),join(root,"moves.js"));
@@ -26,10 +27,10 @@ export async function open(principals,withAccounts=false,restricted=false){
   const sandbox=await openSandbox(withAccounts?{...principals,...membership.principals}:principals,"paydirt",{allowGeneralWrites:true,seeds:withAccounts?[...membership.seeds,membership.grant]:[],policy:restricted?membership.policy:undefined});
   const bytes=new Uint8Array(await (await fetch("./pkg/descriptors.binpb")).arrayBuffer());
   const registry=createFileRegistry(fromBinary(FileDescriptorSetSchema,bytes));const robot=registry.getService("app.RobotService");const holder=registry.getService("app.HolderService");
-  const owned=name=>{const svc=registry.getService("app."+name+"Service");return svc && createClient(svc,sandbox.link.transport)};return {readings:owned("ComputedReading"),notification:owned("Notification"),accountNotification:owned("NotificationAccount"),event:owned("Event"),fact:owned("Fact"),holder:holder && createClient(holder,sandbox.link.transport),typed:robot && createClient(robot,sandbox.link.transport),robots:createClient(RobotService,sandbox.link.transport),client:createClient(CellService,sandbox.link.transport),close:()=>sandbox.close()};
+  const owned=name=>{const svc=registry.getService("app."+name+"Service");return svc && createClient(svc,sandbox.link.transport)};return {robotService:robot,readings:owned("ComputedReading"),notification:owned("Notification"),accountNotification:owned("NotificationAccount"),event:owned("Event"),fact:owned("Fact"),holder:holder && createClient(holder,sandbox.link.transport),typed:robot && createClient(robot,sandbox.link.transport),robots:createClient(RobotService,sandbox.link.transport),client:createClient(CellService,sandbox.link.transport),close:()=>sandbox.close()};
 }
 `);
-const server=await createServer({root,optimizeDeps:{entries:["index.html","harness.js"]},server:{hmr:false,host:"127.0.0.1",port:0},logLevel:"error"});
+const server=await createServer({root,optimizeDeps:{entries:["index.html","harness.js","request-streams.js"],exclude:["@lesomnus/grpc-dgram"]},server:{hmr:false,host:"127.0.0.1",port:0},logLevel:"error"});
 let browser;
 try{
   await server.listen();
@@ -47,7 +48,7 @@ try{
   const actor=Buffer.from(tenant,"hex");actor[9]=2;
   tenants.represented={tenant,actor:actor.toString("hex"),caller:actor.toString("hex"),caller_tenant:tenant};
   tenants.reader={tenant,methods:["/app.RobotService/Get"]};
-  const check=async({tenants,id,move})=>{
+  const check=async({tenants,id,move,compareGo})=>{
     const {open}=await import("/harness.js");const app=await open(tenants,move);
     const [[a,tenant],[b,other]]=Object.entries(tenants);
     const opts=token=>({headers:{authorization:"Bearer "+token}});
@@ -71,6 +72,7 @@ try{
         const {accountCases}=await import("/account.js");await accountCases(app.holder,app.typed,[tenant,other]);
         const {checkReadings}=await import("/readings.js");
         await checkReadings(app.readings);
+        const {requestStreams}=await import("/request-streams.js");await requestStreams(app.typed,app.robotService,opts(a),compareGo);
         const {runPair}=await import("/pair.js");
         await runPair(app.typed,opts(a),bytes);
         if(!(await app.typed.allowance({key:"fleet.browser",lock:true},opts(a))).allowsTwo || (await app.typed.allowance({key:"fleet.browser",lock:true},opts(b))).enabled)throw Error("entitlement tenant or limit mismatch");
@@ -86,13 +88,14 @@ try{
       return {cell:Array.from(cell.id)};
     }finally{app.close()}
   };
-  const id=await page.evaluate(check,{tenants,move:process.env.PAYDIRT_TEST_MOVE==="1"});
+  const id=await page.evaluate(check,{tenants,compareGo:!!process.env.PAYDIRT_GO_CHECKOUT,move:process.env.PAYDIRT_TEST_MOVE==="1"});
   assert.equal(id.cell[9],10);
   if(id.report && process.env.PAYDIRT_GO_REFERENCE){
     assert.deepEqual(id.report,JSON.parse(await readFile(join(process.env.CELL_PROJECT,"query-reference.json"),"utf8")));
     console.log("Browser dRPC List and Watch match the Go reference");
   }
   if(process.env.PAYDIRT_TEST_MOVE==="1"){
+    console.log(`Client streaming, live bidi, half-close and cancellation passed on ${process.env.PAYDIRT_GO_CHECKOUT ? "Go and Rust" : "Rust"} dRPC Workers.`);
     await page.evaluate(async tenants=>{
       const {open}=await import("/harness.js"),{accountCases}=await import("/account.js");
       const app=await open(tenants,true,true);
