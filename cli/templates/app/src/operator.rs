@@ -301,27 +301,7 @@ pub async fn run(args: &[String]) -> Result<()> {
         translate(&mut body, true);
     }
     let endpoint = env::var("PAYDIRT_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".into());
-    let uri: http::Uri = endpoint.parse()?;
-    let client = match uri.scheme_str() {
-        Some("http") => HttpClient::plaintext(),
-        Some("https") => {
-            let roots =
-                rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-            let tls = rustls::ClientConfig::builder_with_provider(Arc::new(
-                rustls::crypto::aws_lc_rs::default_provider(),
-            ))
-            .with_safe_default_protocol_versions()?
-            .with_root_certificates(roots)
-            .with_no_client_auth();
-            HttpClient::with_tls(Arc::new(tls))
-        }
-        _ => return Err("PAYDIRT_URL must be an HTTP or HTTPS URL".into()),
-    };
-    let mut config = ClientConfig::new(uri);
-    if let Ok(token) = env::var("PAYDIRT_TOKEN") {
-        let value = http::HeaderValue::from_str(&format!("Bearer {token}"))?;
-        config = config.with_default_header("authorization", value);
-    }
+    let (client, config) = rpc_client(&endpoint, env::var("PAYDIRT_TOKEN").ok().as_deref())?;
     loop {
         match dispatch(&client, &config, entity, rpc, body.clone(), |v| {
             print(v, output, response.as_ref())
@@ -350,4 +330,32 @@ pub async fn run(args: &[String]) -> Result<()> {
             }
         }
     }
+}
+
+pub(crate) fn rpc_client(
+    endpoint: &str,
+    token: Option<&str>,
+) -> Result<(HttpClient, ClientConfig)> {
+    let uri: http::Uri = endpoint.parse()?;
+    let client = match uri.scheme_str() {
+        Some("http") => HttpClient::plaintext(),
+        Some("https") => {
+            let roots =
+                rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            let tls = rustls::ClientConfig::builder_with_provider(Arc::new(
+                rustls::crypto::aws_lc_rs::default_provider(),
+            ))
+            .with_safe_default_protocol_versions()?
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+            HttpClient::with_tls(Arc::new(tls))
+        }
+        _ => return Err("endpoint must be an HTTP or HTTPS URL".into()),
+    };
+    let mut config = ClientConfig::new(uri);
+    if let Some(token) = token {
+        let value = http::HeaderValue::from_str(&format!("Bearer {token}"))?;
+        config = config.with_default_header("authorization", value);
+    }
+    Ok((client, config))
 }
