@@ -85,6 +85,13 @@ try {
         const holder=createClient(createFileRegistry(descriptors).getService("app.HolderService"),createConnectTransport({baseUrl,useBinaryFormat:true}));
         await accountCases(holder,typed,tenantNames);
         await billingCases(app,process.env.CELL_PROJECT,env,typed,primary,other);
+        const {violations} = await sandbox.ssrLoadModule("/upstream/ts/src/pderr/index.ts");
+        await assert.rejects(typed.renamePair({},own),error=>{
+          assert.deepEqual(violations(error).map(v=>[v.field,v.why]),[
+            ["pair.first_alias","first name required"],["pair.second_alias","second name required"],
+          ]);
+          return true;
+        });
         await runPair(typed,own,primary.id);
         for(const [table,column] of [["Audit","f10"],["Outbox","f9"]]){
           const sql='SELECT count(*) FROM "pd_app__'+table+'" WHERE '+column+"='/app.RobotService/RenamePair'";

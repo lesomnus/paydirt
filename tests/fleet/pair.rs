@@ -39,6 +39,16 @@ impl<N: RobotService> RobotServiceLayer<N> for Pair {
         request: ServiceRequest<'_, RobotRenamePairRequest>,
     ) -> ServiceResult<Robot> {
         let r = request.to_owned_message();
+        if r.first_alias.is_none() && r.second_alias.is_none() {
+            use paydirt_store::{Fault, Violation};
+            return Err(crate::transport::error(
+                Fault::validation([
+                    Violation::new("first_alias", "first name required"),
+                    Violation::new("second_alias", "second name required"),
+                ])
+                .at("pair"),
+            ));
+        }
         next.patch_owned(
             &ctx,
             RobotPatchRequest {
