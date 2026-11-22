@@ -4,11 +4,15 @@ pub use account::{AccountReads, ReadFilter};
 pub mod access;
 pub mod admission;
 mod apply;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod archive_files;
 pub mod audit_content;
 pub mod auth;
 mod crud;
 pub mod domain;
 pub mod header;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod retention;
 pub use paydirt_model;
 mod driver;
 pub mod entitle;
