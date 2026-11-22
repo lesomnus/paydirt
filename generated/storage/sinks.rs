@@ -1790,6 +1790,42 @@ mod sink_app_holder {
     impl<
         N: crate::services::r#app::HolderService,
     > crate::services::r#app::HolderServiceLayer<N> for Sink {
+        async fn add(
+            &self,
+            _: &N,
+            ctx: RequestContext,
+            request: ServiceRequest<'_, crate::proto::r#app::r#HolderAddRequest>,
+        ) -> ServiceResult<crate::proto::r#app::r#Holder> {
+            Response::ok(
+                self.0.rpc(&ctx, "app.Holder", "Add", &request.to_owned_message()).await?,
+            )
+        }
+        async fn apply(
+            &self,
+            _: &N,
+            ctx: RequestContext,
+            request: ServiceRequest<'_, crate::proto::r#app::r#HolderApplyRequest>,
+        ) -> ServiceResult<crate::proto::r#app::r#Holder> {
+            Response::ok(
+                self
+                    .0
+                    .rpc(&ctx, "app.Holder", "Apply", &request.to_owned_message())
+                    .await?,
+            )
+        }
+        async fn erase(
+            &self,
+            _: &N,
+            ctx: RequestContext,
+            request: ServiceRequest<'_, crate::proto::r#app::r#HolderRef>,
+        ) -> ServiceResult<crate::proto::r#app::r#HolderEraseResponse> {
+            Response::ok(
+                self
+                    .0
+                    .rpc(&ctx, "app.Holder", "Erase", &request.to_owned_message())
+                    .await?,
+            )
+        }
         async fn get(
             &self,
             _: &N,
@@ -1812,6 +1848,29 @@ mod sink_app_holder {
                     .rpc(&ctx, "app.Holder", "List", &request.to_owned_message())
                     .await?,
             )
+        }
+        async fn patch(
+            &self,
+            _: &N,
+            ctx: RequestContext,
+            request: ServiceRequest<'_, crate::proto::r#app::r#HolderPatchRequest>,
+        ) -> ServiceResult<crate::proto::r#app::r#Holder> {
+            Response::ok(
+                self
+                    .0
+                    .rpc(&ctx, "app.Holder", "Patch", &request.to_owned_message())
+                    .await?,
+            )
+        }
+        async fn watch(
+            &self,
+            _: &N,
+            ctx: RequestContext,
+            request: ServiceRequest<'_, crate::proto::r#app::r#HolderWatchRequest>,
+        ) -> ServiceResult<
+            ::connectrpc::ServiceStream<crate::proto::r#app::r#HolderWatchResponse>,
+        > {
+            self.0.watch(ctx, "app.Holder", &request.to_owned_message()).await
         }
     }
     impl<
@@ -3353,6 +3412,19 @@ mod sink_app_tenant {
     impl<
         N: crate::services::r#app::TenantService,
     > crate::services::r#app::TenantServiceLayer<N> for Sink {
+        async fn apply(
+            &self,
+            _: &N,
+            ctx: RequestContext,
+            request: ServiceRequest<'_, crate::proto::r#app::r#TenantApplyRequest>,
+        ) -> ServiceResult<crate::proto::r#app::r#Tenant> {
+            Response::ok(
+                self
+                    .0
+                    .rpc(&ctx, "app.Tenant", "Apply", &request.to_owned_message())
+                    .await?,
+            )
+        }
         async fn get(
             &self,
             _: &N,
@@ -3373,6 +3445,19 @@ mod sink_app_tenant {
                 self
                     .0
                     .rpc(&ctx, "app.Tenant", "List", &request.to_owned_message())
+                    .await?,
+            )
+        }
+        async fn patch(
+            &self,
+            _: &N,
+            ctx: RequestContext,
+            request: ServiceRequest<'_, crate::proto::r#app::r#TenantPatchRequest>,
+        ) -> ServiceResult<crate::proto::r#app::r#Tenant> {
+            Response::ok(
+                self
+                    .0
+                    .rpc(&ctx, "app.Tenant", "Patch", &request.to_owned_message())
                     .await?,
             )
         }
