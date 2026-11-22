@@ -4,15 +4,42 @@ mod layers;
 mod new;
 mod payday;
 mod policy;
+mod project;
 mod sandbox;
 mod sinks;
 use std::{env, path::PathBuf, process::ExitCode};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
-const HELP: &str = "Usage: paydirt new NAME [DIRECTORY]\n       paydirt gen [--check] [DIRECTORY]\n       paydirt sandbox init [DIRECTORY]\n       paydirt doctor [DIRECTORY]\n       paydirt entity add [--tenanted|--global] [--watch] [--file FILE] NAME [DIRECTORY]";
+const HELP: &str = "Usage: paydirt new NAME [DIRECTORY]\n       paydirt gen [--check] [DIRECTORY]\n       paydirt sandbox init [DIRECTORY]\n       paydirt doctor [DIRECTORY]\n       paydirt versions [DIRECTORY]\n       paydirt upgrade [--dry-run] [DIRECTORY]\n       paydirt buf [--directory DIRECTORY] [BUF OPTIONS]\n       paydirt entity list [DIRECTORY]\n       paydirt entity add [--tenanted|--global] [--watch] [--file FILE] NAME [DIRECTORY]";
+
+fn directory(args: &[String]) -> Result<&std::path::Path> {
+    match args {
+        [] => Ok(std::path::Path::new(".")),
+        [dir] if !dir.starts_with('-') => Ok(std::path::Path::new(dir)),
+        _ => Err(HELP.into()),
+    }
+}
 
 fn run(args: &[String]) -> Result<()> {
     match args {
+        [cmd, sub, rest @ ..] if cmd == "entity" && sub == "list" => {
+            project::entities(directory(rest)?)
+        }
+        [cmd, rest @ ..] if cmd == "versions" => project::versions(directory(rest)?),
+        [cmd, rest @ ..] if cmd == "upgrade" => {
+            let dry = rest.iter().any(|a| a == "--dry-run");
+            let paths: Vec<_> = rest.iter().filter(|a| *a != "--dry-run").cloned().collect();
+            project::upgrade(directory(&paths)?, dry)
+        }
+        [cmd, rest @ ..] if cmd == "buf" => {
+            if let [flag, root, args @ ..] = rest
+                && flag == "--directory"
+            {
+                project::forward(std::path::Path::new(root), args)
+            } else {
+                project::forward(std::path::Path::new("."), rest)
+            }
+        }
         [cmd, sub, rest @ ..] if cmd == "entity" && sub == "add" => entity::add(rest),
         [cmd] if cmd == "doctor" => entity::doctor(std::path::Path::new(".")),
         [cmd, dir] if cmd == "doctor" => entity::doctor(std::path::Path::new(dir)),

@@ -3,7 +3,6 @@ use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
-    process::Command,
 };
 
 const MARKER: &str = ".paydirt-generated";
@@ -38,7 +37,7 @@ pub(crate) fn write_file(path: &Path, bytes: &[u8]) -> Result<()> {
 
 fn buf(work: &Path, template: &str) -> Result<()> {
     fs::write(work.join("buf.gen.yaml"), template)?;
-    let status = Command::new("buf")
+    let status = crate::project::buf()
         .args(["generate", "--template", "buf.gen.yaml"])
         .current_dir(work)
         .status()

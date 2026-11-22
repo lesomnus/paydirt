@@ -1,10 +1,10 @@
 use crate::Result;
 use serde_json::{Value, json};
-use std::{collections::BTreeMap, fs, path::Path, process::Command};
+use std::{collections::BTreeMap, fs, path::Path};
 
 pub fn generate(work: &Path) -> Result<()> {
     let dest = work.join("resolved.json");
-    let status = Command::new("buf")
+    let status = crate::project::buf()
         .current_dir(work)
         .args([
             "build",
@@ -18,7 +18,7 @@ pub fn generate(work: &Path) -> Result<()> {
         return Err("could not resolve application policies".into());
     }
     let binary = work.join("generated/storage/descriptors.binpb");
-    let status = Command::new("buf")
+    let status = crate::project::buf()
         .current_dir(work)
         .args([
             "build",
