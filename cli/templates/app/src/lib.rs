@@ -12,6 +12,9 @@ pub mod storage {
 pub fn router(database: transport::Database, name: String) -> connectrpc::Router {
     struct App(String);
     impl storage::Layers for App {
+        fn public_methods(&self) -> &'static [&'static str] {
+            &["/app.SettingService/Get"]
+        }
         fn app_setting(
             &self,
             next: impl services::app::SettingService,
@@ -31,5 +34,5 @@ pub fn router(database: transport::Database, name: String) -> connectrpc::Router
     storage::mount(connectrpc::Router::new(), database, &App(name))
 }
 
-#[cfg(target_arch="wasm32")]
+#[cfg(target_arch = "wasm32")]
 mod worker;

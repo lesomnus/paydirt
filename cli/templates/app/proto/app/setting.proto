@@ -9,7 +9,7 @@ option features.field_presence = IMPLICIT;
 // A public read-only setting that identifies this deployment.
 message Setting {
   option (orm.message) = {rpc: {get: {}}};
-  option (payday.entity) = {domain: 7, global: {}, trail: {off: {why: "Read-only deployment configuration"}}, erase: {hard: {}}};
+  option (payday.entity) = {domain: 77, global: {}, trail: {off: {why: "Read-only deployment configuration"}}, erase: {hard: {}}};
   bytes id = 1 [(orm.field) = {type: TYPE_UUID, key: true}];
   string alias = 4 [(orm.field) = {unique: true}];
   string value = 8;

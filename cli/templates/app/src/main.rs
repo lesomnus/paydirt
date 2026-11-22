@@ -10,6 +10,8 @@ use std::{error::Error, fs};
 struct Config {
     listen: std::net::SocketAddr,
     service_name: String,
+    #[serde(default)]
+    allow_general_writes: bool,
 }
 
 #[tokio::main]
@@ -36,7 +38,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Err(e) => return Err(e.into()),
     };
     let principals = std::env::var("PAYDIRT_PRINCIPALS").unwrap_or_else(|_| "{}".into());
-    let db = Database::open(&url, &principals)?;
+    let db = Database::open(&url, &principals)?.allow_general_writes(config.allow_general_writes);
     Server::new(router(db, config.service_name))
         .serve(addr)
         .await

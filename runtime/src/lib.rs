@@ -2,12 +2,15 @@
 mod crud;
 mod driver;
 mod migrate;
+mod session;
+mod trail;
 mod value;
 pub use driver::Connection;
 use driver::Driver;
 use paydirt_model::Model;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+pub use session::{Frame, Packet};
 use std::collections::BTreeMap;
 
 pub type Result<T> = std::result::Result<T, Fault>;
@@ -55,6 +58,7 @@ pub struct Policy {
 pub type Policies = BTreeMap<String, Policy>;
 pub struct Store {
     db: Connection,
+    session: Option<session::Session>,
     model: Model,
     policies: Policies,
 }
@@ -67,6 +71,7 @@ impl Store {
         db.transaction(|tx| migrate::install(tx, &model))?;
         Ok(Self {
             db,
+            session: None,
             model,
             policies,
         })
@@ -79,6 +84,9 @@ impl Store {
         scope: &Scope,
         f: impl FnOnce(&mut Transaction<'_>) -> Result<T>,
     ) -> Result<T> {
+        if self.session.is_some() {
+            return Err(Fault::aborted("another request owns this connection"));
+        }
         let (model, policies) = (&self.model, &self.policies);
         self.db.transaction(|db| {
             let mut tx = Transaction {
@@ -86,6 +94,7 @@ impl Store {
                 model,
                 policies,
                 scope,
+                frame: None,
                 failed: None,
             };
             let result = f(&mut tx);
@@ -101,6 +110,7 @@ pub struct Transaction<'a> {
     model: &'a Model,
     policies: &'a Policies,
     scope: &'a Scope,
+    frame: Option<&'a Frame>,
     failed: Option<Fault>,
 }
 impl Transaction<'_> {
@@ -119,3 +129,6 @@ impl Transaction<'_> {
         result
     }
 }
+
+#[cfg(all(test, any(feature = "sqlite", feature = "postgres")))]
+mod session_test;

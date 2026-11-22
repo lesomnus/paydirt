@@ -10,14 +10,14 @@ function start(worker, data, port) {
   });
 }
 
-export async function openSandbox(principals, name = "paydirt") {
+export async function openSandbox(principals, name = "paydirt", { allowGeneralWrites = false } = {}) {
   const database = new Worker("/database.js", { type: "module", name: "paydirt-sqlite" });
   const server = new Worker("/server.js", { type: "module", name: "paydirt-server" });
   const channel = new MessageChannel();
   try {
     await Promise.all([
-      start(database, { tenants: [...new Set(Object.values(principals))] }, channel.port1),
-      start(server, { principals, name }, channel.port2),
+      start(database, { tenants: [...new Set(Object.values(principals).map(p => typeof p === "string" ? p : p.tenant))] }, channel.port1),
+      start(server, { principals, name, generalWrites: allowGeneralWrites }, channel.port2),
     ]);
     const conn = dialWorker(server);
     const link = new SandboxLink(createDrpcTransport(conn));

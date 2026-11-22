@@ -15,6 +15,7 @@ Path(sys.argv[2]).write_text('edition = "2023";\npackage app;\nimport "orm.proto
 PY
 "${PAYDIRT_BIN:-$repo/target/debug/paydirt}" gen "$CELL_PROJECT"
 cd "$CELL_PROJECT"
+python3 -c 'import json,pathlib;p=pathlib.Path("app.json");c=json.loads(p.read_text());c["allow_general_writes"]=True;p.write_text(json.dumps(c))'
 cargo build --quiet
 target=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys;print(json.load(sys.stdin)["target_directory"])')
 export GENERATED_APP="$target/debug/fleet"
@@ -23,6 +24,15 @@ export CELL_PORT
 cd "$repo/web"
 node generated-cell.mjs
 
+# Install the application-owned overlay and its single Rust handler into this same starter.
+python3 "$repo/scripts/install-fleet-core.py" "$CELL_PROJECT"
+cp "$CELL_PROJECT/src/robot.rs" "$work/original.rs"
+"$repo/target/debug/paydirt" gen "$CELL_PROJECT"
+"$repo/target/debug/paydirt" gen --check "$CELL_PROJECT"
+cmp "$work/original.rs" "$CELL_PROJECT/src/robot.rs"
+cargo build --quiet --manifest-path "$CELL_PROJECT/Cargo.toml"
+export PAYDIRT_TEST_MOVE=1 CELL_SQLITE_PATH="$work/fleet.sqlite3"
+node generated-cell.mjs
 if [[ "${PAYDIRT_TEST_WASM:-0}" == 1 ]]; then
   "${PAYDIRT_BIN:-$repo/target/debug/paydirt}" sandbox init "$CELL_PROJECT"
   "${PAYDIRT_BIN:-$repo/target/debug/paydirt}" sandbox init "$CELL_PROJECT"

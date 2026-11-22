@@ -8,8 +8,8 @@ pub struct Settings {
     pub name: String,
 }
 
-// The service setting has a stable domain-7 Payday ID across restarts.
-const SERVICE_ID: [u8; 16] = [0, 0, 0, 0, 0, 0, 0x80, 0, 0x80, 7, 0, 0, 0, 0, 0, 1];
+// The service setting has a stable domain-77 Payday ID across restarts.
+const SERVICE_ID: [u8; 16] = [0, 0, 0, 0, 0, 0, 0x80, 0, 0x80, 77, 0, 0, 0, 0, 0, 1];
 
 #[allow(refining_impl_trait)]
 impl<N: SettingService> SettingServiceLayer<N> for Settings {

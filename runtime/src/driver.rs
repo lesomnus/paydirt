@@ -138,6 +138,16 @@ impl Connection {
             url.split(':').next().unwrap_or("")
         )))
     }
+    pub(crate) fn driver(&mut self) -> Result<&mut dyn Driver> {
+        match self {
+            #[cfg(feature = "postgres")]
+            Self::Postgres(c) => Ok(c),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(c) => Ok(c),
+            #[cfg(not(any(feature = "postgres", feature = "sqlite")))]
+            _ => Err(Fault::internal("no database feature enabled")),
+        }
+    }
     pub(crate) fn transaction<T>(
         &mut self,
         f: impl FnOnce(&mut dyn Driver) -> Result<T>,
