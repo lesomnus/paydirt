@@ -49,6 +49,23 @@ impl<N: RobotService> RobotServiceLayer<N> for Pair {
                 .at("pair"),
             ));
         }
+        use paydirt::page::StreamExt;
+        let robots = next.list_all(
+            &ctx,
+            &RobotListRequest {
+                size: 1,
+                ..Default::default()
+            },
+        );
+        let mut robots = std::pin::pin!(robots);
+        if let Some(first) = robots.next().await {
+            let first = first?;
+            let header = crate::transport::header(&first).map_err(crate::transport::error)?;
+            assert_eq!(
+                crate::transport::domains().lookup("app.Robot"),
+                Some(header.id[9])
+            );
+        }
         next.patch_owned(
             &ctx,
             RobotPatchRequest {

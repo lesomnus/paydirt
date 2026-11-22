@@ -269,6 +269,12 @@ pub fn generate(work: &Path) -> Result<()> {
                 let input = message_path(input, "crate::proto");
                 let output = message_path(output, "crate::proto");
                 let method_name = format!("{}_owned", snake.trim_start_matches("r#"));
+                if rpc == "List" && policy["entity"].get("list").is_some() {
+                    let row = format!("crate::proto::{}::{short}", module(package));
+                    writeln!(calls, "fn list_all<'a>(&'a self,ctx:&'a RequestContext,request:&{input})->impl ::paydirt::page::Stream<Item=Result<{row},::connectrpc::ConnectError>> + 'a {{
+                       ::paydirt::page::all(request,|q| &mut q.after,move |q|async move {{let page=self.list_owned(ctx,q).await?;Ok((page.items,page.next))}},||::connectrpc::ConnectError::internal(\"repeated continuation token\"))
+                    }}")?;
+                }
                 writeln!(calls,"async fn {method_name}(&self, ctx: &RequestContext, req: {input})-> Result<{output}, ::connectrpc::ConnectError> {{
                     use buffa::{{Message,HasMessageView}}; use connectrpc::Encodable;
                     let bytes=req.encode_to_bytes();
