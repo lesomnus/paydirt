@@ -180,7 +180,7 @@ pub(crate) struct Body<M, R> {
 impl<M: buffa::Message + serde::Serialize, R: Encodable<M>> Encodable<M> for Body<M, R> {
     fn encode(&self, codec: CodecFormat) -> Result<buffa::bytes::Bytes, ConnectError> {
         match &self.public {
-            Some(m) => m.encode(codec),
+            Some(m) => Encodable::<M>::encode(m, codec),
             None => self.original.encode(codec),
         }
     }
