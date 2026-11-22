@@ -14,12 +14,26 @@ pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 include!("../generated/storage/commands.rs");
 
 fn reference(v: &str, entity: &str) -> Result<Value> {
+    let domains = __APP_CRATE__::transport::domains();
+    let short = entity.rsplit('.').next().unwrap_or(entity).to_ascii_lowercase();
+    let expected = domains.lookup(entity);
     if let Ok(id) = uuid::Uuid::parse_str(v) {
+        if let Some(domain) = expected {
+            domains.check_id(id.as_bytes(), domain)?;
+        }
         return Ok(json!({"id":STANDARD.encode(id.as_bytes())}));
     }
-    let (name, kind) = v.rsplit_once('#').unwrap_or((v, ""));
-    if !kind.is_empty() && !kind.eq_ignore_ascii_case(entity) {
-        return Err(format!("expected {entity}, got {kind}").into());
+    let (name, suffix) = v.rsplit_once('#').unwrap_or((v, ""));
+    if !suffix.is_empty() {
+        let kind = suffix.to_ascii_lowercase();
+        let actual = domains.domain_of(&kind);
+        if expected.is_some() && actual.is_none() {
+            let names = domains.entries().map(|(_, n)| n).collect::<Vec<_>>().join(", ");
+            return Err(format!("unknown kind {kind}. Expected one of {names}").into());
+        }
+        if actual != expected || (actual.is_none() && kind != short) {
+            return Err(format!("expected {short}, got {kind}").into());
+        }
     }
     let name = name.strip_prefix('@').ok_or("expected UUID or @name")?;
     if name.is_empty() {
@@ -29,9 +43,9 @@ fn reference(v: &str, entity: &str) -> Result<Value> {
         if tenant.is_empty() || alias.is_empty() {
             return Err("expected @tenant/alias".into());
         }
-        Ok(json!({"slug":{"tenant":{"alias":tenant},"alias":alias}}))
+        Ok(json!({"slug":{"tenant":{"alias":tenant.trim().to_ascii_lowercase()},"alias":alias.trim().to_ascii_lowercase()}}))
     } else {
-        Ok(json!({"alias":name}))
+        Ok(json!({"alias":name.trim().to_ascii_lowercase()}))
     }
 }
 // Interpret only descriptor-declared types, including map values and repeated refs.
@@ -64,7 +78,7 @@ fn translate(
             && !schema[ty].is_null()
             && !schema[entity].is_null()
         {
-            *value = reference(text, entity.rsplit('.').next().unwrap())?;
+            *value = reference(text, entity)?;
         }
         return Ok(());
     }
@@ -277,7 +291,7 @@ pub async fn run(args: &[String]) -> Result<()> {
     };
     let policy = &policies[entity];
     let meta = &policy.methods[rpc];
-    let short = entity.rsplit('.').next().unwrap();
+    let schema: Value = serde_json::from_str(__APP_CRATE__::transport::ADMISSION_SCHEMA)?;
     let mut body = json!({});
     let mut name = None;
     let mut document = None;
@@ -316,7 +330,20 @@ pub async fn run(args: &[String]) -> Result<()> {
                 body["order"] = json!(index + 1);
             }
             v if name.is_none() && (v.starts_with('@') || uuid::Uuid::parse_str(v).is_ok()) => {
-                name = Some(reference(v, short)?)
+                name = Some(reference(v, entity)?)
+            }
+            v if name.is_none() && !v.starts_with(['{', '-']) && v.contains('=') => {
+                let (field, raw) = v.split_once('=').unwrap();
+                if rpc == "Add" {
+                    return Err("a unique key names an existing row".into());
+                }
+                let reference_type = format!("{entity}Ref");
+                if !schema[&reference_type]["fields"].as_array().is_some_and(|fs|
+                    fs.iter().any(|f| f["name"] == field || f["proto"] == field)) {
+                    return Err(format!("unknown reference key {field}").into());
+                }
+                let val = serde_json::from_str(raw).unwrap_or_else(|_| json!(raw));
+                name = Some(json!({field:val}));
             }
             v if document.is_none() && (v == "-" || !v.starts_with('-')) => document = Some(v),
             _ => return Err(format!("unexpected argument {a}").into()),
@@ -325,7 +352,6 @@ pub async fn run(args: &[String]) -> Result<()> {
     let zone = zone
         .parse::<chrono_tz::Tz>()
         .map_err(|_| format!("unknown --tz display zone: {zone}"))?;
-    let schema: Value = serde_json::from_str(__APP_CRATE__::transport::ADMISSION_SCHEMA)?;
     if !matches!(input, "json" | "protojson" | "prototext")
         || (!output.starts_with("template=")
             && !tree.formats.contains_key(output)
@@ -338,10 +364,14 @@ pub async fn run(args: &[String]) -> Result<()> {
     }
     if let Some(ref key) = name {
         match rpc {
-            "Get" | "Patch" => body["ref"] = key.clone(),
+            "Get" | "Patch" | "Apply" => body["ref"] = key.clone(),
             "Erase" => body = key.clone(),
             "List" | "Watch" => body["filters"] = json!([{"ref":key}]),
             "Add" => body = key.get("slug").unwrap_or(key).clone(),
+            _ if meta["input"].as_str().is_some_and(|ty| {
+                schema[ty.trim_start_matches('.')]["fields"].as_array().is_some_and(|fs|
+                    fs.iter().any(|f| f["name"] == "ref" && f["target"] == format!("{entity}Ref")))
+            }) => body["ref"] = key.clone(),
             _ => return Err("pass a request body for this verb".into()),
         }
     }

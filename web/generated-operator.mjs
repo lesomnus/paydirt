@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
-import {execFileSync,spawn} from "node:child_process";
+import {execFile,execFileSync,spawn} from "node:child_process";
+import {createServer} from "node:http";
+import {promisify} from "node:util";
+import {readFile} from "node:fs/promises";
+import {createFileRegistry,fromBinary,getOption} from "@bufbuild/protobuf";
+import {FileDescriptorSetSchema} from "@bufbuild/protobuf/wkt";
 import {createInterface} from "node:readline";
 
 export async function operatorScenario(app,workspace,env,primary){
@@ -8,6 +13,28 @@ export async function operatorScenario(app,workspace,env,primary){
   assert(!run(["cell","--help"]).includes("watch"));
   const tenant=primary.id.toString("hex");
   const idText=tenant.replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/,"$1-$2-$3-$4-$5");
+  const named="@"+tenant+"/reference-holder";
+  const holder=JSON.parse(run(["holder","add",JSON.stringify({tenant:"@"+tenant,alias:"reference-holder"}),"-o","json"]));
+  for(const ref of [named+"#holder",named.toUpperCase(),"slug="+JSON.stringify({tenant:"@"+tenant,alias:"reference-holder"})]){
+    assert.equal(JSON.parse(run(["holder","get",ref,"-o","json"])).id,holder.id);
+  }
+  assert.equal(JSON.parse(run(["tenant","get","alias="+tenant,"-o","json"])).id,idText);
+  assert.equal(JSON.parse(run(["tenant","get","@"+tenant+"#tenant","-o","json"])).id,idText);
+  for(const args of [
+    ["holder","get",named+"#robot"],["holder","get",idText],["holder","get",named+"#hodler"],
+    ["holder","add",named+"#robot"],["holder","patch",named+"#robot",'{"name":"Ada"}'],
+    ["holder","erase",named+"#robot"],["robot","watch",named+"#holder"],
+    ["robot","move",named+"#holder",'{"to":{"alias":"floor"}}'],
+  ]){
+    assert.throws(()=>run(args),err=>{
+      const text=String(err.stderr).toLowerCase();
+      return text.includes("holder") && text.includes(args[2]===idText?"tenant":"robot");
+    },args.join(" "));
+  }
+  assert.throws(()=>run(["holder","add","alias=surprise"]),err=>/existing row/.test(err.stderr));
+  const audits=JSON.parse(run(["audit","list",JSON.stringify({filters:[{object_id:holder.id}]}),"-o","json"],{PAYDIRT_TOKEN:"audit-review"}));
+  assert(audits.items.some(r=>r.objectId===holder.id));
+  await uuidRequestCases(app,workspace,env,named,holder.id);
   const add=JSON.parse(run(["cell","add",JSON.stringify({tenant:{id:idText},alias:"cli"}),"-o","json"]));
   assert.equal(JSON.parse(run(["cell","get",add.id,"-o","json"])).alias,"cli");
   assert.match(run(["inventory","--help"]),/cell/);
@@ -44,4 +71,41 @@ export async function operatorScenario(app,workspace,env,primary){
     const message=await Promise.race([new Promise(resolve=>lines.once("line",resolve)),done.then(code=>{throw Error("watch exited "+code)}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error("watch snapshot timed out")),10000);})]);
     assert.equal(JSON.parse(message).items[0].value.alias,"scout");
   } finally {clearTimeout(timer);lines.close();watcher.kill();await done;}
+}
+
+async function uuidRequestCases(app,workspace,env,ref,uuid){
+  const schema=JSON.parse(await readFile(workspace+"/generated/storage/admission.json","utf8"));
+  const registry=createFileRegistry(fromBinary(FileDescriptorSetSchema,await readFile(workspace+"/generated/storage/descriptors.binpb")));
+  const uuidType=registry.getEnum("orm.Type").values.find(v=>v.name==="TYPE_UUID").number;
+  const fieldOptions=(type,field)=>getOption(registry.getMessage(type).field[field],registry.getExtension("orm.field"));
+  for(const type of ["app.HolderAddRequest","app.HolderPatchRequest"]){
+    const options=fieldOptions(type,"account");
+    assert.equal(options.type,uuidType);
+    assert(!options.key && !options.nullable);
+  }
+  assert.equal(fieldOptions("app.AuditFilter","objectId").type,uuidType);
+  const captured=[];
+  const receiver=createServer(async(req,res)=>{
+    const chunks=[];
+    for await(const chunk of req)chunks.push(chunk);
+    const method=req.url.split("/").at(-1);
+    const name="app.Holder"+method+"Request";
+    const message=registry.getMessage(name);
+    assert(message);
+    assert.equal(schema[name].fields.find(f=>f.name==="account").uuid,true);
+    captured.push(fromBinary(message,Buffer.concat(chunks)));
+    res.writeHead(403,{"Content-Type":"application/json"});
+    res.end(JSON.stringify({code:"permission_denied",message:"account assignment belongs to the deployment"}));
+  });
+  await new Promise(resolve=>receiver.listen(0,"127.0.0.1",resolve));
+  const wire=Buffer.from(uuid.replaceAll("-",""),"hex"),base64=wire.toString("base64");
+  try{
+    for(const [verb,value,strict] of [["add",uuid,false],["patch",uuid,false],["add",base64,false],["add",base64,true]]){
+      const args=["holder",verb,...(strict?["--in","protojson"]:[]),ref,JSON.stringify({account:value})];
+      await assert.rejects(promisify(execFile)(app,args,{cwd:workspace,env:{...env,PAYDIRT_URL:"http://127.0.0.1:"+receiver.address().port}}),e=>/account assignment/.test(e.stderr));
+      assert.deepEqual(Buffer.from(captured.at(-1).account),wire);
+    }
+    assert.equal(captured.length,4);
+    assert.equal(schema["app.AuditFilter"].fields.find(f=>f.name==="objectId").uuid,true);
+  }finally{await new Promise(resolve=>receiver.close(resolve));}
 }
