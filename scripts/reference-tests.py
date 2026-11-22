@@ -15,7 +15,7 @@ PACKAGE = "github.com/lesomnus/payday/internal/apptest/cmd"
 DECLARATION = re.compile(r"^func\s+(Test\w+)\s*\(\s*\w+\s+\*testing\.T\s*\)")
 ENVIRONMENTS = {
     "unit", "cli/native", "native/rekor-v1+v2", "native/witness-store+log", "store/sqlite", "store/postgres", "store/sqlite+postgres",
-    "connect/sqlite", "connect/sqlite+postgres", "connect/postgres-notify",
+    "connect/sqlite", "connect/sqlite+postgres", "connect/postgres-notify", "connect/postgres+nats",
     "connect/tls-sqlite", "connect/cookies-sqlite", "connect/grant-source",
     "connect/sqlite+postgres;drpc/opfs",
 }

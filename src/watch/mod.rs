@@ -9,6 +9,9 @@ use std::{
     sync::{Arc, Mutex, Weak},
 };
 
+mod registry;
+pub use registry::{BrokerSettings, broker_names, register_broker, registered_broker};
+
 #[cfg(feature = "watch-nats")]
 pub mod nats;
 #[cfg(feature = "watch-postgres")]

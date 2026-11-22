@@ -224,6 +224,9 @@ impl Transaction<'_> {
             actor,
             grants: &grants,
         };
+        let host_frame = internal.then(|| {
+            crate::entitle::deployment(tenant.clone(), &format!("/{service}Service/{method}"))
+        });
         let scope = Scope::Tenant(tenant);
         let mut db = Transaction {
             scope_rules: self.scope_rules,
@@ -242,7 +245,7 @@ impl Transaction<'_> {
             model: self.model,
             policies: self.policies,
             scope: &scope,
-            frame,
+            frame: frame.or(host_frame.as_ref()),
             failed: None,
         };
         let record = db.owned_entity("OWN_NOTIFICATION")?.clone();

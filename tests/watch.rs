@@ -164,3 +164,46 @@ async fn nats_disconnect_ends_existing_stream_and_reconnects() {
         .unwrap();
     proxy.abort();
 }
+
+#[tokio::test]
+async fn registered_brokers_report_supported_names_and_refuse_an_empty_factory() {
+    use paydirt::watch::{BrokerSettings, broker_names, register_broker, registered_broker};
+    use std::sync::Arc;
+    let settings = BrokerSettings {
+        database: "tenant".into(),
+        dsn: String::new(),
+        namespace: "application".into(),
+    };
+    let err = registered_broker("missing-fixture", settings.clone())
+        .await
+        .err()
+        .unwrap();
+    for word in ["missing-fixture", "memory", "register_broker"] {
+        assert!(err.contains(word));
+    }
+    register_broker("fixture-echo", |s| {
+        Box::pin(async move {
+            assert_eq!(s.namespace, "application");
+            Ok(Some(Arc::new(Memory::default()) as Arc<dyn Broker>))
+        })
+    })
+    .unwrap();
+    let broker = registered_broker("fixture-echo", settings.clone())
+        .await
+        .unwrap();
+    let mut sub = broker.subscribe(Interest::default()).await.unwrap();
+    let e = event("test", &uuid::Uuid::now_v7().to_string());
+    broker.publish(e.clone()).await.unwrap();
+    assert_eq!(*sub.next().await.unwrap().unwrap(), e);
+    assert!(
+        ["memory", "none", "fixture-echo"]
+            .iter()
+            .all(|s| broker_names().contains(&s.to_string()))
+    );
+    register_broker("fixture-empty", |_| Box::pin(async { Ok(None) })).unwrap();
+    let err = registered_broker("fixture-empty", settings)
+        .await
+        .err()
+        .unwrap();
+    assert!(err.contains("built no broker") && err.contains("none"));
+}

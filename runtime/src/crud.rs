@@ -414,7 +414,14 @@ impl Transaction<'_> {
             for (i, (req, post)) in rows.iter().zip(inserted).enumerate() {
                 let outcome = (|| {
                     self.write_edges(e, &post[&e.key().map_err(Fault::invalid)?.json], req, true)?;
-                    self.record(e, "Add", req, None, Some(&post))?;
+                    self.record(
+                        e,
+                        "Add",
+                        if many { "AddMany" } else { "Add" },
+                        req,
+                        None,
+                        Some(&post),
+                    )?;
                     self.image(e, post, &Value::Null)
                 })();
                 answer.push(outcome.map_err(|err| Self::item_error(err, i, many))?);
@@ -646,7 +653,7 @@ impl Transaction<'_> {
         }
         let edges_changed = self.write_edges(e, &row[&key.json], req, false)?;
         if !sets.is_empty() || edges_changed {
-            self.record(e, method, &req, Some(&row), Some(&updated))?;
+            self.record(e, method, method, &req, Some(&row), Some(&updated))?;
         }
         self.image(e, updated, &Value::Null)
     }
@@ -689,7 +696,7 @@ impl Transaction<'_> {
         let erased = self.db.exec(q)? == 1;
         if erased {
             self.forget_references();
-            self.record(e, "Erase", &Value::Null, Some(&row), post.as_ref())?;
+            self.record(e, "Erase", "Erase", &Value::Null, Some(&row), post.as_ref())?;
         }
         Ok(json!({"erased":erased}))
     }

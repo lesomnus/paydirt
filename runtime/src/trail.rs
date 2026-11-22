@@ -8,6 +8,7 @@ impl Transaction<'_> {
         &mut self,
         e: &Entity,
         method: &str,
+        resource_method: &str,
         request: &Value,
         before: Option<&Value>,
         after: Option<&Value>,
@@ -33,7 +34,7 @@ impl Transaction<'_> {
             .get(&e.name)
             .map(|p| &p.entity)
             .unwrap_or(&Value::Null);
-        let by = format!("/{}Service/{method}", e.name);
+        let by = format!("/{}Service/{resource_method}", e.name);
         let mut resource = String::new();
         if let Some(recorder) = self.resources.filter(|r| r.selected(&e.name)) {
             let outer = self.frame.map_or(by.as_str(), |f| &f.action);
@@ -59,11 +60,10 @@ impl Transaction<'_> {
         ) && let Ok(id) = value::bytes(&row[&e.key().map_err(Fault::internal)?.json])
             && let Some(key) = paydirt::format_id(&id)
         {
-            let by = format!("/{}Service/{method}", e.name);
             self.changes.push(paydirt::watch::Change {
                 method: self.frame.map_or_else(|| by.clone(), |f| f.action.clone()),
                 resource: resource.clone(),
-                by,
+                by: by.clone(),
                 key,
                 routes: Some(Vec::new()),
                 ..Default::default()

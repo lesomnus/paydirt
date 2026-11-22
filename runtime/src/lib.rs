@@ -332,7 +332,9 @@ impl Store {
                 _ => {}
             }
         }
-        if self.trail.is_some() && p.and_then(|p| p.methods.get(&call.method)).is_some() {
+        if self.trail.is_some()
+            && p.is_some_and(|p| !p.notification && p.methods.contains_key(&call.method))
+        {
             let frame =
                 entitle::deployment(vec![], &format!("/{}Service/{}", call.entity, call.method));
             self.operator_framed(call, frame)

@@ -84,7 +84,7 @@ main.write_text(source.replace(point, """let store=store.with_admission(ADMISSIO
 with (app / "src/operator.rs").open("a") as operator:
     operator.write((repo / "tests/fleet/operator-types.rs").read_text())
 
-(app / "resources.json").write_text('{"entities":["app.Cell","app.Robot"],"previous":true}\n')
+(app / "resources.json").write_text('{"entities":["app.Cell","app.Robot","shared.Thing"],"previous":true}\n')
 
 copyfile(repo / "tests/fleet/presence.rs", app / "src/presence_fixture.rs")
 with lib.open("a") as library:
@@ -95,3 +95,10 @@ if main.read_text().count(hook) != 1:
 main.write_text(main.read_text().replace(hook, 'db = fleet::presence_fixture::install(db);\n    ' + hook))
 
 (app / "trail.json").write_text('{"access":true,"reads":true,"by":{"app.Robot":"value","app.Cell":"fields"},"downloads":["/app.RobotService/ExportRobot"]}\n')
+
+# The external replica fixture can revoke a topic while both listeners are idle.
+copyfile(repo / "tests/fleet/notification-policy.rs", app / "src/notification_policy_fixture.rs")
+main.write_text("mod notification_policy_fixture;\n" + main.read_text().replace(point, """let store = if let Some(path) = std::env::var_os("FLEET_TEST_TOPIC_POLICY") {
+        store.with_notification_policy(notification_policy_fixture::File(path.into()))
+    } else { store };
+    """ + point))

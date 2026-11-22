@@ -11,7 +11,16 @@ pub struct Options {
     pub entities: BTreeSet<String>,
     pub previous: bool,
 }
+pub struct Publication<'a> {
+    pub entity: &'a str,
+    pub method: &'a str,
+    pub outer: &'a str,
+    pub previous: Option<&'a Value>,
+    pub value: Option<&'a Value>,
+}
+type PublicationPolicy = dyn Fn(&Publication<'_>) -> Result<bool> + Send + Sync;
 pub struct Recorder {
+    policy: Option<Box<PublicationPolicy>>,
     options: Options,
     pool: DescriptorPool,
     secrets: secrets::Schema,
@@ -43,10 +52,23 @@ impl Store {
             }
         }
         self.resources = Some(Recorder {
+            policy: None,
             options,
             pool: DescriptorPool::decode(descriptors).map_err(|e| Fault::invalid(e.to_string()))?,
             secrets: secrets::Schema::new(fields)?,
         });
+        Ok(self)
+    }
+}
+impl Store {
+    pub fn with_resource_policy(
+        mut self,
+        policy: impl Fn(&Publication<'_>) -> Result<bool> + Send + Sync + 'static,
+    ) -> Result<Self> {
+        let recorder = self.resources.as_mut().ok_or_else(|| {
+            Fault::precondition("install resource recording before its publication policy")
+        })?;
+        recorder.policy = Some(Box::new(policy));
         Ok(self)
     }
 }
@@ -64,6 +86,17 @@ impl Recorder {
         id: Value,
         stamp: Value,
     ) -> Result<String> {
+        if let Some(policy) = &self.policy
+            && !policy(&Publication {
+                entity: name,
+                method,
+                outer: call,
+                previous: before,
+                value: after,
+            })?
+        {
+            return Ok(String::new());
+        }
         let kind = match (before, after) {
             (None, Some(_)) => "CHANGE_KIND_CREATED",
             (Some(_), Some(_)) => "CHANGE_KIND_UPDATED",
@@ -105,6 +138,14 @@ impl Transaction<'_> {
         let d = self.db.dialect();
         let mut cols = Vec::new();
         for f in e.fields.iter().filter(|f| f.is_column()) {
+            if self
+                .policies
+                .get(&e.name)
+                .and_then(|p| p.fields.get(&f.name))
+                .is_some_and(|v| v.get("secret").is_some_and(|s| s != false && !s.is_null()))
+            {
+                continue;
+            }
             let field = self.field_type(f)?;
             let v = &image[&f.json];
             let v = if f.target.is_empty() {

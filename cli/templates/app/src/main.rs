@@ -11,8 +11,9 @@ use paydirt::watch::{Broker, Memory, nats::Nats, postgres::Postgres};
 use serde::Deserialize;
 use std::{error::Error, fs, sync::Arc, time::Duration};
 
-#[derive(Deserialize)]
+#[derive(Deserialize,Default)]
 struct Watch {
+    #[serde(default)]
     broker: String,
     #[serde(default)]
     dsn: String,
@@ -38,7 +39,10 @@ impl Watch {
             }))),
             "nats" => Some(Arc::new(Nats::connect(&self.dsn, &self.namespace).await?)),
             "none" => None,
-            name => return Err(format!("unknown watch broker {name}").into()),
+            "" => return Err("set watch.broker explicitly. A process-local memory broker cannot notify a second replica".into()),
+            name => Some(paydirt::watch::registered_broker(name, paydirt::watch::BrokerSettings {
+                database: url.into(), dsn: self.dsn.clone(), namespace: self.namespace.clone()
+            }).await?),
         })
     }
 }
@@ -53,6 +57,7 @@ struct Operator {actor:String,tenant:String,address:String}
 #[derive(Deserialize)]
 struct Config {
     operator:Option<Operator>,
+    #[serde(default)]
     watch: Watch,
     authentication: Option<paydirt_server::authentication::Config>,
     #[serde(default)]
@@ -253,7 +258,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
     use paydirt::spin::{Lease, Placement};
     let mut workers = __APP_CRATE__::workers(&db)?;
-    if let Some(ms) = config.notification_expiry_ms {
+    let declared:paydirt_store::Policies=serde_json::from_str(POLICIES)?;
+    let has_retention=declared.values().any(|p|p.application["notify"]["keep"]["days"].as_u64().is_some_and(|days|days>0));
+    if let Some(ms) = config.notification_expiry_ms.or(has_retention.then_some(3_600_000)) {
         if ms == 0 {
             return Err("notification expiry interval must be positive".into());
         }
@@ -282,7 +289,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
         })?;
     }
-    if let (Some(ms), Some(broker)) = (config.watch.drain_every_ms, broker) {
+    if let (Some(ms), Some(broker)) = (config.watch.drain_every_ms.or(config.watch.outbox.then_some(1_000)), broker) {
         let url = url.clone();
         workers.add("paydirt.outbox", Placement::Singleton, move |stop| {
             let url = url.clone();
