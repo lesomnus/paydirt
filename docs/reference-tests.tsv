@@ -48,12 +48,12 @@ content_test.go	231	TestATenantIsNobody	tracked			101
 content_test.go	261	TestADocumentThatNamesAFieldByNameIsWithheldAllTheSame	tracked			101
 content_test.go	305	TestAContentLevelIsAWordTheTrailKnows	tracked			101
 cost_test.go	57	TestAnAddManyCostsItsItems	verified	connect/tls-sqlite	web/generated-serving.mjs#L69	-
-cursor_test.go	325	TestACheckOfTheRowsReadsTheTrailFromWhereItLeftOff	tracked			98
-cursor_test.go	361	TestAPassReadsTheTrailFromWhereItLeftOff	tracked			98
-cursor_test.go	395	TestAPassReadsTheAccessRecordFromWhereItLeftOff	tracked			98
-cursor_test.go	431	TestAPassOverTheDeploymentReadsTheTrailFromWhereItLeftOff	tracked			98
-cursor_test.go	489	TestAPassOverTheDeploymentReadsTheAccessRecordFromWhereItLeftOff	tracked			98
-cursor_test.go	519	TestTheErasuresOwedAreReadFromWhereTheyLeftOff	tracked			98
+cursor_test.go	325	TestACheckOfTheRowsReadsTheTrailFromWhereItLeftOff	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L448	-
+cursor_test.go	361	TestAPassReadsTheTrailFromWhereItLeftOff	verified	store/postgres	runtime/src/trail_page.rs#L400	-
+cursor_test.go	395	TestAPassReadsTheAccessRecordFromWhereItLeftOff	verified	store/postgres	runtime/src/trail_page.rs#L400	-
+cursor_test.go	431	TestAPassOverTheDeploymentReadsTheTrailFromWhereItLeftOff	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L424	-
+cursor_test.go	489	TestAPassOverTheDeploymentReadsTheAccessRecordFromWhereItLeftOff	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L413	-
+cursor_test.go	519	TestTheErasuresOwedAreReadFromWhereTheyLeftOff	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L500	-
 digest_test.go	61	TestEachRowOfTheTrailKeepsADigestOfTheRowItsWriteLeft	verified	store/sqlite	runtime/tests/trail_integrity.rs#L190	-
 digest_test.go	94	TestARowChangedPastTheServersDiffers	verified	store/sqlite+postgres	runtime/tests/trail_integrity.rs#L273	-
 digest_test.go	124	TestAPersonalFieldChangedPastTheServersIsFoundByTheSeal	verified	store/sqlite	runtime/tests/trail_integrity.rs#L197	-
@@ -82,7 +82,7 @@ entitle_test.go	303	TestTwoWritesCannotBothPassALimitOfOne	tracked			102
 entitle_test.go	381	TestAReadThatDoesNotLockLetsBothThrough	tracked			102
 entitle_test.go	444	TestTheCopyGoesWithItsTenant	verified	connect/sqlite+postgres	web/generated-billing.mjs#L20	-
 entitle_test.go	477	TestTheServerFollowsTheSourceItIsNamed	verified	connect/grant-source	web/generated-grant-follower.mjs#L74	-
-forgetturn_test.go	39	TestTwoErasuresInATransactionBesideAPassFinish	tracked			98
+forgetturn_test.go	39	TestTwoErasuresInATransactionBesideAPassFinish	verified	store/postgres	runtime/tests/reference_cases.rs#L522	-
 formerly_earlier_test.go	301	TestAStoreOfARenamedEntityIsMovedWhole	verified	store/sqlite+postgres	runtime/tests/upgrade.rs#L162	-
 handed_test.go	95	TestTheTrailIsTheRowTheWriteRead	tracked			101
 header_test.go	25	TestTheTrailCanSayWhatTheThingWasCalled	tracked			103
@@ -308,13 +308,13 @@ tenantlist_test.go	23	TestATenantListIsNarrowedLikeAnyOtherRead	tracked			102
 tenantlist_test.go	49	TestHoldersCanBeListedByTenant	tracked			102
 time_zone_test.go	13	TestCommandsUseTheRequestedDisplayZoneBeforeCallingTheServer	verified	connect/sqlite+postgres	web/generated-operator.mjs#L26	-
 trail_test.go	45	TestTheTrailIsKeptPerKindOfThing	tracked			98
-trail_test.go	116	TestAKindTheAppDoesNotHaveIsRefused	tracked	store/sqlite+postgres	runtime/tests/trail_retention.rs#L270	98
+trail_test.go	116	TestAKindTheAppDoesNotHaveIsRefused	verified	store/sqlite+postgres	runtime/tests/trail_retention.rs#L270	-
 trail_test.go	185	TestARenamedKindIsConfiguredByEitherWordAndNotBoth	verified	store/sqlite+postgres	runtime/tests/trail_retention.rs#L281	-
 trail_test.go	216	TestTheArchiveIsSplitByKindSoThatTheSecondClockCanBe	tracked			98
 trail_test.go	293	TestOnePersonLeavesTheTrailWithoutTakingTheEventWithThem	tracked			98
 trail_test.go	373	TestAnArchivedRowIsForgottenToo	verified	store/sqlite+postgres	runtime/tests/trail_retention.rs#L184	-
-trail_test.go	457	TestTheStoreSaysWhoseARowIs	tracked			98
-trail_test.go	557	TestRowsWrittenAtOneInstantAreReadOnceEach	tracked			98
+trail_test.go	457	TestTheStoreSaysWhoseARowIs	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L413	-
+trail_test.go	557	TestRowsWrittenAtOneInstantAreReadOnceEach	verified	store/sqlite+postgres	runtime/tests/reference_cases.rs#L413	-
 trail_test.go	595	TestEachTenantKeepsItsTrailForItsOwnWindow	tracked	store/sqlite+postgres	runtime/tests/trail_retention.rs#L128	98
 trail_test.go	682	TestARowTwoTenantsMayReadLastsAsLongAsTheLongerKeepsIt	verified	store/sqlite+postgres	runtime/tests/trail_retention.rs#L302	-
 trail_test.go	754	TestAHeldTenantKeepsItsTrail	verified	store/sqlite+postgres	runtime/tests/trail_retention.rs#L143	-
@@ -325,7 +325,7 @@ trail_test.go	983	TestTheManifestIsSignedAndChainedInTheAppsOwnTable	tracked			9
 trail_test.go	1069	TestADatabaseRestoredFromBeforeTheLatestCheckpointIsAcceptedInTheAppsOwnTable	tracked			98
 trail_test.go	1193	TestTheGeneratedManifestWritesARowWholeWithItsSignature	tracked			98
 trail_test.go	1269	TestWhatTheTrailSaysIsSealedThroughTheAppsOwnStore	tracked			98
-trail_test.go	1338	TestAnErasureIsOwedInItsTransaction	tracked	store/sqlite+postgres	runtime/tests/trail_retention.rs#L339	98
+trail_test.go	1338	TestAnErasureIsOwedInItsTransaction	verified	store/sqlite+postgres	runtime/tests/trail_retention.rs#L352	-
 uuid_contract_test.go	23	TestUUIDTypesReachGeneratedRequestsAndCLI	tracked			103
 uuid_contract_test.go	72	TestUUIDFilterMetadataTravelsTheStack	tracked			103
 valid_test.go	34	TestAnIndexWhoseBuildDidNotFinishIsRefused	verified	store/postgres	runtime/tests/upgrade.rs#L203	-
