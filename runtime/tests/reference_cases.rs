@@ -548,3 +548,240 @@ fn original_owed_queue_pages_and_transactional_erasure() {
         }
     });
 }
+
+#[test]
+fn original_signed_manifest_rows_and_reviewed_restore() {
+    use paydirt_store::{
+        archive_files::Archive,
+        attestation::{Acceptance, DirectoryWitness, Ed25519, Notary},
+    };
+    backends(|fixture, url, raw| {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("vault");
+        let new_archive = || {
+            Archive::open(&root, &[74; 32])
+                .unwrap()
+                .with_notary(Notary::new(
+                    Box::new(Ed25519::from_seed(&[3; 32]).unwrap()),
+                    Default::default(),
+                    Box::new(DirectoryWitness(dir.path().join("witness"))),
+                ))
+        };
+        let vault = new_archive();
+        let mut db = fixture.open(url, &fixture.policies, true);
+        let tenant = provision(&mut db);
+        let name = paydirt::format_id(&tenant).unwrap();
+        let manage = |db: &mut Store, arg: Value| {
+            let mut r = arg;
+            r["tenant"] = json!(name);
+            db.manage_trail(&vault, None, serde_json::from_value(r).unwrap())
+        };
+        manage(
+            &mut db,
+            json!({"action":"policy","policy":{"default":{"retain_ms":0}}}),
+        )
+        .unwrap();
+        for (i, alias) in ["one", "two", "three"].iter().enumerate() {
+            write(
+                &mut db,
+                &tenant,
+                "app.Robot",
+                "Add",
+                json!({"tenant":{"id":STANDARD.encode(tenant)},"alias":alias}),
+            );
+            assert!(
+                !manage(&mut db, json!({"action":"collect"}))
+                    .unwrap()
+                    .archived
+                    .is_empty()
+            );
+            let point = db.attest_trail(&vault, false).unwrap().unwrap();
+            assert_eq!(point.k, i as u64 + 1);
+            if i == 0 {
+                raw(r#"CREATE TABLE manifest_backup AS SELECT * FROM "pd_app__Archived""#);
+            }
+        }
+        let rows = db
+            .call(
+                &Scope::Internal,
+                Call {
+                    entity: "app.Archived".into(),
+                    method: "List".into(),
+                    request: json!({}),
+                },
+            )
+            .unwrap();
+        let records = rows["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|v| v["namespace"].as_str().is_some_and(|v| !v.is_empty()))
+            .collect::<Vec<_>>();
+        assert!(records.len() >= 3);
+        for row in records {
+            assert!(paydirt::has_domain(&id(&row["id"]), 5));
+            assert_eq!(row["state"], "present");
+            assert_eq!(row["labels"]["Kind"], "robot");
+            assert!(
+                !row["signature"].as_str().unwrap().is_empty()
+                    && !row["signedBy"].as_str().unwrap().is_empty()
+            );
+            assert!(row["since"].as_u64().unwrap() > 0);
+        }
+        raw(
+            r#"DELETE FROM "pd_app__Archived"; INSERT INTO "pd_app__Archived" SELECT * FROM manifest_backup"#,
+        );
+        assert!(db.attest_trail(&vault, false).is_err());
+        assert!(db.attest_trail(&vault, true).is_err());
+        let review = db.review_trail(&vault).unwrap();
+        assert_eq!(
+            (review.database_checkpoint, review.archive_checkpoint),
+            (1, 3)
+        );
+        assert_eq!(review.unaccounted.len(), 2);
+        let mut decision = Acceptance {
+            of: review.of,
+            by: "operator".into(),
+            why: "restored the first database backup".into(),
+            restored: 2,
+        };
+        assert!(db.accept_trail_restore(&vault, decision.clone()).is_err());
+        decision.restored = 1;
+        let accepted = db.accept_trail_restore(&vault, decision.clone()).unwrap();
+        assert_eq!(accepted.k, 4);
+        assert!(db.accept_trail_restore(&vault, decision).is_err());
+        assert_eq!(db.attest_trail(&vault, false).unwrap().unwrap().k, 4);
+        use std::io::Read;
+        let mut decoded = String::new();
+        flate2::read::GzDecoder::new(
+            std::fs::File::open(root.join(".checkpoints/00000000000000000004.gz")).unwrap(),
+        )
+        .read_to_string(&mut decoded)
+        .unwrap();
+        let envelope: Value = serde_json::from_str(&decoded).unwrap();
+        assert_eq!(envelope["checkpoint"]["accepted"]["restored"], 1);
+        assert_eq!(envelope["checkpoint"]["accepted"]["by"], "operator");
+        write(
+            &mut db,
+            &tenant,
+            "app.Robot",
+            "Add",
+            json!({"tenant":{"id":STANDARD.encode(tenant)},"alias":"after-restore"}),
+        );
+        if url.starts_with("postgres") {
+            let mut peer = fixture.open(url, &fixture.policies, true);
+            let peer_vault = new_archive();
+            std::thread::scope(|threads| {
+                threads.spawn(|| {
+                    peer.manage_trail(
+                        &peer_vault,
+                        None,
+                        serde_json::from_value(json!({"action":"collect","tenant":name})).unwrap(),
+                    )
+                    .unwrap()
+                });
+                manage(&mut db, json!({"action":"collect"})).unwrap();
+            });
+        } else {
+            manage(&mut db, json!({"action":"collect"})).unwrap();
+        }
+        assert_eq!(db.attest_trail(&vault, false).unwrap().unwrap().k, 5);
+        raw(r#"UPDATE "pd_app__Archived" SET f7='{"Kind":"forged"}' WHERE f11='present'"#);
+        assert!(db.attest_trail(&vault, false).is_err());
+    });
+}
+
+#[test]
+fn original_signed_transition_is_whole_or_unchanged() {
+    use paydirt_store::{
+        Fault,
+        attestation::Signature,
+        manifest::{Record, State},
+    };
+    backends(|fixture, url, raw| {
+        let mut db = fixture.open(url, &fixture.policies, false);
+        let sign =
+            |_was: Option<&Record>, next: &Record| -> paydirt_store::Result<Option<Signature>> {
+                Ok(Some(Signature {
+                    key: STANDARD.encode(b"key"),
+                    sig: STANDARD.encode(next.statement()),
+                }))
+            };
+        let row = db
+            .transaction(&Scope::Internal, |tx| {
+                tx.archive_intent("ns", "example", Default::default(), sign)
+            })
+            .unwrap();
+        let key = row.id;
+        let added = db
+            .transaction(&Scope::Internal, |tx| {
+                tx.change_archive_record(
+                    key,
+                    State::Adding,
+                    |r| {
+                        r.digest = "sha256:abc".into();
+                        r.labels.insert("a".into(), "2".into());
+                        r.state = State::Present;
+                        Ok(())
+                    },
+                    |was, next| {
+                        assert_eq!(was.unwrap().signature, row.signature);
+                        sign(was, next)
+                    },
+                )
+            })
+            .unwrap()
+            .unwrap();
+        let get = |db: &mut Store| {
+            db.transaction(&Scope::Internal, |tx| tx.archive_record(key))
+                .unwrap()
+        };
+        let stored = get(&mut db);
+        assert_eq!(stored.signature, added.signature);
+        assert_eq!(stored.labels["a"], "2");
+        assert!(
+            db.transaction(&Scope::Internal, |tx| tx.change_archive_record(
+                key,
+                State::Adding,
+                |_| panic!("incorrect prior state"),
+                sign
+            ))
+            .unwrap()
+            .is_none()
+        );
+        assert!(
+            db.transaction(&Scope::Internal, |tx| tx.change_archive_record(
+                key,
+                State::Present,
+                |r| {
+                    r.state = State::Erasing;
+                    Ok(())
+                },
+                |_, _| Err(Fault::precondition("signer refused"))
+            ))
+            .is_err()
+        );
+        assert_eq!(get(&mut db).state, State::Present);
+        db.transaction(&Scope::Internal, |tx| {
+            tx.change_archive_record(
+                key,
+                State::Present,
+                |r| {
+                    r.state = State::Erasing;
+                    Ok(())
+                },
+                sign,
+            )
+        })
+        .unwrap()
+        .unwrap();
+        if url.starts_with("postgres") {
+            let result=db.transaction(&Scope::Internal,|tx|tx.change_archive_record(key,State::Erasing,|r|{r.state=State::Present;Ok(())},|was,next|{
+                raw(&format!("UPDATE \"pd_app__Archived\" SET f11='erased' WHERE f1=decode('{}','hex')",hex::encode(key)));
+                sign(was,next)
+            })).unwrap();
+            assert!(result.is_none());
+            assert_eq!(get(&mut db).state, State::Erased);
+        }
+    });
+}

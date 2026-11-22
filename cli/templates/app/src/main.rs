@@ -154,8 +154,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let export=std::env::var_os(paydirt::environment::PAYDIRT_EXPORT_DIR).map(|_|archive(paydirt::environment::PAYDIRT_EXPORT_DIR,paydirt::environment::PAYDIRT_EXPORT_KEY)).transpose()?;
         let mut store=__APP_CRATE__::resource::record(paydirt_store::Store::open(&url,MODEL,POLICIES)?)?;
         if command=="trail-check"{
-            let advance=match argument.as_str(){"checkpoint"=>true,"verify"=>false,_=>return Err("expected verify or checkpoint".into())};
-            println!("{}",serde_json::to_string(&store.attest_trail(&vault,advance)?)?);
+            let result=match argument.as_str(){
+                "checkpoint"|"verify"=>serde_json::to_value(store.attest_trail(&vault,argument=="checkpoint")?)?,
+                "review"=>serde_json::to_value(store.review_trail(&vault)?)?,
+                json if json.trim_start().starts_with('{')=>serde_json::to_value(store.accept_trail_restore(&vault,serde_json::from_str(json)?)?)?,
+                _=>return Err("expected verify, checkpoint, review or a restore acceptance".into()),
+            };
+            println!("{}",serde_json::to_string(&result)?);
             return Ok(());
         }
         println!("{}",serde_json::to_string(&store.manage_trail(&vault,export.as_ref(),serde_json::from_str(argument)?)?)?);

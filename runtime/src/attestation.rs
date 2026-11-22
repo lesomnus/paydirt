@@ -51,7 +51,7 @@ impl Signer for Ed25519 {
             .map_err(bad)
     }
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Signature {
     pub key: String,
     pub sig: String,
@@ -102,6 +102,18 @@ fn membership(v: &[Blob]) -> String {
     }
     hash(&b)
 }
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Acceptance {
+    pub of: String,
+    pub by: String,
+    pub why: String,
+    pub restored: u64,
+}
+pub(crate) struct History {
+    pub head: Option<Head>,
+    pub latest: BTreeSet<Blob>,
+}
 #[derive(Serialize, Deserialize)]
 pub struct Checkpoint {
     pub k: u64,
@@ -111,6 +123,8 @@ pub struct Checkpoint {
     pub count: usize,
     pub digest: String,
     pub blobs: Vec<Blob>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepted: Option<Acceptance>,
 }
 #[derive(Deserialize, Serialize)]
 struct Envelope {
@@ -399,6 +413,10 @@ impl Notary {
         removed: BTreeSet<Blob>,
         advance: bool,
     ) -> Result<Option<Head>> {
+        let history = self.history(root, advance)?;
+        self.finish_chain(root, history, blobs, removed, advance, None)
+    }
+    pub(crate) fn history(&self, root: &Path, advance: bool) -> Result<History> {
         let directory = root.join(".checkpoints");
         let mut history = BTreeMap::new();
         let mut head: Option<Head> = None;
@@ -429,6 +447,19 @@ impl Notary {
         }
         self.witness
             .check(root, &history, self.signer.as_ref(), &self.trusted, advance)?;
+        Ok(History { head, latest })
+    }
+    pub(crate) fn finish_chain(
+        &self,
+        root: &Path,
+        history: History,
+        blobs: BTreeSet<Blob>,
+        removed: BTreeSet<Blob>,
+        advance: bool,
+        accepted: Option<Acceptance>,
+    ) -> Result<Option<Head>> {
+        let directory = root.join(".checkpoints");
+        let History { head, latest } = history;
         if !advance {
             if latest != blobs {
                 return Err(bad("checkpoint differs from current archive"));
@@ -447,6 +478,7 @@ impl Notary {
             count: blobs.len(),
             digest: membership(&blobs),
             blobs,
+            accepted,
         };
         let doc = serde_json::to_string(&c).map_err(bad)?;
         let signature = self.sign(doc.as_bytes())?;
