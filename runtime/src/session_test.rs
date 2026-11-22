@@ -113,3 +113,101 @@ fn atomic_postgres() {
         exercise(&url)
     }
 }
+
+fn exercise_label_filters(url: &str) {
+    let mut db = Store::open(
+        url,
+        include_str!("../../generated/storage/model.json"),
+        include_str!("../../generated/storage/policies.json"),
+    )
+    .unwrap();
+    let mut call = |scope: &Scope, entity: &str, method: &str, request: serde_json::Value| {
+        db.call(
+            scope,
+            Call {
+                entity: format!("app.{entity}"),
+                method: method.into(),
+                request,
+            },
+        )
+    };
+    let tenant = paydirt::mint(1);
+    let scope = Scope::Tenant(tenant.to_vec());
+    let tenant_ref = json!({"id":encoded(&tenant)});
+    call(
+        &Scope::Internal,
+        "Tenant",
+        "Add",
+        json!({"id":encoded(&tenant),"alias":format!("org-{}",hex::encode(tenant))}),
+    )
+    .unwrap();
+    for (alias, labels) in [
+        ("one", json!({"team":"core", "tier":"gold"})),
+        ("two", json!({"team":"core"})),
+        ("other", json!({"team":"edge","tier":"gold"})),
+        ("blank", json!({"team":""})),
+        ("bare", json!({})),
+    ] {
+        call(
+            &scope,
+            "Holder",
+            "Add",
+            json!({"tenant":tenant_ref,"alias":alias,"labels":labels}),
+        )
+        .unwrap();
+    }
+    let mut list = |filter, after: &str, size| {
+        call(
+            &scope,
+            "Holder",
+            "List",
+            json!({"filters":[filter],"size":size,"after":after}),
+        )
+    };
+    let one = list(json!({"labels":{"team":"core"}}), "", 1).unwrap();
+    let two = list(
+        json!({"labels":{"team":"core"}}),
+        one["next"].as_str().filter(|s| !s.is_empty()).unwrap(),
+        1,
+    )
+    .unwrap();
+    let mut names = [
+        one["items"][0]["alias"].clone(),
+        two["items"][0]["alias"].clone(),
+    ];
+    names.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
+    assert_eq!(names, [json!("one"), json!("two")]);
+    for (labels, expected) in [
+        (json!({"team":"core","tier":"gold"}), "one"),
+        (json!({"team":""}), "blank"),
+    ] {
+        let rows = list(json!({"labels":labels}), "", 50).unwrap();
+        assert_eq!(rows["items"].as_array().unwrap().len(), 1);
+        assert_eq!(rows["items"][0]["alias"], expected);
+    }
+    assert_eq!(
+        list(json!({"labels":{}}), "", 50).unwrap_err().code,
+        "invalid_argument"
+    );
+    assert_eq!(
+        list(json!({"tenant":tenant_ref,"labels":{}}), "", 50).unwrap()["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        5
+    );
+}
+
+#[cfg(feature = "sqlite")]
+#[test]
+fn sqlite_label_filters() {
+    exercise_label_filters(":memory:")
+}
+
+#[cfg(feature = "postgres")]
+#[test]
+fn postgres_label_filters() {
+    if let Ok(url) = std::env::var("DATABASE_URL") {
+        exercise_label_filters(&url);
+    }
+}

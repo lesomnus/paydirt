@@ -1,6 +1,10 @@
-use crate::{Fault, Result, Transaction, driver::Query, value};
+use crate::{
+    Fault, Result, Transaction,
+    driver::{Bind, Query},
+    value,
+};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use paydirt_model::{Entity, Field, quote};
+use paydirt_model::{Dialect, Entity, Field, quote};
 use serde_json::{Value, json};
 
 fn from_cursor(field: &Field, v: &Value) -> Result<Value> {
@@ -69,7 +73,30 @@ impl Transaction<'_> {
                         .find(|field| heck::AsLowerCamelCase(*field).to_string() == *name)
                         .ok_or_else(|| Fault::invalid("undeclared filter"))?;
                     let f = e.field(name).map_err(Fault::invalid)?;
-                    and.push(self.same(q, f, v)?);
+                    if f.collection == "map" {
+                        let entries = v
+                            .as_object()
+                            .ok_or_else(|| Fault::invalid("expected label map"))?;
+                        if entries.is_empty() {
+                            continue;
+                        }
+                        if entries.values().any(|value| !value.is_string()) {
+                            return Err(Fault::invalid("expected string label values"));
+                        }
+                        let dialect = self.db.dialect();
+                        let wanted = q.param(Bind::Text(v.to_string()), dialect);
+                        let column = quote(&f.column());
+                        and.push(match dialect {
+                            Dialect::Postgres => format!("r.{column}::jsonb @> {wanted}::jsonb"),
+                            Dialect::Sqlite => format!(
+                                "NOT EXISTS (SELECT 1 FROM json_each({wanted}) want WHERE NOT EXISTS \
+                                 (SELECT 1 FROM json_each(r.{column}) have WHERE have.key=want.key \
+                                  AND have.type='text' AND have.value=want.value))"
+                            ),
+                        });
+                    } else {
+                        and.push(self.same(q, f, v)?);
+                    }
                 }
             }
             if and.is_empty() {
