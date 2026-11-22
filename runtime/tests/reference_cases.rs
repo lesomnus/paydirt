@@ -295,3 +295,256 @@ fn original_secret_bulk_erasure_and_kind_selection() {
         );
     })
 }
+
+#[test]
+fn original_trail_scopes_seek_ties_and_walk_entire_deployment() {
+    use paydirt_store::trail_page::{Cursor, Selection, Whose};
+    use std::collections::BTreeSet;
+    backends(|fixture, url, _| {
+        let mut store = fixture.open(url, &fixture.policies, true);
+        let a = paydirt::mint(1);
+        let b = paydirt::mint(1);
+        let nobody = [0; 16];
+        let at = chrono::DateTime::parse_from_rfc3339("2020-01-01T00:00:00Z")
+            .unwrap()
+            .to_utc();
+        let mut entries = Vec::new();
+        let mut expected = Vec::new();
+        let mut objects = Vec::new();
+        for i in 0..1280 {
+            let access = i % 2 == 1;
+            let domain = if access {
+                6
+            } else if i % 16 == 0 {
+                7
+            } else {
+                2
+            };
+            let owners = match (i / 2) % 5 {
+                0 => (a, a, None),
+                1 => (a, nobody, None),
+                2 => (a, b, None),
+                3 => (b, b, Some(a)),
+                _ => (b, b, None),
+            };
+            let mut tenants = vec![owners.0];
+            for t in [Some(owners.1), owners.2].into_iter().flatten() {
+                if t != nobody && !tenants.contains(&t) {
+                    tenants.push(t);
+                }
+            }
+            let stamp = at + chrono::TimeDelta::seconds(i / 6);
+            let id = paydirt::mint(if access { 6 } else { 3 });
+            let mut row = json!({"id":STANDARD.encode(id),"domain":domain,"tenantId":STANDARD.encode(owners.0),
+                "actorTenantId":STANDARD.encode(owners.1),"actorId":STANDARD.encode(paydirt::mint(2)),
+                "dateCreated":stamp,"action":"/app.RobotService/Get"});
+            if !access {
+                let object = paydirt::mint(domain);
+                objects.push(object);
+                row["objectId"] = STANDARD.encode(object).into();
+                if let Some(other) = owners.2 {
+                    row["counterpartTenantId"] = STANDARD.encode(other).into();
+                }
+            } else if owners.2.is_some() {
+                // Access has actor and filing columns and no counterparty column.
+                tenants = vec![owners.0];
+            }
+            entries.push((if access { "app.Access" } else { "app.Audit" }.into(), row));
+            expected.push((
+                Cursor {
+                    created: stamp,
+                    key: id,
+                },
+                domain,
+                tenants,
+            ));
+        }
+        store.seed(entries).unwrap();
+        expected.sort_by_key(|v| v.0);
+        let until = at + chrono::TimeDelta::days(1);
+        let read = |store: &mut Store, selection: &Selection| {
+            store
+                .transaction(&Scope::Internal, |tx| {
+                    let mut found = Vec::new();
+                    let mut cursor = None;
+                    loop {
+                        let page = tx.trail_page(selection, Some(until), cursor, 50)?;
+                        if page.is_empty() {
+                            break;
+                        }
+                        cursor = page.last().map(|r| r.cursor);
+                        found.extend(page.into_iter().map(|r| (r.cursor, r.tenants)));
+                    }
+                    Ok(found)
+                })
+                .unwrap()
+        };
+        for whose in [
+            Whose::Anyone,
+            Whose::FiledUnder,
+            Whose::Alone,
+            Whose::Together,
+            Whose::Sharing,
+        ] {
+            for domain in [None, Some(6), Some(7)] {
+                for tenant in [a, b] {
+                    let selection = Selection {
+                        tenant,
+                        whose,
+                        only: domain.into_iter().collect(),
+                        ..Default::default()
+                    };
+                    let actual = read(&mut store, &selection);
+                    let want: Vec<_> = expected
+                        .iter()
+                        .filter(|(_, d, ts)| {
+                            domain.is_none_or(|k| k == *d)
+                                && match whose {
+                                    Whose::Anyone => true,
+                                    Whose::FiledUnder => ts[0] == tenant,
+                                    Whose::Alone => ts == &[tenant],
+                                    Whose::Together => ts.contains(&tenant) && ts.len() > 1,
+                                    Whose::Sharing => ts[0] == tenant && ts.len() > 1,
+                                    _ => unreachable!(),
+                                }
+                        })
+                        .map(|(k, _, ts)| (*k, ts.clone()))
+                        .collect();
+                    assert_eq!(actual, want, "scope {whose:?}, domain {domain:?}");
+                }
+            }
+        }
+        let except = read(
+            &mut store,
+            &Selection {
+                except: BTreeSet::from([7]),
+                ..Default::default()
+            },
+        );
+        assert_eq!(except.len(), expected.iter().filter(|v| v.1 != 7).count());
+        let chosen = read(
+            &mut store,
+            &Selection {
+                objects: BTreeSet::from([objects[3]]),
+                ..Default::default()
+            },
+        );
+        assert_eq!(chosen.len(), 1);
+        store
+            .transaction(&Scope::Internal, |tx| {
+                let all = tx.trail_tenants(nobody, 256)?;
+                let first = tx.trail_tenants(nobody, 1)?;
+                assert_eq!(all, BTreeSet::from([a, b]).into_iter().collect::<Vec<_>>());
+                assert_eq!(tx.trail_tenants(first[0], 256)?, all[1..]);
+                Ok(())
+            })
+            .unwrap();
+        let extra = 3 * 256 + 100;
+        let padding=(0..extra).map(|i|("app.Audit".into(),json!({"id":STANDARD.encode(paydirt::mint(3)),"domain":7,
+            "tenantId":STANDARD.encode(a),"actorTenantId":STANDARD.encode(a),"actorId":STANDARD.encode(nobody),
+            "objectId":STANDARD.encode(paydirt::mint(7)),"action":"/test/Write","dateCreated":at+chrono::TimeDelta::seconds(i as i64/3)}))).collect();
+        store.seed(padding).unwrap();
+        let report = store.check_kind("app.Robot", None).unwrap();
+        let expected_missing = extra + expected.iter().filter(|v| v.1 == 7).count();
+        assert_eq!(
+            report
+                .findings
+                .values()
+                .filter(|f| f.digest == Verdict::Missing)
+                .count(),
+            expected_missing
+        );
+    });
+}
+
+#[test]
+fn original_owed_queue_pages_and_transactional_erasure() {
+    use std::collections::BTreeSet;
+    backends(|fixture, url, _| {
+        let instant = "2020-05-01T00:00:00Z"
+            .parse::<chrono::DateTime<chrono::Utc>>()
+            .unwrap();
+        let mut store = fixture
+            .open(url, &fixture.policies, false)
+            .with_inputs(paydirt_store::Inputs::new(move || instant, paydirt::mint));
+        let tenant = paydirt::mint(1);
+        let ids: Vec<_> = (0..600).map(|_| paydirt::mint(10)).collect();
+        for chunk in ids.chunks(120) {
+            store
+                .transaction(&Scope::Internal, |tx| {
+                    for id in chunk {
+                        tx.owe_trail_erasure(tenant, *id)?;
+                    }
+                    Ok(())
+                })
+                .unwrap();
+        }
+        store
+            .transaction(&Scope::Internal, |tx| {
+                let mut seen = BTreeSet::new();
+                let mut cursor = None;
+                let mut pages = 0;
+                loop {
+                    let rows = tx.owed_page(cursor, 50)?;
+                    pages += 1;
+                    if rows.is_empty() {
+                        break;
+                    }
+                    for row in rows {
+                        assert!(cursor.is_none_or(|before| row.cursor > before));
+                        assert!(paydirt::has_domain(&row.cursor.key, 254));
+                        assert!(seen.insert(id(&row.document["object"])));
+                        cursor = Some(row.cursor);
+                    }
+                }
+                assert_eq!(pages, 13);
+                assert_eq!(seen, ids.iter().copied().collect());
+                Ok(())
+            })
+            .unwrap();
+        if url.starts_with("postgres") {
+            let other = paydirt::mint(1);
+            let targets = [paydirt::mint(7), paydirt::mint(2)];
+            let directory = tempfile::tempdir().unwrap();
+            let (queued, wait) = std::sync::mpsc::channel();
+            let (entered, proceed) = std::sync::mpsc::channel();
+            let mut queue = fixture.open(url, &fixture.policies, false);
+            let mut maintenance = fixture.open(url, &fixture.policies, false);
+            let archive =
+                paydirt_store::archive_files::Archive::open(directory.path(), &[42; 32]).unwrap();
+            std::thread::scope(|threads| {
+                threads.spawn(move || {
+                    queue
+                        .transaction(&Scope::Internal, |tx| {
+                            tx.owe_trail_erasure(other, targets[0])?;
+                            queued.send(()).unwrap();
+                            proceed.recv().unwrap();
+                            tx.owe_trail_erasure(other, targets[1])
+                        })
+                        .unwrap()
+                });
+                threads.spawn(move || {
+                    wait.recv().unwrap();
+                    entered.send(()).unwrap();
+                    let req =
+                        json!({"action":"collect","tenant":paydirt::format_id(&other).unwrap()});
+                    let result = maintenance
+                        .manage_trail(&archive, None, serde_json::from_value(req).unwrap())
+                        .unwrap();
+                    assert!(result.owed.is_empty());
+                });
+            });
+            store
+                .transaction(&Scope::Internal, |tx| {
+                    let rows = tx.owed_page(None, 1000)?;
+                    assert_eq!(rows.len(), ids.len());
+                    assert!(
+                        rows.iter()
+                            .all(|r| !targets.contains(&id(&r.document["object"])))
+                    );
+                    Ok(())
+                })
+                .unwrap();
+        }
+    });
+}

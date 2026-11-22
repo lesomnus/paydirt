@@ -177,6 +177,24 @@ CREATE TABLE IF NOT EXISTS paydirt_trail_archive (id TEXT PRIMARY KEY, doc TEXT 
 CREATE TABLE IF NOT EXISTS paydirt_trail_owed (id TEXT PRIMARY KEY, doc TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS paydirt_trail_removed (id TEXT PRIMARY KEY, doc TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS paydirt_trail_gc (id TEXT PRIMARY KEY, doc TEXT NOT NULL);";
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+enum Obligation {
+    Current {
+        tenant: String,
+        subject: String,
+        key: String,
+    },
+    Legacy((String, String)),
+}
+impl Obligation {
+    fn subject(&self) -> &str {
+        match self {
+            Self::Current { subject, .. } => subject,
+            Self::Legacy((_, subject)) => subject,
+        }
+    }
+}
 impl Transaction<'_> {
     fn lock_trail(&mut self) -> Result<()> {
         if self.db.dialect() == Dialect::Postgres {
@@ -200,11 +218,130 @@ impl Transaction<'_> {
         let tenant = paydirt::format_id(&tenant).expect("sixteen-byte identifier");
         let subject = paydirt::format_id(&subject).expect("sixteen-byte identifier");
         self.lock_trail()?;
-        self.trail_set(
-            "paydirt_trail_owed",
-            &format!("{tenant}/{subject}"),
-            Some(&(&tenant, &subject)),
-        )
+        self.queue_obligation(&tenant, &subject).map(|_| ())
+    }
+    fn queue_obligation(&mut self, tenant: &str, subject: &str) -> Result<Obligation> {
+        let id = format!("{tenant}/{subject}");
+        let mut q = Query::new("");
+        let bound = param(&mut q, &id, self.db.dialect());
+        q.sql = format!("SELECT doc AS value FROM paydirt_trail_owed WHERE id={bound}");
+        if let Some(doc) = self.db.rows(q)?.first()
+            && let obligation @ Obligation::Current { .. } = decode(doc)?
+        {
+            return Ok(obligation);
+        }
+        let obligation = if let Some((name, p)) = self
+            .policies
+            .iter()
+            .find(|(_, p)| p.entity["own"] == "OWN_OWED")
+        {
+            let domain = p.entity["domain"]
+                .as_u64()
+                .and_then(|n| u8::try_from(n).ok())
+                .ok_or_else(|| bad("missing erasure queue domain"))?;
+            let key = (self.inputs.mint)(domain);
+            let e = self.model.entity(name).map_err(bad)?;
+            self.insert(e,&json!({"id":value::encoded(&key),"object":value::encoded(&paydirt::parse_id(subject).ok_or_else(||bad("invalid subject"))?),"heldBy":[]}))?;
+            Obligation::Current {
+                tenant: tenant.into(),
+                subject: subject.into(),
+                key: paydirt::format_id(&key).unwrap(),
+            }
+        } else {
+            Obligation::Legacy((tenant.into(), subject.into()))
+        };
+        self.trail_set("paydirt_trail_owed", &id, Some(&obligation))?;
+        Ok(obligation)
+    }
+    fn obligations(&mut self, tenant: &str, upgrade: bool) -> Result<BTreeMap<String, Obligation>> {
+        let mut out = BTreeMap::new();
+        let end = format!("{tenant}0");
+        let mut cursor = format!("{tenant}/");
+        loop {
+            let mut q = Query::new("");
+            let d = self.db.dialect();
+            let start = param(&mut q, &cursor, d);
+            let end = param(&mut q, &end, d);
+            let projection = match d {
+                Dialect::Postgres => "json_build_array(id,doc)::text",
+                Dialect::Sqlite => "json_array(id,doc)",
+            };
+            q.sql = format!(
+                "SELECT {projection} AS value FROM paydirt_trail_owed WHERE id>{start} AND id<{end} ORDER BY id LIMIT 256"
+            );
+            let page = self.db.rows(q)?;
+            let count = page.len();
+            for raw in page {
+                let (key, doc): (String, String) = decode(&raw)?;
+                let mut entry: Obligation = decode(&doc)?;
+                let subject = uuid(entry.subject())?;
+                if key != format!("{tenant}/{subject}") {
+                    return Err(bad("erasure obligation key mismatch"));
+                }
+                cursor = key;
+                if upgrade && matches!(entry, Obligation::Legacy(_)) {
+                    entry = self.queue_obligation(tenant, &subject)?;
+                }
+                out.insert(subject, entry);
+            }
+            if count < 256 {
+                break;
+            }
+        }
+        Ok(out)
+    }
+    fn finish_obligation(
+        &mut self,
+        tenant: &str,
+        obligation: &Obligation,
+        held_by: &BTreeSet<String>,
+    ) -> Result<()> {
+        if let Obligation::Current { key, .. } = obligation {
+            let (name, _) = self
+                .policies
+                .iter()
+                .find(|(_, p)| p.entity["own"] == "OWN_OWED")
+                .ok_or_else(|| bad("erasure queue schema missing"))?;
+            let e = self.model.entity(name).map_err(bad)?;
+            let d = self.db.dialect();
+            let mut q = Query::new("");
+            let bound = q.param(
+                Bind::Bytes(
+                    paydirt::parse_id(key)
+                        .ok_or_else(|| bad("invalid erasure queue id"))?
+                        .to_vec(),
+                ),
+                d,
+            );
+            let table = quote(&e.table());
+            let key_col = quote(&e.key().map_err(bad)?.column());
+            if held_by.is_empty() {
+                q.sql = format!("DELETE FROM {table} WHERE {key_col}={bound}");
+            } else {
+                let held: Vec<_> = held_by
+                    .iter()
+                    .map(|v| {
+                        paydirt::parse_id(v)
+                            .map(|id| value::encoded(&id))
+                            .ok_or_else(|| bad("invalid hold tenant"))
+                    })
+                    .collect::<Result<_>>()?;
+                let field = e.field("held_by").map_err(bad)?;
+                let owners = q.param(value::bind(field, &json!(held))?, d);
+                q.sql = format!(
+                    "UPDATE {table} SET {}={owners} WHERE {key_col}={bound}",
+                    quote(&field.column())
+                );
+            }
+            self.db.exec(q)?;
+        }
+        if held_by.is_empty() {
+            self.trail_clear(
+                "paydirt_trail_owed",
+                &format!("{tenant}/{}", obligation.subject()),
+            )?;
+        }
+        Ok(())
     }
     fn trail_docs<T: DeserializeOwned>(&mut self, table: &str) -> Result<Vec<T>> {
         self.db
@@ -234,43 +371,25 @@ impl Transaction<'_> {
         self.trail_set(table, id, None::<&Value>)
     }
     fn live_trail(&mut self, tenant: &str, shared: bool) -> Result<Vec<(Entry, Value)>> {
-        let mut rows = Vec::new();
-        for (name, p) in self
-            .policies
-            .iter()
-            .filter(|(_, p)| matches!(p.entity["own"].as_str(), Some("OWN_AUDIT" | "OWN_ACCESS")))
-        {
-            let access = p.entity["own"] == "OWN_ACCESS";
-            let entity = self.model.entity(name).map_err(bad)?;
-            let mut q = Query::new("");
-            let owner = q.param(
-                Bind::Bytes(paydirt::parse_id(tenant).unwrap().to_vec()),
-                self.db.dialect(),
-            );
-            let columns = if shared {
-                &["tenant_id", "actor_tenant_id", "counterpart_tenant_id"][..]
+        use crate::trail_page::{Selection, Whose};
+        let select = Selection {
+            whose: if shared {
+                Whose::Named
             } else {
-                &["tenant_id"][..]
-            };
-            let owners = columns
-                .iter()
-                .filter_map(|n| entity.field(n).ok())
-                .map(|f| format!("r.{}={owner}", quote(&f.column())))
-                .collect::<Vec<_>>()
-                .join(" OR ");
-            q.sql = format!(
-                "SELECT {} AS value FROM {} r WHERE ({owners}) ORDER BY r.{}",
-                self.project_sql(entity)?,
-                quote(&entity.table()),
-                quote(&entity.key().map_err(bad)?.column())
-            );
-            if self.db.dialect() == Dialect::Postgres {
-                q.sql.push_str(" FOR UPDATE")
-            }
-            for raw in self.db.rows(q)? {
-                let row = self.decode_row(entity, &raw)?;
-                let id = row_id(&row["id"]).ok_or_else(|| bad("invalid trail row ID"))?;
-                let kind = if access {
+                Whose::FiledUnder
+            },
+            tenant: paydirt::parse_id(tenant).ok_or_else(|| bad("invalid tenant"))?,
+            ..Default::default()
+        };
+        let mut rows = Vec::new();
+        let mut after = None;
+        loop {
+            let page = self.read_trail_page(&select, None, after, 256, false, true)?;
+            let count = page.len();
+            for item in page {
+                after = Some(item.cursor);
+                let row = item.document;
+                let kind = if self.policies[&item.entity].entity["own"] == "OWN_ACCESS" {
                     "access".into()
                 } else {
                     self.policies
@@ -279,13 +398,14 @@ impl Transaction<'_> {
                         .map(|(n, _)| n.clone())
                         .unwrap_or_else(|| format!("domain.{}", row["domain"]))
                 };
-                let owners = ["tenantId", "actorTenantId", "counterpartTenantId"]
-                    .into_iter()
-                    .filter_map(|k| row_id(&row[k]))
+                let owners = item
+                    .tenants
+                    .iter()
+                    .filter_map(|id| paydirt::format_id(id))
                     .collect();
                 rows.push((
                     Entry {
-                        id,
+                        id: paydirt::format_id(&item.cursor.key).unwrap(),
                         tenant: row_id(&row["tenantId"])
                             .unwrap_or_else(|| "00000000-0000-0000-0000-000000000000".into()),
                         kind,
@@ -297,12 +417,15 @@ impl Transaction<'_> {
                         namespace: None,
                         proof: None,
                         ciphertext: None,
-                        table: name.clone(),
+                        table: item.entity,
                         digest: None,
                         signature: None,
                     },
                     row,
                 ));
+            }
+            if count < 256 {
+                break;
             }
         }
         Ok(rows)
@@ -426,24 +549,18 @@ fn run_pass(
         retired: state.retired,
         ..Default::default()
     };
-    let mut owed: BTreeSet<String> = tx
-        .trail_docs::<(String, String)>("paydirt_trail_owed")?
-        .into_iter()
-        .filter(|(t, _)| t == &tenant)
-        .map(|(_, o)| o)
-        .collect();
+    let mut obligations = tx.obligations(&tenant, !dry)?;
     if let Action::Forget { subject } = &request.action {
         let subject = uuid(subject)?;
-        owed.insert(subject.clone());
-        if !dry {
-            tx.trail_set(
-                "paydirt_trail_owed",
-                &format!("{tenant}/{subject}"),
-                Some(&(&tenant, &subject)),
-            )?;
-        }
+        let item = if dry {
+            Obligation::Legacy((tenant.clone(), subject.clone()))
+        } else {
+            tx.queue_obligation(&tenant, &subject)?
+        };
+        obligations.insert(subject, item);
     }
-    let mut waiting = BTreeSet::new();
+    let owed: BTreeSet<_> = obligations.keys().cloned().collect();
+    let mut waiting: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut exported = Vec::new();
     let mut carry = crate::integrity::CarryHeads::default();
     let shared = !matches!(request.action, Action::Retire | Action::Purge);
@@ -518,7 +635,19 @@ fn run_pass(
                 || state.retired && e.tenant == tenant);
         if held && (target || shared_departure || forget && !subjects.is_empty()) {
             out.held.push(e.id.clone());
-            waiting.extend(subjects.iter().cloned());
+            for subject in &subjects {
+                let owners = waiting.entry(subject.clone()).or_default();
+                owners.extend(
+                    e.owners
+                        .iter()
+                        .filter(|t| {
+                            states.get(*t).is_some_and(|s| {
+                                s.policy.held.contains("*") || s.policy.held.contains(&e.kind)
+                            })
+                        })
+                        .cloned(),
+                );
+            }
         }
         if target && !held && !shared_departure {
             if matches!(request.action, Action::Collect)
@@ -628,13 +757,19 @@ fn run_pass(
         request.action,
         Action::Forget { .. } | Action::Retry | Action::Collect
     ) {
-        for o in owed.difference(&waiting) {
-            if !dry {
-                tx.forget_seal(&paydirt::parse_id(o).ok_or_else(|| bad("invalid subject"))?)?;
-                tx.trail_clear("paydirt_trail_owed", &format!("{tenant}/{o}"))?;
+        if !dry {
+            let empty = BTreeSet::new();
+            for (subject, obligation) in &obligations {
+                let holds = waiting.get(subject).unwrap_or(&empty);
+                if holds.is_empty() {
+                    tx.forget_seal(
+                        &paydirt::parse_id(subject).ok_or_else(|| bad("invalid subject"))?,
+                    )?;
+                }
+                tx.finish_obligation(&tenant, obligation, holds)?;
             }
         }
-        out.owed = waiting.into_iter().collect();
+        out.owed = waiting.into_keys().collect();
     } else {
         out.owed = owed.into_iter().collect();
     }

@@ -569,40 +569,34 @@ impl Transaction<'_> {
             .get(name)
             .and_then(|p| p.entity["domain"].as_i64())
             .ok_or_else(|| Fault::invalid("expected an entity with a domain"))?;
+        use crate::trail_page::{Cursor, Page, ReadMode, Selection};
+        let domain = u8::try_from(domain).map_err(|_| Fault::invalid("invalid audit domain"))?;
+        let selection = Selection {
+            only: BTreeSet::from([domain]),
+            objects: object.into_iter().collect(),
+            ..Default::default()
+        };
         let mut heads = Heads::new();
         let mut cursor = None;
+        let limit = if object.is_some() { 1 } else { 256 };
         loop {
-            let mut q = Query::new("");
-            let dialect = self.db.dialect();
-            let bound = q.param(Bind::Big(domain), dialect);
-            let mut predicate = format!("r.f19={bound}");
-            if let Some(id) = object {
-                let key = q.param(Bind::Bytes(id.to_vec()), dialect);
-                predicate.push_str(&format!(" AND r.f11={key}"));
-            }
-            if let Some((stamp, key)) = &cursor {
-                let at = q.param(
-                    value::bind(audit.field("date_created").map_err(Fault::internal)?, stamp)?,
-                    dialect,
-                );
-                let id = q.param(
-                    value::bind(audit.key().map_err(Fault::internal)?, key)?,
-                    dialect,
-                );
-                predicate.push_str(&format!(" AND (r.f15,r.f1)>({at},{id})"));
-            }
-            let direction = if object.is_some() { "DESC" } else { "ASC" };
-            let limit = if object.is_some() { 1 } else { 256 };
-            q.sql = format!(
-                "SELECT {} AS value FROM {} r WHERE {predicate} ORDER BY r.f15 {direction},r.f1 {direction} LIMIT {limit}",
-                self.project_sql(&audit)?,
-                quote(&audit.table())
-            );
+            let page = Page {
+                before: None,
+                after: cursor,
+                limit,
+                mode: if object.is_some() {
+                    ReadMode::Latest
+                } else {
+                    ReadMode::Oldest
+                },
+            };
+            let q = self.seek_query(&audit, "OWN_AUDIT", &selection, page)?;
             let rows = self.db.rows(q)?;
             let count = rows.len();
             for raw in rows {
                 let row = self.decode_row(&audit, &raw)?;
-                cursor = Some((row["dateCreated"].clone(), row["id"].clone()));
+                let (created, key) = order(&row)?;
+                cursor = Some(Cursor { created, key });
                 if let Some(keys) = self.trail.and_then(|r| r.keys.as_ref()) {
                     keys.check_start(&row)?;
                 }
@@ -653,17 +647,19 @@ impl Transaction<'_> {
             .map(|_| value::bytes(&audit["digest"]))
             .transpose()?
             .unwrap_or_default();
+        let current = self.stored_object(e, &object, false)?;
         if sum.is_empty() {
             return Ok(Finding {
                 digest: if keys.since.is_some_and(|since| at < since) {
                     Verdict::Predates
+                } else if current.is_none() {
+                    Verdict::Missing
                 } else {
                     Verdict::NoDigest
                 },
                 seal: None,
             });
         }
-        let current = self.stored_object(e, &object, false)?;
         let check = |sum: &[u8], fields: &Value, seal: bool| -> Result<Verdict> {
             let covered: Vec<u32> = serde_json::from_value(fields.clone())
                 .map_err(|e| Fault::precondition(e.to_string()))?;

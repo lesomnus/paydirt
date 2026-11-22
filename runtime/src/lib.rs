@@ -36,6 +36,7 @@ mod seen;
 mod session;
 mod tenancy;
 mod trail;
+pub mod trail_page;
 mod value;
 mod watch;
 pub use driver::Connection;
