@@ -161,9 +161,15 @@ pub fn generate(work: &Path) -> Result<()> {
             } else {
                 ""
             };
-            fields.push(
-                json!({"name":f["jsonName"],"number":f["number"],"target":target,"secret":secret}),
-            );
+            let mut field =
+                json!({"name":f["jsonName"],"number":f["number"],"target":target,"secret":secret});
+            if f["options"]["[orm.field]"]["type"] == "TYPE_UUID" {
+                field["uuid"] = json!(true);
+            }
+            if f["jsonName"] != f["name"] {
+                field["proto"] = f["name"].clone();
+            }
+            fields.push(field);
         }
         out.insert(
             name.clone(),

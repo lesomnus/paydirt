@@ -1,3 +1,5 @@
+mod commands;
+mod tree;
 mod grants;
 mod operator;
 use __APP_CRATE__::{

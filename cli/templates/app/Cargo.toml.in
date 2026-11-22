@@ -32,6 +32,8 @@ paydirt-store = {git="https://github.com/lesomnus/paydirt",rev="b53a750f95a96340
 connectrpc = {version="=0.8.2",default-features=false,features=["server","client-tls"]}
 buffa-reflect = {version="0.9.2", default-features=false, features=["serde","text-format"]}
 gtmpl = "0.7.1"
+chrono="0.4"
+chrono-tz="0.10"
 http="1"
 rustls="0.23"
 webpki-roots="1"
