@@ -1,4 +1,5 @@
 //! Transactional entity storage for generated Payday applications.
+mod account;
 mod apply;
 mod crud;
 mod driver;
@@ -57,6 +58,8 @@ pub struct Call {
 }
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Policy {
+    #[serde(default)]
+    pub application: Value,
     #[serde(default)]
     pub entity: Value,
     #[serde(default)]

@@ -17,7 +17,11 @@ robot = app / "proto/app/robot.proto"
 source = robot.read_text()
 header = source.split("// This package", 1)[0]
 entities = [re.search(rf"^message {name} \{{.*?^\}}", source, re.M | re.S).group() for name in ["Cell", "Robot", "Pairing", "Reading"]]
-robot.write_text(header + "option (payday.app) = {};\n" + "\n\n".join(entities) + "\n")
+robot.write_text(header + "option (payday.app) = {accounts: {field: {name: \"account\", number: 12}}};\n" + "\n\n".join(entities) + "\n")
+for rel in ["ext/app/payday/holder_svc.ext.proto", "ext/payday/holder.ext.proto","app/profile.proto"]:
+    dest=app / "proto" / rel
+    dest.parent.mkdir(exist_ok=True,parents=True)
+    copyfile(proto / rel,dest)
 copyfile(repo / "tests/fleet/robot.rs", app / "src/robot.rs")
 lib = app / "src/lib.rs"
 source = lib.read_text()

@@ -1,4 +1,5 @@
 //! Core types shared by native and WebAssembly Payday applications.
+pub mod rbac;
 pub mod tenant;
 
 use uuid::Uuid;
@@ -9,6 +10,10 @@ pub fn mint(domain: u8) -> [u8; 16] {
     bytes[6] = 0x80 | (bytes[6] & 15);
     bytes[9] = domain;
     bytes
+}
+
+pub fn parse_id(v: &str) -> Option<[u8; 16]> {
+    Uuid::parse_str(v).ok().map(|u| u.into_bytes())
 }
 
 pub fn has_domain(bytes: &[u8], domain: u8) -> bool {

@@ -10,7 +10,7 @@ const POLICIES: &str = include_str!("../../../generated/storage/policies.json");
 pub struct AppDatabase(Store);
 #[wasm_bindgen]
 impl AppDatabase {
-    pub async fn open(tenants: &str) -> Result<AppDatabase, JsError> {
+    pub async fn open(tenants: &str, seeds: Option<String>) -> Result<AppDatabase, JsError> {
         install::<sqlite_wasm_rs::WasmOsCallback>(&OpfsSAHPoolCfg::default(), true)
             .await
             .map_err(|e| JsError::new(&e.to_string()))?;
@@ -35,6 +35,33 @@ impl AppDatabase {
                 }
                 Err(e) => return Err(e.into()),
             }
+        }
+        if let Some(seeds) = seeds {
+            #[derive(serde::Deserialize)]
+            struct Seed {
+                entity: String,
+                row: Value,
+            }
+            let seeds: Vec<Seed> = serde_json::from_str(&seeds)?;
+            db.transaction(&Scope::Internal, |tx| {
+                for seed in seeds {
+                    let id = seed
+                        .row
+                        .get("id")
+                        .ok_or_else(|| paydirt_store::Fault::invalid("seed requires stable id"))?;
+                    let call = |method: &str, request| Call {
+                        entity: seed.entity.clone(),
+                        method: method.into(),
+                        request,
+                    };
+                    // List returns no rows for a new key, keeping the enclosing transaction healthy.
+                    let found = tx.call(call("List", json!({"filters":[{"ref":{"id":id}}]})))?;
+                    if found["items"].as_array().is_none_or(|rows| rows.is_empty()) {
+                        tx.call(call("Add", seed.row))?;
+                    }
+                }
+                Ok(())
+            })?;
         }
         Ok(Self(db))
     }

@@ -33,8 +33,12 @@ pub fn generate(work: &Path) -> Result<()> {
     }
     let image: Value = serde_json::from_slice(&fs::read(dest)?)?;
     let mut policies = BTreeMap::new();
+    let mut apps = BTreeMap::new();
     for file in image["file"].as_array().ok_or("expected files")? {
         let package = file["package"].as_str().unwrap_or_default();
+        if let Some(app) = file["options"].get("[payday.app]") {
+            apps.insert(package, app);
+        }
         for message in file["messageType"].as_array().into_iter().flatten() {
             let Some(entity) = message["options"].get("[payday.entity]") else {
                 continue;
@@ -66,6 +70,13 @@ pub fn generate(work: &Path) -> Result<()> {
                 let name = method["name"].as_str().ok_or("missing method name")?;
                 entity["methods"][name] = json!({"input":method["inputType"],"output":method["outputType"],"policy":method["options"]["[payday.method]"],"client_stream":method["clientStreaming"]==true,"server_stream":method["serverStreaming"]==true});
             }
+        }
+    }
+    for (name, policy) in &mut policies {
+        if policy["entity"]["own"] == "OWN_HOLDER"
+            && let Some(app) = name.rsplit_once('.').and_then(|(p, _)| apps.get(p))
+        {
+            policy["application"] = (*app).clone();
         }
     }
     fs::write(

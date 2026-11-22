@@ -7,6 +7,7 @@ import { chromium } from "playwright";
 
 const root=join(process.env.CELL_PROJECT,"sandbox");
 await cp(resolve("upstream/internal/apptest/ts/gen"),join(root,"test-client"),{recursive:true});
+await cp(resolve("generated-account.js"),join(root,"account.js"));
 await cp(resolve("generated-pair.js"),join(root,"pair.js"));
 await cp(resolve("generated-query.js"),join(root,"query.js"));
 await cp(resolve("generated-move.js"),join(root,"moves.js"));
@@ -16,11 +17,13 @@ import { fromBinary, createFileRegistry } from "@bufbuild/protobuf";
 import {FileDescriptorSetSchema} from "@bufbuild/protobuf/wkt";
 import { CellService, RobotService } from "./test-client/app/robot_svc_pb.ts";
 import {createClient} from "@connectrpc/connect";
-export async function open(principals){
-  const sandbox=await openSandbox(principals,"paydirt",{allowGeneralWrites:true});
+import {accounts} from "./account.js";
+export async function open(principals,withAccounts=false,restricted=false){
+  const membership=accounts(Object.values(principals).slice(0,2));
+  const sandbox=await openSandbox(withAccounts?{...principals,...membership.principals}:principals,"paydirt",{allowGeneralWrites:true,seeds:withAccounts?membership.seeds:[],policy:restricted?membership.policy:undefined});
   const bytes=new Uint8Array(await (await fetch("./pkg/descriptors.binpb")).arrayBuffer());
-  const robot=createFileRegistry(fromBinary(FileDescriptorSetSchema,bytes)).getService("app.RobotService");
-  return {typed:robot && createClient(robot,sandbox.link.transport),robots:createClient(RobotService,sandbox.link.transport),client:createClient(CellService,sandbox.link.transport),close:()=>sandbox.close()};
+  const registry=createFileRegistry(fromBinary(FileDescriptorSetSchema,bytes));const robot=registry.getService("app.RobotService");const holder=registry.getService("app.HolderService");
+  return {holder:holder && createClient(holder,sandbox.link.transport),typed:robot && createClient(robot,sandbox.link.transport),robots:createClient(RobotService,sandbox.link.transport),client:createClient(CellService,sandbox.link.transport),close:()=>sandbox.close()};
 }
 `);
 const server=await createServer({root,optimizeDeps:{entries:["index.html","harness.js"]},server:{hmr:false,host:"127.0.0.1",port:0},logLevel:"error"});
@@ -31,7 +34,7 @@ try{
   const page=await browser.newPage();
   page.on("pageerror",e=>console.error(e));
   const tenants=Object.fromEntries(Array.from({length:2},()=>{
-    const b=randomBytes(16);b[6]=128;b[8]=128;b[9]=1;return [randomBytes(16).toString("hex"),b.toString("hex")];
+    const b=randomBytes(16);b[0]=172;b[6]=128;b[8]=128;b[9]=1;return [randomBytes(16).toString("hex"),b.toString("hex")];
   }));
   await page.goto(server.resolvedUrls.local[0]);
   await page.locator("#read").click();
@@ -42,7 +45,7 @@ try{
   tenants.represented={tenant,actor:actor.toString("hex"),caller:actor.toString("hex"),caller_tenant:tenant};
   tenants.reader={tenant,methods:["/app.RobotService/Get"]};
   const check=async({tenants,id,move})=>{
-    const {open}=await import("/harness.js");const app=await open(tenants);
+    const {open}=await import("/harness.js");const app=await open(tenants,move);
     const [[a,tenant],[b,other]]=Object.entries(tenants);
     const opts=token=>({headers:{authorization:"Bearer "+token}});
     const key=b=>({key:{case:"id",value:b}});
@@ -62,6 +65,7 @@ try{
       try {await app.client.get({ref},opts(b))}catch(e){code=e.code}
       if(code!==5)throw Error("another tenant could reach the Cell");
       if(move){
+        const {accountCases}=await import("/account.js");await accountCases(app.holder,app.typed,[tenant,other]);
         const {runPair}=await import("/pair.js");
         await runPair(app.typed,opts(a),bytes);
         const {exerciseMove}=await import("/moves.js");
@@ -78,6 +82,13 @@ try{
   if(id.report && process.env.PAYDIRT_GO_REFERENCE){
     assert.deepEqual(id.report,JSON.parse(await readFile(join(process.env.CELL_PROJECT,"query-reference.json"),"utf8")));
     console.log("Browser dRPC List and Watch match the Go reference");
+  }
+  if(process.env.PAYDIRT_TEST_MOVE==="1"){
+    await page.evaluate(async tenants=>{
+      const {open}=await import("/harness.js"),{accountCases}=await import("/account.js");
+      const app=await open(tenants,true,true);
+      try{await accountCases(app.holder,app.typed,Object.values(tenants).slice(0,2),true)}finally{app.close()}
+    },tenants);
   }
   await page.reload();
   assert.equal(await page.evaluate(check,{tenants,id}),"persisted");

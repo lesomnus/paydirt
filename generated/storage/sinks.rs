@@ -80,7 +80,9 @@ mod sink_app_cell {
                         "Add",
                         self.public.contains(&"/app.CellService/Add"),
                         false,
-                    )?;
+                        false,
+                    )
+                    .await?;
                 next.add(ctx, request).await
             }
         }
@@ -103,7 +105,9 @@ mod sink_app_cell {
                         "Get",
                         self.public.contains(&"/app.CellService/Get"),
                         false,
-                    )?;
+                        false,
+                    )
+                    .await?;
                 next.get(ctx, request).await
             }
         }
@@ -129,7 +133,9 @@ mod sink_app_cell {
                         "Patch",
                         self.public.contains(&"/app.CellService/Patch"),
                         false,
-                    )?;
+                        false,
+                    )
+                    .await?;
                 next.patch(ctx, request).await
             }
         }
@@ -155,7 +161,9 @@ mod sink_app_cell {
                         "Apply",
                         self.public.contains(&"/app.CellService/Apply"),
                         false,
-                    )?;
+                        false,
+                    )
+                    .await?;
                 next.apply(ctx, request).await
             }
         }
@@ -180,7 +188,9 @@ mod sink_app_cell {
                         "Erase",
                         self.public.contains(&"/app.CellService/Erase"),
                         false,
-                    )?;
+                        false,
+                    )
+                    .await?;
                 next.erase(ctx, request).await
             }
         }
@@ -290,6 +300,265 @@ mod sink_app_cell {
                 let mut ctx = ctx;
                 let guard = self.0.begin(&mut ctx).await?;
                 let result = next.erase(ctx, request).await;
+                if let Some(guard) = guard {
+                    guard.finish(result.is_ok()).await?;
+                }
+                result
+            }
+        }
+    }
+}
+mod sink_app_holder {
+    use super::*;
+    pub struct Sink(pub Database);
+    #[allow(refining_impl_trait)]
+    impl<
+        N: crate::services::r#app::HolderService,
+    > crate::services::r#app::HolderServiceLayer<N> for Sink {
+        async fn get(
+            &self,
+            _: &N,
+            ctx: RequestContext,
+            request: ServiceRequest<'_, crate::proto::r#app::r#HolderGetRequest>,
+        ) -> ServiceResult<crate::proto::r#app::r#Holder> {
+            Response::ok(
+                self.0.rpc(&ctx, "app.Holder", "Get", &request.to_owned_message()).await?,
+            )
+        }
+        async fn list(
+            &self,
+            _: &N,
+            ctx: RequestContext,
+            request: ServiceRequest<'_, crate::proto::r#app::r#HolderListRequest>,
+        ) -> ServiceResult<crate::proto::r#app::r#HolderListResponse> {
+            Response::ok(
+                self
+                    .0
+                    .rpc(&ctx, "app.Holder", "List", &request.to_owned_message())
+                    .await?,
+            )
+        }
+    }
+    impl<
+        N: crate::services::r#app::HolderService,
+    > crate::services::r#app::HolderServiceLayer<N> for Gate {
+        fn add<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::HolderAddRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::Holder,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            let _ = next;
+            crate::services::r#app::HolderService::add(
+                &crate::services::r#app::HolderServiceUnimplemented,
+                ctx,
+                request,
+            )
+        }
+        fn get<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::HolderGetRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::Holder,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            async move {
+                let ctx = self
+                    .db
+                    .authorize(
+                        ctx,
+                        "app.Holder",
+                        "Get",
+                        self.public.contains(&"/app.HolderService/Get"),
+                        false,
+                        false,
+                    )
+                    .await?;
+                next.get(ctx, request).await
+            }
+        }
+        fn patch<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::HolderPatchRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::Holder,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            let _ = next;
+            crate::services::r#app::HolderService::patch(
+                &crate::services::r#app::HolderServiceUnimplemented,
+                ctx,
+                request,
+            )
+        }
+        fn apply<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::HolderApplyRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::Holder,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            let _ = next;
+            crate::services::r#app::HolderService::apply(
+                &crate::services::r#app::HolderServiceUnimplemented,
+                ctx,
+                request,
+            )
+        }
+        fn erase<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<'_, crate::proto::app::HolderRef>,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::HolderEraseResponse,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            let _ = next;
+            crate::services::r#app::HolderService::erase(
+                &crate::services::r#app::HolderServiceUnimplemented,
+                ctx,
+                request,
+            )
+        }
+        fn list<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::HolderListRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::HolderListResponse,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            async move {
+                let ctx = self
+                    .db
+                    .authorize(
+                        ctx,
+                        "app.Holder",
+                        "List",
+                        self.public.contains(&"/app.HolderService/List"),
+                        false,
+                        false,
+                    )
+                    .await?;
+                next.list(ctx, request).await
+            }
+        }
+        fn watch(
+            &self,
+            next: &N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::HolderWatchRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                ::connectrpc::ServiceStream<
+                    impl ::connectrpc::Encodable<
+                        crate::proto::app::HolderWatchResponse,
+                    > + Send + use<N>,
+                >,
+            >,
+        > + Send {
+            let _ = next;
+            crate::services::r#app::HolderService::watch(
+                &crate::services::r#app::HolderServiceUnimplemented,
+                ctx,
+                request,
+            )
+        }
+    }
+    impl<
+        N: crate::services::r#app::HolderService,
+    > crate::services::r#app::HolderServiceLayer<N> for Audit {
+        fn get<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::HolderGetRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::Holder,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            async move {
+                let mut ctx = ctx;
+                let guard = self.0.begin(&mut ctx).await?;
+                let result = next.get(ctx, request).await;
+                if let Some(guard) = guard {
+                    guard.finish(result.is_ok()).await?;
+                }
+                result
+            }
+        }
+        fn list<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::HolderListRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::HolderListResponse,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            async move {
+                let mut ctx = ctx;
+                let guard = self.0.begin(&mut ctx).await?;
+                let result = next.list(ctx, request).await;
                 if let Some(guard) = guard {
                     guard.finish(result.is_ok()).await?;
                 }
@@ -422,7 +691,9 @@ mod sink_app_robot {
                         "Add",
                         self.public.contains(&"/app.RobotService/Add"),
                         false,
-                    )?;
+                        false,
+                    )
+                    .await?;
                 next.add(ctx, request).await
             }
         }
@@ -450,7 +721,9 @@ mod sink_app_robot {
                         "AddMany",
                         self.public.contains(&"/app.RobotService/AddMany"),
                         false,
-                    )?;
+                        false,
+                    )
+                    .await?;
                 next.add_many(ctx, request).await
             }
         }
@@ -475,7 +748,9 @@ mod sink_app_robot {
                         "Get",
                         self.public.contains(&"/app.RobotService/Get"),
                         false,
-                    )?;
+                        false,
+                    )
+                    .await?;
                 next.get(ctx, request).await
             }
         }
@@ -503,7 +778,9 @@ mod sink_app_robot {
                         "Patch",
                         self.public.contains(&"/app.RobotService/Patch"),
                         false,
-                    )?;
+                        false,
+                    )
+                    .await?;
                 next.patch(ctx, request).await
             }
         }
@@ -531,7 +808,9 @@ mod sink_app_robot {
                         "Apply",
                         self.public.contains(&"/app.RobotService/Apply"),
                         false,
-                    )?;
+                        false,
+                    )
+                    .await?;
                 next.apply(ctx, request).await
             }
         }
@@ -556,7 +835,9 @@ mod sink_app_robot {
                         "Erase",
                         self.public.contains(&"/app.RobotService/Erase"),
                         false,
-                    )?;
+                        false,
+                    )
+                    .await?;
                 next.erase(ctx, request).await
             }
         }
@@ -584,7 +865,9 @@ mod sink_app_robot {
                         "List",
                         self.public.contains(&"/app.RobotService/List"),
                         false,
-                    )?;
+                        false,
+                    )
+                    .await?;
                 next.list(ctx, request).await
             }
         }
@@ -614,7 +897,9 @@ mod sink_app_robot {
                         "Watch",
                         self.public.contains(&"/app.RobotService/Watch"),
                         false,
-                    )?;
+                        false,
+                    )
+                    .await?;
                 next.watch(ctx, request).await
             }
         }
@@ -642,7 +927,9 @@ mod sink_app_robot {
                         "Move",
                         self.public.contains(&"/app.RobotService/Move"),
                         true,
-                    )?;
+                        false,
+                    )
+                    .await?;
                 next.r#move(ctx, request).await
             }
         }
@@ -843,6 +1130,241 @@ mod sink_app_robot {
         }
     }
 }
+mod sink_app_tenant {
+    use super::*;
+    pub struct Sink(pub Database);
+    #[allow(refining_impl_trait)]
+    impl<
+        N: crate::services::r#app::TenantService,
+    > crate::services::r#app::TenantServiceLayer<N> for Sink {
+        async fn get(
+            &self,
+            _: &N,
+            ctx: RequestContext,
+            request: ServiceRequest<'_, crate::proto::r#app::r#TenantGetRequest>,
+        ) -> ServiceResult<crate::proto::r#app::r#Tenant> {
+            Response::ok(
+                self.0.rpc(&ctx, "app.Tenant", "Get", &request.to_owned_message()).await?,
+            )
+        }
+        async fn list(
+            &self,
+            _: &N,
+            ctx: RequestContext,
+            request: ServiceRequest<'_, crate::proto::r#app::r#TenantListRequest>,
+        ) -> ServiceResult<crate::proto::r#app::r#TenantListResponse> {
+            Response::ok(
+                self
+                    .0
+                    .rpc(&ctx, "app.Tenant", "List", &request.to_owned_message())
+                    .await?,
+            )
+        }
+    }
+    impl<
+        N: crate::services::r#app::TenantService,
+    > crate::services::r#app::TenantServiceLayer<N> for Gate {
+        fn add<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::TenantAddRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::Tenant,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            let _ = next;
+            crate::services::r#app::TenantService::add(
+                &crate::services::r#app::TenantServiceUnimplemented,
+                ctx,
+                request,
+            )
+        }
+        fn get<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::TenantGetRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::Tenant,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            async move {
+                let ctx = self
+                    .db
+                    .authorize(
+                        ctx,
+                        "app.Tenant",
+                        "Get",
+                        self.public.contains(&"/app.TenantService/Get"),
+                        false,
+                        false,
+                    )
+                    .await?;
+                next.get(ctx, request).await
+            }
+        }
+        fn patch<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::TenantPatchRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::Tenant,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            let _ = next;
+            crate::services::r#app::TenantService::patch(
+                &crate::services::r#app::TenantServiceUnimplemented,
+                ctx,
+                request,
+            )
+        }
+        fn apply<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::TenantApplyRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::Tenant,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            let _ = next;
+            crate::services::r#app::TenantService::apply(
+                &crate::services::r#app::TenantServiceUnimplemented,
+                ctx,
+                request,
+            )
+        }
+        fn erase<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<'_, crate::proto::app::TenantRef>,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::TenantEraseResponse,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            let _ = next;
+            crate::services::r#app::TenantService::erase(
+                &crate::services::r#app::TenantServiceUnimplemented,
+                ctx,
+                request,
+            )
+        }
+        fn list<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::TenantListRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::TenantListResponse,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            async move {
+                let ctx = self
+                    .db
+                    .authorize(
+                        ctx,
+                        "app.Tenant",
+                        "List",
+                        self.public.contains(&"/app.TenantService/List"),
+                        false,
+                        false,
+                    )
+                    .await?;
+                next.list(ctx, request).await
+            }
+        }
+    }
+    impl<
+        N: crate::services::r#app::TenantService,
+    > crate::services::r#app::TenantServiceLayer<N> for Audit {
+        fn get<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::TenantGetRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::Tenant,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            async move {
+                let mut ctx = ctx;
+                let guard = self.0.begin(&mut ctx).await?;
+                let result = next.get(ctx, request).await;
+                if let Some(guard) = guard {
+                    guard.finish(result.is_ok()).await?;
+                }
+                result
+            }
+        }
+        fn list<'a>(
+            &'a self,
+            next: &'a N,
+            ctx: ::connectrpc::RequestContext,
+            request: ::connectrpc::ServiceRequest<
+                '_,
+                crate::proto::app::TenantListRequest,
+            >,
+        ) -> impl ::std::future::Future<
+            Output = ::connectrpc::ServiceResult<
+                impl ::connectrpc::Encodable<
+                    crate::proto::app::TenantListResponse,
+                > + Send + use<'a, N>,
+            >,
+        > + Send {
+            async move {
+                let mut ctx = ctx;
+                let guard = self.0.begin(&mut ctx).await?;
+                let result = next.list(ctx, request).await;
+                if let Some(guard) = guard {
+                    guard.finish(result.is_ok()).await?;
+                }
+                result
+            }
+        }
+    }
+}
 struct Gate {
     db: Database,
     public: &'static [&'static str],
@@ -857,10 +1379,22 @@ impl Next {
             layer: sink_app_cell::Sink(self.0.clone()),
         }
     }
+    pub fn app_holder(&self) -> impl crate::services::r#app::HolderService {
+        crate::services::r#app::HolderServiceOverlay {
+            next: crate::services::r#app::HolderServiceUnimplemented,
+            layer: sink_app_holder::Sink(self.0.clone()),
+        }
+    }
     pub fn app_robot(&self) -> impl crate::services::r#app::RobotService {
         crate::services::r#app::RobotServiceOverlay {
             next: crate::services::r#app::RobotServiceUnimplemented,
             layer: sink_app_robot::Sink(self.0.clone()),
+        }
+    }
+    pub fn app_tenant(&self) -> impl crate::services::r#app::TenantService {
+        crate::services::r#app::TenantServiceOverlay {
+            next: crate::services::r#app::TenantServiceUnimplemented,
+            layer: sink_app_tenant::Sink(self.0.clone()),
         }
     }
 }
@@ -973,6 +1507,52 @@ pub trait CellCalls: crate::services::r#app::CellService {
     }
 }
 impl<N: crate::services::r#app::CellService> CellCalls for N {}
+#[allow(async_fn_in_trait)]
+pub trait HolderCalls: crate::services::r#app::HolderService {
+    async fn get_owned(
+        &self,
+        ctx: &RequestContext,
+        req: crate::proto::r#app::r#HolderGetRequest,
+    ) -> Result<crate::proto::r#app::r#Holder, ::connectrpc::ConnectError> {
+        use buffa::{Message, HasMessageView};
+        use connectrpc::Encodable;
+        let bytes = req.encode_to_bytes();
+        let view = crate::proto::r#app::r#HolderGetRequest::decode_view(&bytes)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream request",
+            ))?;
+        let reply = self
+            .get(ctx.clone(), ServiceRequest::from_parts(&view, &bytes))
+            .await?;
+        let wire = reply.body.encode(connectrpc::CodecFormat::Proto)?;
+        crate::proto::r#app::r#Holder::decode_from_slice(&wire)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream response",
+            ))
+    }
+    async fn list_owned(
+        &self,
+        ctx: &RequestContext,
+        req: crate::proto::r#app::r#HolderListRequest,
+    ) -> Result<crate::proto::r#app::r#HolderListResponse, ::connectrpc::ConnectError> {
+        use buffa::{Message, HasMessageView};
+        use connectrpc::Encodable;
+        let bytes = req.encode_to_bytes();
+        let view = crate::proto::r#app::r#HolderListRequest::decode_view(&bytes)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream request",
+            ))?;
+        let reply = self
+            .list(ctx.clone(), ServiceRequest::from_parts(&view, &bytes))
+            .await?;
+        let wire = reply.body.encode(connectrpc::CodecFormat::Proto)?;
+        crate::proto::r#app::r#HolderListResponse::decode_from_slice(&wire)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream response",
+            ))
+    }
+}
+impl<N: crate::services::r#app::HolderService> HolderCalls for N {}
 #[allow(async_fn_in_trait)]
 pub trait RobotCalls: crate::services::r#app::RobotService {
     async fn add_owned(
@@ -1148,6 +1728,52 @@ pub trait RobotCalls: crate::services::r#app::RobotService {
     }
 }
 impl<N: crate::services::r#app::RobotService> RobotCalls for N {}
+#[allow(async_fn_in_trait)]
+pub trait TenantCalls: crate::services::r#app::TenantService {
+    async fn get_owned(
+        &self,
+        ctx: &RequestContext,
+        req: crate::proto::r#app::r#TenantGetRequest,
+    ) -> Result<crate::proto::r#app::r#Tenant, ::connectrpc::ConnectError> {
+        use buffa::{Message, HasMessageView};
+        use connectrpc::Encodable;
+        let bytes = req.encode_to_bytes();
+        let view = crate::proto::r#app::r#TenantGetRequest::decode_view(&bytes)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream request",
+            ))?;
+        let reply = self
+            .get(ctx.clone(), ServiceRequest::from_parts(&view, &bytes))
+            .await?;
+        let wire = reply.body.encode(connectrpc::CodecFormat::Proto)?;
+        crate::proto::r#app::r#Tenant::decode_from_slice(&wire)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream response",
+            ))
+    }
+    async fn list_owned(
+        &self,
+        ctx: &RequestContext,
+        req: crate::proto::r#app::r#TenantListRequest,
+    ) -> Result<crate::proto::r#app::r#TenantListResponse, ::connectrpc::ConnectError> {
+        use buffa::{Message, HasMessageView};
+        use connectrpc::Encodable;
+        let bytes = req.encode_to_bytes();
+        let view = crate::proto::r#app::r#TenantListRequest::decode_view(&bytes)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream request",
+            ))?;
+        let reply = self
+            .list(ctx.clone(), ServiceRequest::from_parts(&view, &bytes))
+            .await?;
+        let wire = reply.body.encode(connectrpc::CodecFormat::Proto)?;
+        crate::proto::r#app::r#TenantListResponse::decode_from_slice(&wire)
+            .map_err(|_| connectrpc::ConnectError::internal(
+                "invalid downstream response",
+            ))
+    }
+}
+impl<N: crate::services::r#app::TenantService> TenantCalls for N {}
 pub trait Layers {
     fn public_methods(&self) -> &'static [&'static str] {
         &[]
@@ -1158,10 +1784,22 @@ pub trait Layers {
     ) -> impl crate::services::r#app::CellService {
         next
     }
+    fn app_holder(
+        &self,
+        next: impl crate::services::r#app::HolderService,
+    ) -> impl crate::services::r#app::HolderService {
+        next
+    }
     fn app_robot(
         &self,
         next: impl crate::services::r#app::RobotService,
     ) -> impl crate::services::r#app::RobotService {
+        next
+    }
+    fn app_tenant(
+        &self,
+        next: impl crate::services::r#app::TenantService,
+    ) -> impl crate::services::r#app::TenantService {
         next
     }
 }
@@ -1183,6 +1821,22 @@ pub fn mount(router: Router, db: Database, layers: &impl Layers) -> Router {
         ::std::sync::Arc::new(gate),
         router,
     );
+    let core = layers.app_holder(next.app_holder());
+    let audit = crate::services::r#app::HolderServiceOverlay {
+        next: core,
+        layer: Audit(db.clone()),
+    };
+    let gate = crate::services::r#app::HolderServiceOverlay {
+        next: audit,
+        layer: Gate {
+            db: db.clone(),
+            public: layers.public_methods(),
+        },
+    };
+    let router = crate::services::r#app::HolderServiceExt::register(
+        ::std::sync::Arc::new(gate),
+        router,
+    );
     let core = layers.app_robot(next.app_robot());
     let audit = crate::services::r#app::RobotServiceOverlay {
         next: core,
@@ -1196,6 +1850,22 @@ pub fn mount(router: Router, db: Database, layers: &impl Layers) -> Router {
         },
     };
     let router = crate::services::r#app::RobotServiceExt::register(
+        ::std::sync::Arc::new(gate),
+        router,
+    );
+    let core = layers.app_tenant(next.app_tenant());
+    let audit = crate::services::r#app::TenantServiceOverlay {
+        next: core,
+        layer: Audit(db.clone()),
+    };
+    let gate = crate::services::r#app::TenantServiceOverlay {
+        next: audit,
+        layer: Gate {
+            db: db.clone(),
+            public: layers.public_methods(),
+        },
+    };
+    let router = crate::services::r#app::TenantServiceExt::register(
         ::std::sync::Arc::new(gate),
         router,
     );
