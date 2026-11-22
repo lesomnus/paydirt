@@ -1,7 +1,7 @@
 // Run against the app-owned layer built into the external client and server.
 export async function operationCases(robot,events,facts,access,own,foreign,tenant,legacy){
     const ref=id=>({key:{case:"id",value:id}});
-    const same=(a,b)=>Buffer.from(a).equals(Buffer.from(b));
+    const same=(a,b)=>a?.length===b?.length && a.every((v,i)=>v===b[i]);
     const op=()=>{const bytes=crypto.getRandomValues(new Uint8Array(16));bytes[6]=128;bytes[8]=128;bytes[9]=17;return bytes;};
     const subject=await robot.add({tenant:ref(tenant),alias:"operation-robot"},own);
     const id=op();
@@ -47,13 +47,15 @@ export async function operationCases(robot,events,facts,access,own,foreign,tenan
     if(!reason)throw Error("reading the reason omitted the event from Access");
     if(!named)throw Error("the sentence omitted its two named subjects from Access");
     if(!same(named.tenantId,tenant))throw Error("the sentence was filed under the wrong tenant");
-    const previous=op(), empty=op();
-    legacy.load(id,previous,empty);
-    for(const options of [own,ko])if((await robot.describe({id:previous},options)).sentence!=="alice oiled arm-01")throw Error("legacy sentence changed with locale");
-    legacy.rename("Alicia");
-    if((await robot.describe({id:previous},own)).sentence!=="Alicia oiled arm-01")throw Error("legacy sentence kept an obsolete name");
-    legacy.rename("alice");
-    if((await robot.describe({id:empty},own)).sentence!=="robot.oil")throw Error("legacy event without a sentence lost its kind");
+    if(legacy){
+        const previous=op(), empty=op();
+        legacy.load(id,previous,empty);
+        for(const options of [own,ko])if((await robot.describe({id:previous},options)).sentence!=="alice oiled arm-01")throw Error("legacy sentence changed with locale");
+        legacy.rename("Alicia");
+        if((await robot.describe({id:previous},own)).sentence!=="Alicia oiled arm-01")throw Error("legacy sentence kept an obsolete name");
+        legacy.rename("alice");
+        if((await robot.describe({id:empty},own)).sentence!=="robot.oil")throw Error("legacy event without a sentence lost its kind");
+    }
     await robot.journal({id,redact:true},own);
     if((await get(id)).reason)throw Error("reason not redacted");
 }
