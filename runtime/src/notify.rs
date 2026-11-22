@@ -185,6 +185,7 @@ impl Transaction<'_> {
             seen: None,
             changes: self.changes,
             outbox: self.outbox,
+            inputs: self.inputs,
             namer: self.namer,
             db: self.db,
             model: self.model,
@@ -331,7 +332,7 @@ impl Transaction<'_> {
             let v = if let Some(old) = found.first() {
                 old.clone()
             } else {
-                let v=self.insert(receipts,&json!({"tenantId":r.tenant,"notificationId":n,"readerId":actor,"dateRead":value::stamp()}))?;
+                let v=self.insert(receipts,&json!({"tenantId":r.tenant,"notificationId":n,"readerId":actor,"dateRead":self.inputs.stamp()}))?;
                 self.bump(
                     r,
                     row["topicKey"].as_str().unwrap(),
@@ -408,6 +409,7 @@ impl Transaction<'_> {
                 db: self.db,
                 model: self.model,
                 policies: self.policies,
+                inputs: self.inputs,
                 namer: self.namer,
                 outbox: false,
                 changes: self.changes,

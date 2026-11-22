@@ -202,7 +202,7 @@ impl Transaction<'_> {
             .get("dateStart")
             .filter(|v| !v.is_null())
             .cloned()
-            .unwrap_or_else(value::stamp);
+            .unwrap_or_else(|| self.inputs.stamp());
         time(&start)?;
         data["dateOccurred"] = start.clone();
         let changes = changes(e, &self.policies[&e.name], before, after)?;
