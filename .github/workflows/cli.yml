@@ -8,7 +8,7 @@ permissions:
 jobs:
   external-app:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     services:
       postgres:
         image: postgres:17
@@ -60,6 +60,9 @@ jobs:
       - name: Build the pinned Go reference server
         working-directory: upstream-go
         run: go build -o "$RUNNER_TEMP/payday-reference" ./internal/apptest/testsrv
+      - name: Compare reference account, role and optional service cases
+        working-directory: upstream-go
+        run: go test ./account ./rbac/... ./past ./notify ./meter ./entitle
       - run: scripts/test-generated-cell.sh
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/app-target

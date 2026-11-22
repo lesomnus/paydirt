@@ -10,6 +10,8 @@ import {operatorScenario} from "./generated-operator.mjs";
 import { exerciseTenancy } from "./generated-tenancy.mjs";
 import {queryScenario} from "./generated-query.js";
 import {goReference} from "./compare-queries.mjs";
+import {filePolicy} from "./generated-file-policy.mjs";
+import {accounts,accountCases} from "./generated-account.js";
 import {runPair} from "./generated-pair.js";
 import {fromBinary,createFileRegistry} from "@bufbuild/protobuf";
 import {FileDescriptorSetSchema} from "@bufbuild/protobuf/wkt";
@@ -17,7 +19,7 @@ import {readFile,writeFile} from "node:fs/promises";
 import { exerciseMove } from "./generated-move.js";
 const app = process.env.GENERATED_APP;
 const [primary,other] = Array.from({length:2},()=>{
-  const id=randomBytes(16); id[6]=(id[6]&15)|128; id[8]=(id[8]&63)|128; id[9]=1;
+  const id=randomBytes(16); id[0]=172; id[6]=(id[6]&15)|128; id[8]=(id[8]&63)|128; id[9]=1;
   return {id, token:randomBytes(24).toString("hex")};
 });
 const clients = [primary,other];
@@ -46,8 +48,14 @@ try {
     principals.both={tenant:primary.id.toString("hex"),tenants:clients.map(p=>p.id.toString("hex"))};
     principals.grouped={tenant:primary.id.toString("hex"),sets:[allowedSet.toString("hex")],methods:["/app.*/*"]};
     principals.reader={tenant:primary.id.toString("hex"),methods:["/app.RobotService/Get"]};
+    const tenantNames=clients.map(p=>p.id.toString("hex"));
+    const membership=accounts(tenantNames);
+    if(process.env.PAYDIRT_TEST_MOVE==="1") Object.assign(principals,membership.principals);
     const env={...process.env,DATABASE_URL:url,PAYDIRT_PRINCIPALS:JSON.stringify(principals),PAYDIRT_LISTEN:"127.0.0.1:"+process.env.CELL_PORT};
     for(const {id} of clients)execFileSync(app,["app.Tenant","Add",JSON.stringify({id:id.toString("base64"),alias:id.toString("hex")})],{cwd:process.env.CELL_PROJECT,env});
+    if(process.env.PAYDIRT_TEST_MOVE==="1"){
+      for(const seed of membership.seeds) execFileSync(app,[seed.entity,"Add",JSON.stringify(seed.row)],{cwd:process.env.CELL_PROJECT,env});
+    }
     const server=spawn(app,[],{cwd:process.env.CELL_PROJECT,env,stdio:"inherit"});
     const exited=new Promise(resolve=>server.once("exit",resolve));
     try{
@@ -71,6 +79,8 @@ try {
         const descriptors=fromBinary(FileDescriptorSetSchema,await readFile(process.env.CELL_PROJECT+"/generated/storage/descriptors.binpb"));
         const robotType=createFileRegistry(descriptors).getService("app.RobotService");
         const typed=createClient(robotType,createConnectTransport({baseUrl,useBinaryFormat:true}));
+        const holder=createClient(createFileRegistry(descriptors).getService("app.HolderService"),createConnectTransport({baseUrl,useBinaryFormat:true}));
+        await accountCases(holder,typed,tenantNames);
         await runPair(typed,own,primary.id);
         for(const [table,column] of [["Audit","f10"],["Outbox","f9"]]){
           const sql='SELECT count(*) FROM "pd_app__'+table+'" WHERE '+column+"='/app.RobotService/RenamePair'";
@@ -87,6 +97,11 @@ try {
       }
       console.log(engine,"served Cell CRUD and enforced tenant scope using only the app entity declaration");
     } finally {server.kill();await exited}
+    if(process.env.PAYDIRT_TEST_MOVE==="1"){
+      const descriptors=fromBinary(FileDescriptorSetSchema,await readFile(process.env.CELL_PROJECT+"/generated/storage/descriptors.binpb"));
+      await filePolicy(app,process.env.CELL_PROJECT,env,membership,tenantNames,createFileRegistry(descriptors));
+      console.log(engine,"resolved account membership, enforced file roles and revoked an open stream");
+    }
   }
 } finally {
   if (created) ddl("DROP SCHEMA "+schema+" CASCADE");

@@ -44,7 +44,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Err(e) => return Err(e.into()),
     };
     let principals = std::env::var("PAYDIRT_PRINCIPALS").unwrap_or_else(|_| "{}".into());
-    let db = Database::open(&url, &principals)?.allow_general_writes(config.allow_general_writes);
+    let mut db =
+        Database::open(&url, &principals)?.allow_general_writes(config.allow_general_writes);
+    if let Ok(path) = std::env::var("PAYDIRT_POLICY_FILE") {
+        let refresh = std::env::var("PAYDIRT_POLICY_REFRESH_MS")
+            .ok()
+            .map(|s| s.parse())
+            .transpose()?
+            .unwrap_or(5000);
+        db = db.with_policy(paydirt::rbac::Policy::file(
+            path.into(),
+            std::time::Duration::from_millis(refresh),
+        )?);
+    }
+    if let Ok(header) = std::env::var("PAYDIRT_ACCOUNT_HEADER") {
+        db = db.with_account_header(header)?;
+    }
     Server::new(router(db, config.service_name))
         .serve(addr)
         .await

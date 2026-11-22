@@ -9,7 +9,8 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-paydirt-store = {git="https://github.com/lesomnus/paydirt",rev="faf150fbc4a292ddfbbc874964ddc810026efebc",features=["sqlite"]}
+serde={version="1",features=["derive"]}
+paydirt-store = {git="https://github.com/lesomnus/paydirt",rev="7705c770e4de612c8c3eb95d1ce425fc4b52814f",features=["sqlite"]}
 sqlite-wasm-rs = {version="=0.6.3",features=["wasm-bindgen"]}
 sqlite-wasm-vfs = {version="0.3",features=["sahpool"]}
 wasm-bindgen = "=0.2.130"

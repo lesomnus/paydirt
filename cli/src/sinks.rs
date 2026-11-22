@@ -75,7 +75,8 @@ pub fn generate(work: &Path) -> Result<()> {
         }
         // Framework-owned services need the account and administrative policies
         // specific to those services before exposing them on a public router.
-        if policy["entity"].get("own").is_some() || methods.is_empty() {
+        let own = policy["entity"]["own"].as_str();
+        if own.is_some_and(|v| !matches!(v, "OWN_HOLDER" | "OWN_TENANT")) || methods.is_empty() {
             continue;
         }
         let (package, short) = name
@@ -88,9 +89,20 @@ pub fn generate(work: &Path) -> Result<()> {
             "mod {local} {{\nuse super::*;\npub struct Sink(pub Database);\n#[allow(refining_impl_trait)]\nimpl<N: {svc}> {svc}Layer<N> for Sink {{"
         )?;
         for (rpc, method) in methods {
+            if own.is_some() && !matches!(rpc.as_str(), "Get" | "List" | "Memberships") {
+                continue;
+            }
             if !matches!(
                 rpc.as_str(),
-                "Add" | "AddMany" | "Get" | "Patch" | "Apply" | "Erase" | "List" | "Watch"
+                "Memberships"
+                    | "Add"
+                    | "AddMany"
+                    | "Get"
+                    | "Patch"
+                    | "Apply"
+                    | "Erase"
+                    | "List"
+                    | "Watch"
             ) {
                 continue;
             }
@@ -148,9 +160,20 @@ pub fn generate(work: &Path) -> Result<()> {
                 Some(syn::FnArg::Typed(arg)) => arg.pat.to_token_stream(),
                 _ => return Err("missing request".into()),
             };
+            if own.is_some()
+                && !matches!(rpc.as_str(), "Get" | "List")
+                && method["policy"].get("account").is_none()
+            {
+                writeln!(
+                    gate,
+                    "{sig} {{let _=next;{svc}::{fun}(&{svc}Unimplemented,ctx,{arg})}}"
+                )?;
+                continue;
+            }
+            let account = method["policy"].get("account").is_some();
             writeln!(
                 gate,
-                "{sig} {{async move {{let ctx=self.db.authorize(ctx,{name:?},{rpc:?},self.public.contains(&{action:?}),{direct})?;next.{fun}(ctx,{arg}).await}}}}"
+                "{sig} {{async move {{let ctx=self.db.authorize(ctx,{name:?},{rpc:?},self.public.contains(&{action:?}),{direct},{account}).await?;next.{fun}(ctx,{arg}).await}}}}"
             )?;
             if method["server_stream"] == false && method["client_stream"] == false {
                 writeln!(

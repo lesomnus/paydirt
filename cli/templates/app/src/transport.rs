@@ -11,8 +11,14 @@ pub const POLICIES: &str = include_str!("../generated/storage/policies.json");
 #[serde(untagged, deny_unknown_fields)]
 enum Credential {
     Tenant(String),
+    Account {
+        account: String,
+        tenant: Option<String>,
+        methods: Option<Vec<String>>,
+    },
     Principal {
         tenant: String,
+        name: Option<String>,
         actor: Option<String>,
         caller: Option<String>,
         caller_tenant: Option<String>,
@@ -24,6 +30,7 @@ enum Credential {
 
 #[derive(Clone)]
 struct Principal {
+    name: Option<String>,
     frame: Frame,
     methods: Option<Vec<String>>,
 }
@@ -44,18 +51,47 @@ fn tokens(config: &str) -> Result<HashMap<String, Principal>, String> {
             if token.is_empty() {
                 return Err("empty bearer token".into());
             }
-            let (tenant, actor, caller, caller_tenant, methods, tenants, sets) = match c {
-                Credential::Tenant(tenant) => (tenant, None, None, None, None, None, None),
-                Credential::Principal {
-                    tenant,
-                    actor,
-                    caller,
-                    caller_tenant,
-                    methods,
-                    tenants,
-                    sets,
-                } => (tenant, actor, caller, caller_tenant, methods, tenants, sets),
-            };
+            let (tenant, actor, caller, caller_tenant, methods, tenants, sets, account, name) =
+                match c {
+                    Credential::Tenant(tenant) => {
+                        (Some(tenant), None, None, None, None, None, None, None, None)
+                    }
+                    Credential::Account {
+                        account,
+                        tenant,
+                        methods,
+                    } => (
+                        tenant,
+                        None,
+                        None,
+                        None,
+                        methods,
+                        None,
+                        None,
+                        Some(account),
+                        None,
+                    ),
+                    Credential::Principal {
+                        name,
+                        tenant,
+                        actor,
+                        caller,
+                        caller_tenant,
+                        methods,
+                        tenants,
+                        sets,
+                    } => (
+                        Some(tenant),
+                        actor,
+                        caller,
+                        caller_tenant,
+                        methods,
+                        tenants,
+                        sets,
+                        None,
+                        name,
+                    ),
+                };
             if caller.is_some() != caller_tenant.is_some() || (caller.is_some() && actor.is_none())
             {
                 return Err("incomplete represented principal".into());
@@ -64,7 +100,19 @@ fn tokens(config: &str) -> Result<HashMap<String, Principal>, String> {
                 token,
                 Principal {
                     frame: Frame {
-                        tenant: id(&tenant, 1)?,
+                        tenant: tenant
+                            .as_deref()
+                            .map(|v| id(v, 1))
+                            .transpose()?
+                            .unwrap_or_default(),
+                        account: account
+                            .map(|v| {
+                                paydirt::parse_id(&v)
+                                    .filter(|id| *id != [0; 16])
+                                    .map(|id| id.to_vec())
+                                    .ok_or("invalid account ID")
+                            })
+                            .transpose()?,
                         tenants: tenants
                             .map(|v| v.iter().map(|t| id(t, 1)).collect::<Result<_, _>>())
                             .transpose()?,
@@ -90,6 +138,7 @@ fn tokens(config: &str) -> Result<HashMap<String, Principal>, String> {
                         action: String::new(),
                     },
                     methods,
+                    name,
                 },
             ))
         })
@@ -115,6 +164,8 @@ pub struct Database {
     principals: Arc<HashMap<String, Principal>>,
     lock: Arc<async_lock::Mutex<()>>,
     general_writes: bool,
+    policy: Option<paydirt::rbac::Policy>,
+    account_header: String,
     #[cfg(not(target_arch = "wasm32"))]
     queue: std::sync::mpsc::Sender<(
         Packet,
@@ -125,6 +176,8 @@ pub struct Database {
 type Reply = Pin<Box<dyn Future<Output = Result<Value, ConnectError>> + Send>>;
 #[derive(Clone)]
 struct Session(String);
+#[derive(Clone)]
+struct PolicyRevision(u64);
 
 impl Database {
     #[cfg(not(target_arch = "wasm32"))]
@@ -149,6 +202,8 @@ impl Database {
             lock: Default::default(),
             queue,
             general_writes: false,
+            policy: None,
+            account_header: "paydirt-tenant".into(),
         })
     }
     #[cfg(target_arch = "wasm32")]
@@ -157,19 +212,39 @@ impl Database {
             principals: Arc::new(tokens(config)?),
             lock: Default::default(),
             general_writes: false,
+            policy: None,
+            account_header: "paydirt-tenant".into(),
         })
     }
     pub fn allow_general_writes(mut self, allow: bool) -> Self {
         self.general_writes = allow;
         self
     }
-    pub fn authorize(
+    pub fn with_policy(mut self, policy: paydirt::rbac::Policy) -> Self {
+        self.policy = Some(policy);
+        self
+    }
+    pub fn with_account_header(mut self, header: String) -> Result<Self, String> {
+        if header.is_empty()
+            || header.starts_with("grpc-")
+            || header.ends_with("-bin")
+            || !header
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        {
+            return Err("invalid account tenant header".into());
+        }
+        self.account_header = header;
+        Ok(self)
+    }
+    pub async fn authorize(
         &self,
         mut ctx: RequestContext,
         entity: &str,
         method: &str,
         public: bool,
         direct: bool,
+        account_method: bool,
     ) -> Result<RequestContext, ConnectError> {
         let action = format!("/{entity}Service/{method}");
         if !self.general_writes && matches!(method, "Patch" | "Apply") {
@@ -203,6 +278,60 @@ impl Database {
             ));
         }
         let mut frame = principal.frame.clone();
+        let mut name = principal.name.clone();
+        if let Some(account) = &frame.account {
+            if account_method {
+                if !frame.tenant.is_empty() {
+                    return Err(ConnectError::permission_denied(
+                        "credential is bound to a tenant",
+                    ));
+                }
+                frame.actor = Some(account.clone());
+            } else {
+                let mut headers = ctx.headers().get_all(&self.account_header).iter();
+                let selector = headers
+                    .next()
+                    .map(|v| v.to_str())
+                    .transpose()
+                    .map_err(|_| ConnectError::invalid_argument("invalid tenant selector"))?
+                    .unwrap_or("");
+                if headers.next().is_some() {
+                    return Err(ConnectError::invalid_argument("multiple tenant selectors"));
+                }
+                let _guard = self.lock.lock_arc().await;
+                #[derive(Deserialize)]
+                struct Member {
+                    actor: Vec<u8>,
+                    tenant: Vec<u8>,
+                    name: String,
+                }
+                let found = self
+                    .send(Packet::ResolveAccount {
+                        account: account.clone(),
+                        bound: (!frame.tenant.is_empty()).then(|| frame.tenant.clone()),
+                        selector: selector.to_string(),
+                    })
+                    .await?;
+                let member: Member = serde_json::from_value(found)
+                    .map_err(|_| ConnectError::internal("invalid membership"))?;
+                frame.actor = Some(member.actor);
+                frame.tenant = member.tenant;
+                name = Some(member.name);
+            }
+        } else if account_method {
+            return Err(ConnectError::failed_precondition(
+                "an account makes this call as itself",
+            ));
+        }
+        if let Some(policy) = &self.policy {
+            let (revision, snapshot) = policy.pin();
+            if !account_method && !name.as_deref().is_some_and(|n| snapshot.allows(n, &action)) {
+                return Err(ConnectError::permission_denied(
+                    "method outside holder roles",
+                ));
+            }
+            ctx.extensions_mut().insert(PolicyRevision(revision));
+        }
         frame.action = action;
         if let Some(trace) = ctx
             .headers()
@@ -270,6 +399,29 @@ impl Database {
         op: &str,
         request: &Value,
     ) -> Result<Value, ConnectError> {
+        if let (Some(policy), Some(revision)) =
+            (&self.policy, ctx.extensions().get::<PolicyRevision>())
+        {
+            if policy.pin().0 != revision.0 {
+                return Err(ConnectError::unauthenticated("policy changed; reconnect"));
+            }
+        }
+        if let Some(frame) = ctx.extensions().get::<Frame>()
+            && let Some(account) = &frame.account
+            && !frame.tenant.is_empty()
+        {
+            let _guard = self.lock.lock_arc().await;
+            let member = self
+                .send(Packet::ResolveAccount {
+                    account: account.clone(),
+                    bound: Some(frame.tenant.clone()),
+                    selector: String::new(),
+                })
+                .await?;
+            if serde_json::to_value(&frame.actor).ok().as_ref() != member.get("actor") {
+                return Err(ConnectError::unauthenticated("membership changed"));
+            }
+        }
         let mut ctx = ctx.clone();
         let guard = self
             .begin(&mut ctx)
