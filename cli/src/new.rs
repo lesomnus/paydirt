@@ -19,6 +19,7 @@ const TEMPLATE: &[(&str, &str)] = &[
     ("buf.yaml", include_str!("../templates/app/buf.yaml")),
     ("buf.lock", include_str!("../templates/app/buf.lock")),
     ("src/main.rs", include_str!("../templates/app/src/main.rs")),
+    ("src/sink.rs", include_str!("../templates/app/src/sink.rs")),
     ("src/core.rs", include_str!("../templates/app/src/core.rs")),
     ("client.mjs", include_str!("../templates/app/client.mjs")),
     ("README.md", include_str!("../templates/app/README.md.in")),

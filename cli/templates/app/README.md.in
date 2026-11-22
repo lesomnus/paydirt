@@ -2,4 +2,4 @@
 
 Run `cargo run` in this directory to start the Connect server at the address in `app.json`. In a second shell, use `node client.mjs` to read the public service setting. The response comes from the deployment configuration.
 
-Edit the entity in `proto/app/setting.proto` and run `paydirt gen` to regenerate the standard service contract and Rust bindings. The server wiring in `src/main.rs` and handlers in `src/core.rs` belong to this app. Use `paydirt gen --check` in CI.
+Edit the entity in `proto/app/setting.proto` and run `paydirt gen` to regenerate the standard service contract and Rust bindings. Add domain RPCs in `proto/ext/app/setting_svc.ext.proto`. Implement only the methods you override on `SettingServiceLayer` in `src/core.rs`. Other methods pass to the next service, including the config-backed Get in `src/sink.rs`. The app owns these files and assembles the layers in `src/main.rs`. Use `paydirt gen --check` in CI.
