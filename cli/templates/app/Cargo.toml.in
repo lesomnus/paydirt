@@ -23,11 +23,11 @@ connectrpc = { version = "=0.8.2", default-features = false, features = ["json"]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 hex = "0.4"
-paydirt = {git="https://github.com/lesomnus/paydirt",rev="f30cee51d5ca216f2da5e85cc4ca6bbea2fd71ce"}
+paydirt = {git="https://github.com/lesomnus/paydirt",rev="c9b870d5a4e122b67a5552a4ab96bcdce15c47d1"}
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-paydirt = {git="https://github.com/lesomnus/paydirt",rev="f30cee51d5ca216f2da5e85cc4ca6bbea2fd71ce",features=["watch-postgres","watch-nats"]}
-paydirt-store = {git="https://github.com/lesomnus/paydirt",rev="f30cee51d5ca216f2da5e85cc4ca6bbea2fd71ce",features=["postgres","sqlite"]}
+paydirt = {git="https://github.com/lesomnus/paydirt",rev="c9b870d5a4e122b67a5552a4ab96bcdce15c47d1",features=["watch-postgres","watch-nats"]}
+paydirt-store = {git="https://github.com/lesomnus/paydirt",rev="c9b870d5a4e122b67a5552a4ab96bcdce15c47d1",features=["postgres","sqlite"]}
 connectrpc = {version="=0.8.2",default-features=false,features=["server","client-tls"]}
 buffa-reflect = {version="0.9.2", default-features=false, features=["serde","text-format"]}
 gtmpl = "0.7.1"
@@ -38,7 +38,7 @@ uuid="1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-paydirt-store = {git="https://github.com/lesomnus/paydirt",rev="f30cee51d5ca216f2da5e85cc4ca6bbea2fd71ce"}
+paydirt-store = {git="https://github.com/lesomnus/paydirt",rev="c9b870d5a4e122b67a5552a4ab96bcdce15c47d1"}
 wasm-bindgen = "=0.2.130"
 js-sys = "0.3"
 wasm-bindgen-futures = "0.4"
