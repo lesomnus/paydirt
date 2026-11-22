@@ -21,8 +21,10 @@ cat >proto/ext/app/setting_svc.ext.proto <<'PROTO'
 edition = "2023";
 package app;
 import "app/setting.proto";
+import "google/protobuf/empty.proto";
 service SettingService {
   rpc Describe(SettingGetRequest) returns (Setting);
+  rpc Ping(google.protobuf.Empty) returns (google.protobuf.Empty);
   rpc Pending(SettingGetRequest) returns (Setting);
   rpc Import(stream SettingGetRequest) returns (Setting);
   rpc Follow(stream SettingGetRequest) returns (stream Setting);

@@ -14,6 +14,46 @@ fn ident(s: &str) -> String {
 fn module(path: &str) -> String {
     path.split('.').map(ident).collect::<Vec<_>>().join("::")
 }
+// The Connect generator resolves nested messages and externally provided types such as
+// google.protobuf.Empty. Use the same Rust paths in the operator and in Core's typed calls.
+#[derive(Default)]
+struct RpcTypes {
+    request: Option<syn::Path>,
+    response: Option<syn::Path>,
+}
+impl syn::visit_mut::VisitMut for RpcTypes {
+    fn visit_path_segment_mut(&mut self, segment: &mut syn::PathSegment) {
+        let destination = match segment.ident.to_string().as_str() {
+            "ServiceRequest" => Some(&mut self.request),
+            "Encodable" => Some(&mut self.response),
+            _ => None,
+        };
+        if let Some(slot) = destination
+            && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+            && let Some(path) = args.args.iter().find_map(|arg| match arg {
+                syn::GenericArgument::Type(syn::Type::Path(ty)) => Some(&ty.path),
+                _ => None,
+            })
+        {
+            *slot = Some(path.clone());
+        }
+        syn::visit_mut::visit_path_segment_mut(self, segment);
+    }
+}
+fn message_path(path: &syn::Path, proto: &str) -> String {
+    let segments: Vec<_> = path.segments.iter().map(|s| s.ident.to_string()).collect();
+    if segments.starts_with(&["crate".into(), "proto".into()]) {
+        return format!(
+            "{proto}::{}",
+            segments[2..]
+                .iter()
+                .map(|s| ident(s.trim_start_matches("r#")))
+                .collect::<Vec<_>>()
+                .join("::")
+        );
+    }
+    path.to_token_stream().to_string()
+}
 pub fn generate(work: &Path) -> Result<()> {
     let root = work.join("generated/storage");
     let policies: BTreeMap<String, Value> =
@@ -45,23 +85,55 @@ pub fn generate(work: &Path) -> Result<()> {
     let mut mount = String::new();
     for (name, policy) in policies {
         let methods = policy["methods"].as_object().ok_or("missing methods")?;
+        if methods.is_empty() {
+            continue;
+        }
+        let (package, short) = name
+            .rsplit_once('.')
+            .ok_or("expected application package")?;
+        let hook_name = format!("{short}ServiceLayer");
+        let mut available = hooks
+            .iter()
+            .filter(|((file, ty), _)| ty == &hook_name && file.starts_with(&format!("{package}.")));
+        let service_hooks = &available.next().ok_or("missing generated layer")?.1;
+        if available.next().is_some() {
+            return Err(format!("ambiguous generated layer for {name}").into());
+        }
+        let mut types = BTreeMap::new();
+        for item in &service_hooks.items {
+            if let TraitItem::Fn(method) = item {
+                let mut ty = RpcTypes::default();
+                syn::visit_mut::VisitMut::visit_signature_mut(&mut ty, &mut method.sig.clone());
+                if let (Some(input), Some(output)) = (ty.request, ty.response) {
+                    types.insert(
+                        method
+                            .sig
+                            .ident
+                            .to_string()
+                            .trim_start_matches("r#")
+                            .to_string(),
+                        (input, output),
+                    );
+                }
+            }
+        }
         for (rpc, meta) in methods {
             if meta["client_stream"] == true {
                 continue;
             }
-            let message = |n: &str| module(meta[n].as_str().unwrap().trim_start_matches('.'));
-            let input = message("input");
-            let output = message("output");
-            let types = format!(
-                "_,proto::{input},<proto::{output} as buffa::HasMessageView>::View<'static>"
-            );
+            let (input, output) = types
+                .get(&rpc.to_snake_case())
+                .ok_or("missing Connect message types")?;
+            let input = message_path(input, "proto");
+            let output = message_path(output, "proto");
+            let types = format!("_,{input},<{output} as buffa::HasMessageView>::View<'static>");
             let service = format!("{name}Service");
             let args = format!(
                 "client,config,{service:?},{rpc:?},serde_json::from_value(request)?,Default::default()"
             );
             let action = if meta["server_stream"] == true {
                 format!(
-                    "let mut stream=call_server_stream::<{types}>({args}).await?;while let Some(msg)=stream.message::<proto::{output}>().await?{{emit(serde_json::to_value(msg.to_owned_message())?)?;}}"
+                    "let mut stream=call_server_stream::<{types}>({args}).await?;while let Some(msg)=stream.message::<{output}>().await?{{emit(serde_json::to_value(msg.to_owned_message())?)?;}}"
                 )
             } else {
                 format!(
@@ -75,20 +147,16 @@ pub fn generate(work: &Path) -> Result<()> {
         let notification = policy["notification"] == true;
         let own = policy["entity"]["own"].as_str();
         if own.is_some_and(|v| !matches!(v, "OWN_HOLDER" | "OWN_TENANT" | "OWN_EVENT" | "OWN_FACT"))
-            || methods.is_empty()
         {
             continue;
         }
-        let (package, short) = name
-            .rsplit_once('.')
-            .ok_or("expected application package")?;
         let svc = format!("crate::services::{}::{short}Service", module(package));
         let local = format!("sink_{}", name.replace('.', "__").to_snake_case());
         writeln!(
             out,
             "mod {local} {{\nuse super::*;\npub struct Sink(pub Database);\n#[allow(refining_impl_trait)]\nimpl<N: {svc}> {svc}Layer<N> for Sink {{"
         )?;
-        for (rpc, method) in methods {
+        for rpc in methods.keys() {
             if own.is_some() && !matches!(rpc.as_str(), "Get" | "List" | "Memberships") {
                 continue;
             }
@@ -108,20 +176,10 @@ pub fn generate(work: &Path) -> Result<()> {
             {
                 continue;
             }
-            let message = |field: &str| -> Result<String> {
-                Ok(format!(
-                    "crate::proto::{}",
-                    module(
-                        method[field]
-                            .as_str()
-                            .ok_or("missing RPC type")?
-                            .trim_start_matches('.')
-                    )
-                ))
-            };
-            let input = message("input")?;
-            let output = message("output")?;
             let fun = rpc.to_snake_case();
+            let (input, output) = types.get(&fun).ok_or("missing sink message types")?;
+            let input = message_path(input, "crate::proto");
+            let output = message_path(output, "crate::proto");
             if rpc == "Listen" && notification {
                 writeln!(
                     out,
@@ -143,18 +201,10 @@ pub fn generate(work: &Path) -> Result<()> {
             )?;
         }
         writeln!(out, "}}")?;
-        let hook_name = format!("{short}ServiceLayer");
-        let mut available = hooks
-            .iter()
-            .filter(|((file, ty), _)| ty == &hook_name && file.starts_with(&format!("{package}.")));
-        let hooks = &available.next().ok_or("missing generated layer")?.1;
-        if available.next().is_some() {
-            return Err(format!("ambiguous generated layer for {name}").into());
-        }
         let mut gate = String::new();
         let mut audit = String::new();
         let mut calls = String::new();
-        for item in &hooks.items {
+        for item in &service_hooks.items {
             let TraitItem::Fn(f) = item else { continue };
             let fun = &f.sig.ident;
             let snake = fun.to_string();
@@ -189,16 +239,19 @@ pub fn generate(work: &Path) -> Result<()> {
                     audit,
                     "{sig} {{async move {{let mut ctx=ctx;let guard=self.0.begin(&mut ctx).await?;let result=next.{fun}(ctx,{arg}).await;if let Some(guard)=guard {{guard.finish(result.is_ok()).await?;}} result}}}}"
                 )?;
-                let input = module(method["input"].as_str().unwrap().trim_start_matches('.'));
-                let output = module(method["output"].as_str().unwrap().trim_start_matches('.'));
+                let (input, output) = types
+                    .get(&rpc.to_snake_case())
+                    .ok_or("missing Core message types")?;
+                let input = message_path(input, "crate::proto");
+                let output = message_path(output, "crate::proto");
                 let method_name = format!("{}_owned", snake.trim_start_matches("r#"));
-                writeln!(calls,"async fn {method_name}(&self, ctx: &RequestContext, req:crate::proto::{input})-> Result<crate::proto::{output}, ::connectrpc::ConnectError> {{
+                writeln!(calls,"async fn {method_name}(&self, ctx: &RequestContext, req: {input})-> Result<{output}, ::connectrpc::ConnectError> {{
                     use buffa::{{Message,HasMessageView}}; use connectrpc::Encodable;
                     let bytes=req.encode_to_bytes();
-                    let view=crate::proto::{input}::decode_view(&bytes).map_err(|_|connectrpc::ConnectError::internal(\"invalid downstream request\"))?;
+                    let view={input}::decode_view(&bytes).map_err(|_|connectrpc::ConnectError::internal(\"invalid downstream request\"))?;
                     let reply=self.{fun}(ctx.clone(),ServiceRequest::from_parts(&view,&bytes)).await?;
                     let wire=reply.body.encode(connectrpc::CodecFormat::Proto)?;
-                    crate::proto::{output}::decode_from_slice(&wire).map_err(|_|connectrpc::ConnectError::internal(\"invalid downstream response\"))
+                    {output}::decode_from_slice(&wire).map_err(|_|connectrpc::ConnectError::internal(\"invalid downstream response\"))
                 }}")?;
             }
         }
