@@ -441,6 +441,8 @@ impl Transaction<'_> {
     }
     pub(crate) fn dispatch(&mut self, e: &Entity, method: &str, req: &Value) -> Result<Value> {
         match method {
+            "$event" => self.say(e, req),
+            "$state" => self.past_state(e, req),
             "Add" => self.insert(e, req),
             "AddMany" => {
                 let items = req["items"]

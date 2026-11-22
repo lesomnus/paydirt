@@ -16,8 +16,8 @@ for rel in ["shared/thing.proto", "app/robot.proto", "ext/app/robot_svc.ext.prot
 robot = app / "proto/app/robot.proto"
 source = robot.read_text()
 header = source.split("// This package", 1)[0]
-entities = [re.search(rf"^message {name} \{{.*?^\}}", source, re.M | re.S).group() for name in ["Cell", "Robot", "Pairing", "Reading"]]
-robot.write_text(header + "option (payday.app) = {accounts: {field: {name: \"account\", number: 12}}};\n" + "\n\n".join(entities) + "\n")
+entities = [re.search(rf"^message {name} \{{.*?^\}}", source, re.M | re.S).group() for name in ["Cell", "Robot", "Pairing", "Reading","RobotMoved"]]
+robot.write_text(header + "option (payday.app) = {accounts: {field: {name: \"account\", number: 12}} past: {event:17, fact:18}};\n" + "\n\n".join(entities) + "\n")
 for rel in ["ext/app/payday/holder_svc.ext.proto", "ext/payday/holder.ext.proto","app/profile.proto"]:
     dest=app / "proto" / rel
     dest.parent.mkdir(exist_ok=True,parents=True)

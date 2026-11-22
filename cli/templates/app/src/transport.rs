@@ -392,6 +392,44 @@ impl Database {
         serde_json::from_value(out)
             .map_err(|_| ConnectError::internal("invalid response from storage"))
     }
+    /// Write a declared domain event and the changed facts in this Core call's transaction.
+    pub async fn event<E: buffa::Message + buffa::MessageName, I: Serialize>(
+        &self,
+        ctx: &RequestContext,
+        entity: &str,
+        kind: &str,
+        payload: &E,
+        before: &I,
+        after: &I,
+    ) -> Result<Value, ConnectError> {
+        let value = buffa_types::google::protobuf::Any::pack(
+            payload,
+            format!("type.googleapis.com/{}", E::FULL_NAME),
+        );
+        self.rpc(
+            ctx,
+            entity,
+            "$event",
+            &serde_json::json!({"kind":kind,"value":value,"before":before,"after":after}),
+        )
+        .await
+    }
+    pub async fn state(
+        &self,
+        ctx: &RequestContext,
+        entity: &str,
+        reference: Value,
+        at: &str,
+        known: Option<&str>,
+    ) -> Result<Value, ConnectError> {
+        self.rpc(
+            ctx,
+            entity,
+            "$state",
+            &serde_json::json!({"ref":reference,"at":at,"known":known}),
+        )
+        .await
+    }
     async fn read(
         &self,
         ctx: &RequestContext,

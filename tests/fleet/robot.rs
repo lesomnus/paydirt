@@ -27,7 +27,7 @@ impl<N: RobotService> RobotServiceLayer<N> for Fleet {
             .await?;
         let mut patch = RobotPatchRequest {
             r#ref: request.r#ref,
-            date_updated: robot.date_updated,
+            date_updated: robot.date_updated.clone(),
             ..Default::default()
         };
         if let Some(dest) = request.to.into_option() {
@@ -51,6 +51,25 @@ impl<N: RobotService> RobotServiceLayer<N> for Fleet {
         } else {
             patch.cell_null = Some(true);
         }
-        Response::ok(next.patch_owned(&ctx, patch).await?)
+        let moved = next.patch_owned(&ctx, patch).await?;
+        let payload = RobotMoved {
+            robot: robot.id.clone(),
+            from: robot
+                .cell
+                .as_option()
+                .map(|v| v.id.clone())
+                .unwrap_or_default(),
+            to: moved
+                .cell
+                .as_option()
+                .map(|v| v.id.clone())
+                .unwrap_or_default(),
+            ..Default::default()
+        };
+        self.0
+            .0
+            .event(&ctx, "app.Robot", "robot.move", &payload, &robot, &moved)
+            .await?;
+        Response::ok(moved)
     }
 }

@@ -76,7 +76,9 @@ pub fn generate(work: &Path) -> Result<()> {
         // Framework-owned services need the account and administrative policies
         // specific to those services before exposing them on a public router.
         let own = policy["entity"]["own"].as_str();
-        if own.is_some_and(|v| !matches!(v, "OWN_HOLDER" | "OWN_TENANT")) || methods.is_empty() {
+        if own.is_some_and(|v| !matches!(v, "OWN_HOLDER" | "OWN_TENANT" | "OWN_EVENT" | "OWN_FACT"))
+            || methods.is_empty()
+        {
             continue;
         }
         let (package, short) = name
