@@ -76,3 +76,40 @@ To regenerate this repository's fixture, run `paydirt gen` at the root. The Type
 ## Updating a stored schema
 
 The generated app checks its stored ORM model and physical database layout at startup. Field numbers identify existing columns across protobuf field renames. New tables, nullable columns, supported default-valued columns and index changes run in a single transaction. A unique index that conflicts with existing data rolls back its migration. Removing a stored column, changing its key/type or adding a required field that needs a backfill reports a version or schema error. The upgrade suite exercises both dialects with rows written against the previous generated model.
+
+### Computed read resources
+
+A message with `(payday.resource)` generates a read-only Connect service. Implement its
+service trait and return the provider from the matching method on `storage::Layers`.
+For example, `app.ComputedReading` generates `fn app_computed_reading(&self) -> impl
+services::app::ComputedReadingService`. The default provider returns `Unimplemented`.
+
+The provider owns its data source, checks access on every read and subsequent Watch
+snapshot, and chooses its pagination and revision semantics. List can return metadata
+even for an empty page. Watch replaces the complete collection on each message. The
+same provider is mounted by the native and sandbox routers. [Runnable example](tests/fleet/readings.rs)
+
+### Watch brokers and the outbox
+
+Generated native apps select their Watch broker in `app.json`. Add a `watch` entry
+when upgrading an older project. A new project explicitly selects `memory`.
+The browser sandbox also uses the in-process broker in its server Worker. Only a
+successful transaction in the SQLite Worker returns change metadata to that broker.
+
+| Setting | Deployment |
+| --- | --- |
+| `{"broker":"memory"}` | Subscribers and writers share one server process. |
+| `{"broker":"postgres"}` | Replicas share a PostgreSQL database. A subscriber listens on `payday_watch`. Set `dsn` to select a different broker database. |
+| `{"broker":"nats","dsn":"nats://localhost:4222","namespace":"fleet"}` | Core NATS routes by deployment, service, key and notification audience. All replicas of a deployment use the same namespace. |
+| `{"broker":"none"}` | Live subscriptions return FailedPrecondition. |
+
+Subscriptions are installed before the initial snapshot or notification Ready.
+The server reads current authorized state after a signal. A full reader queue
+or a broken broker stream tells the consumer to reconnect.
+
+Set `outbox` to record mutations durably. Set `drain_every_ms` to a positive interval
+to publish queued rows, oldest first, in batches of 128. Successful publications
+are acknowledged in a separate SQL transaction. A restart between publication
+and deletion can repeat an event. Rust applications can call `Store::drain_once`
+with a custom `paydirt::watch::Broker`. Existing outbox rows without route
+metadata are delivered to matching service and key subscriptions.

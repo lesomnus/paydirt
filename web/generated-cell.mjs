@@ -15,6 +15,7 @@ import {filePolicy} from "./generated-file-policy.mjs";
 import {accounts,accountCases} from "./generated-account.js";
 import {notificationCases} from "./generated-notify.js";
 import {pastScenario} from "./generated-past.js";
+import {checkReadings} from "./generated-readings.js";
 import {runPair} from "./generated-pair.js";
 import {fromBinary,createFileRegistry} from "@bufbuild/protobuf";
 import {FileDescriptorSetSchema} from "@bufbuild/protobuf/wkt";
@@ -92,6 +93,8 @@ try {
           ]);
           return true;
         });
+        const readings = createFileRegistry(descriptors).getService("app.ComputedReadingService");
+        await checkReadings(createClient(readings, createConnectTransport({baseUrl,useBinaryFormat:true})));
         await runPair(typed,own,primary.id);
         for(const [table,column] of [["Audit","f10"],["Outbox","f9"]]){
           const sql='SELECT count(*) FROM "pd_app__'+table+'" WHERE '+column+"='/app.RobotService/RenamePair'";

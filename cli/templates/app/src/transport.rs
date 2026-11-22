@@ -1,4 +1,6 @@
 use connectrpc::{ConnectError, RequestContext};
+use futures_util::{FutureExt, StreamExt};
+use paydirt::watch::{Broker, Interest, Memory, Subscription};
 use paydirt_store::{Call, Fault, Frame, Packet};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
@@ -201,6 +203,7 @@ pub fn error(mut f: Fault) -> ConnectError {
 
 #[derive(Clone)]
 pub struct Database {
+    broker: Option<Arc<dyn Broker>>,
     principals: Arc<HashMap<String, Principal>>,
     lock: Arc<async_lock::Mutex<()>>,
     general_writes: bool,
@@ -248,6 +251,7 @@ impl Database {
             principals,
             lock: Default::default(),
             queue,
+            broker: Some(Arc::new(Memory::default())),
             general_writes: false,
             policy: None,
             account_header: "paydirt-tenant".into(),
@@ -259,6 +263,7 @@ impl Database {
         Ok(Self {
             principals: Arc::new(tokens(config)?),
             lock: Default::default(),
+            broker: Some(Arc::new(Memory::default())),
             general_writes: false,
             policy: None,
             account_header: "paydirt-tenant".into(),
@@ -266,6 +271,68 @@ impl Database {
         })
     }
     /// Resolve an application credential to a host-registered principal.
+    pub fn with_broker(mut self, broker: Option<Arc<dyn Broker>>) -> Self {
+        self.broker = broker;
+        self
+    }
+    async fn subscribe(
+        &self,
+        ctx: &RequestContext,
+        interest: Interest,
+        entity: &str,
+    ) -> Result<Subscription, ConnectError> {
+        let broker = self
+            .broker
+            .as_ref()
+            .ok_or_else(|| ConnectError::failed_precondition("watch broker is disabled"))?;
+        let mut changes = broker
+            .subscribe(interest)
+            .await
+            .map_err(ConnectError::unavailable)?;
+        // A membership change can invalidate the frame even when the selected rows do not change.
+        if ctx
+            .extensions()
+            .get::<Frame>()
+            .is_some_and(|f| f.account.is_some() && !f.tenant.is_empty())
+        {
+            let package = entity.rsplit_once('.').map(|(p, _)| p).unwrap_or("");
+            for name in ["Tenant", "Holder"] {
+                let members = broker
+                    .subscribe(Interest {
+                        service: format!("/{package}.{name}Service/"),
+                        ..Default::default()
+                    })
+                    .await
+                    .map_err(ConnectError::unavailable)?;
+                changes = futures_util::stream::select(changes, members).boxed();
+            }
+        }
+        Ok(changes)
+    }
+    async fn next_change(
+        &self,
+        ctx: &RequestContext,
+        stream: &mut Subscription,
+    ) -> Result<(), ConnectError> {
+        loop {
+            let read = stream.next().fuse();
+            futures_util::pin_mut!(read);
+            if self.resolve.is_some() || self.policy.is_some() {
+                let tick = futures_timer::Delay::new(std::time::Duration::from_millis(100)).fuse();
+                futures_util::pin_mut!(tick);
+                futures_util::select_biased! {
+                    event=read=>return event.ok_or_else(||ConnectError::unavailable("watch ended"))?.map(|_|()).map_err(ConnectError::unavailable),
+                    _=tick=>self.check_credential(ctx)?,
+                }
+            } else {
+                return read
+                    .await
+                    .ok_or_else(|| ConnectError::unavailable("watch ended"))?
+                    .map(|_| ())
+                    .map_err(ConnectError::unavailable);
+            }
+        }
+    }
     pub fn with_resolver(
         mut self,
         resolve: impl Fn(&RequestContext) -> Result<Option<String>, ConnectError>
@@ -530,13 +597,7 @@ impl Database {
         )
         .await
     }
-    async fn read(
-        &self,
-        ctx: &RequestContext,
-        entity: &str,
-        op: &str,
-        request: &Value,
-    ) -> Result<Value, ConnectError> {
+    fn check_credential(&self, ctx: &RequestContext) -> Result<(), ConnectError> {
         if let (Some(resolve), Some(original)) =
             (&self.resolve, ctx.extensions().get::<ResolvedKey>())
             && resolve(ctx)?.as_deref() != Some(&original.0)
@@ -552,6 +613,16 @@ impl Database {
                 return Err(ConnectError::unauthenticated("policy changed; reconnect"));
             }
         }
+        Ok(())
+    }
+    async fn read(
+        &self,
+        ctx: &RequestContext,
+        entity: &str,
+        op: &str,
+        request: &Value,
+    ) -> Result<Value, ConnectError> {
+        self.check_credential(ctx)?;
         if let Some(frame) = ctx.extensions().get::<Frame>()
             && let Some(account) = &frame.account
             && !frame.tenant.is_empty()
@@ -586,13 +657,28 @@ impl Database {
     ) -> connectrpc::ServiceResult<connectrpc::ServiceStream<O>> {
         let request = serde_json::to_value(req)
             .map_err(|_| ConnectError::invalid_argument("invalid listen request"))?;
+        let routes = serde_json::from_value(
+            self.read(&ctx, entity, "$listen_interest", &request)
+                .await?,
+        )
+        .map_err(|_| ConnectError::internal("invalid notification routes"))?;
+        let mut changes = self
+            .subscribe(
+                &ctx,
+                Interest {
+                    routes,
+                    ..Default::default()
+                },
+                entity,
+            )
+            .await?;
         let start = self.read(&ctx, entity, "$listen", &request).await?;
         let db = self.clone();
         let stream = async_stream::try_stream! {
             let mut old=start["revisions"].clone();
             yield serde_json::from_value(serde_json::json!({"ready":{"readerId":start["readerId"]}})).map_err(|_|ConnectError::internal("invalid listen reply"))?;
             loop{
-                futures_timer::Delay::new(std::time::Duration::from_millis(80)).await;
+                db.next_change(&ctx,&mut changes).await?;
                 let batch=db.read(&ctx,entity,"$listen",&request).await?;
                 let changed:Vec<_>=batch["topics"].as_array().into_iter().flatten().enumerate().filter(|(i,_)|old[*i]!=batch["revisions"][*i]).map(|(_,v)|v).collect();
                 if !changed.is_empty(){yield serde_json::from_value(serde_json::json!({"invalidated":{"topics":changed}})).map_err(|_|ConnectError::internal("invalid listen change"))?;}
@@ -609,6 +695,31 @@ impl Database {
     ) -> connectrpc::ServiceResult<connectrpc::ServiceStream<O>> {
         let request = serde_json::to_value(request)
             .map_err(|_| ConnectError::invalid_argument("invalid watch request"))?;
+        let keys = request["filters"]
+            .as_array()
+            .and_then(|fs| {
+                fs.iter()
+                    .map(|f| {
+                        use base64::Engine;
+                        let raw = base64::engine::general_purpose::STANDARD
+                            .decode(f["ref"]["id"].as_str()?)
+                            .ok()?;
+                        paydirt::format_id(&raw)
+                    })
+                    .collect::<Option<Vec<_>>>()
+            })
+            .unwrap_or_default();
+        let mut changes = self
+            .subscribe(
+                &ctx,
+                Interest {
+                    service: format!("/{entity}Service/"),
+                    keys,
+                    ..Default::default()
+                },
+                entity,
+            )
+            .await?;
         let start = self.read(&ctx, entity, "$watch_start", &request).await?;
         let db = self.clone();
         let stream = async_stream::try_stream! {
@@ -619,6 +730,7 @@ impl Database {
             }
             let mut poll=serde_json::json!({"ids":start["ids"],"revision":start["revision"]});
             loop {
+                db.next_change(&ctx,&mut changes).await?;
                 let batch=db.read(&ctx,entity,"$watch_poll",&poll).await?;
                 poll["revision"]=batch["revision"].clone();
                 let mut items=Vec::new();
@@ -631,7 +743,6 @@ impl Database {
                 if !items.is_empty(){
                     yield serde_json::from_value(serde_json::json!({"items":items})).map_err(|_|ConnectError::internal("invalid watch response"))?;
                 }
-                futures_timer::Delay::new(std::time::Duration::from_millis(80)).await;
             }
         };
         connectrpc::Response::stream_ok(stream)
@@ -682,10 +793,18 @@ pub struct Guard {
 impl Guard {
     pub async fn finish(mut self, commit: bool) -> Result<(), ConnectError> {
         let id = self.id.take().expect("active transaction");
-        self.db
-            .send(Packet::Finish { id, commit })
-            .await
-            .map(|_| ())
+        let value = self.db.send(Packet::Finish { id, commit }).await?;
+        if let Some(broker) = &self.db.broker {
+            if !value.is_null() {
+                let event = serde_json::from_value(value)
+                    .map_err(|_| ConnectError::internal("invalid commit receipt"))?;
+                // The database has committed. A broker failure cannot roll it back.
+                if let Err(e) = broker.publish(event).await {
+                    eprintln!("watch publication failed: {e}");
+                }
+            }
+        }
+        Ok(())
     }
 }
 impl Drop for Guard {

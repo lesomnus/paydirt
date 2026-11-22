@@ -10,6 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     services:
+      nats:
+        image: nats:2
+        ports: ["4222:4222"]
       postgres:
         image: postgres:17
         env:
@@ -68,6 +71,7 @@ jobs:
           CARGO_TARGET_DIR: ${{ runner.temp }}/app-target
           PAYDIRT_GO_CHECKOUT: ${{ github.workspace }}/upstream-go
           PAYDIRT_TEST_WASM: "1"
+          NATS_URL: nats://127.0.0.1:4222
           PAYDIRT_GO_REFERENCE: ${{ runner.temp }}/payday-reference
           DATABASE_URL: postgres://postgres:paydirt@127.0.0.1:5432/paydirt
       - run: scripts/test-upgrades.sh

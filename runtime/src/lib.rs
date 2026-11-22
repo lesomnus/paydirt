@@ -10,6 +10,7 @@ pub mod meter;
 mod migrate;
 pub mod naming;
 mod notify;
+pub mod outbox;
 mod past;
 mod relations;
 mod session;
@@ -150,6 +151,8 @@ pub struct Policy {
 }
 pub type Policies = BTreeMap<String, Policy>;
 pub struct Store {
+    outbox: bool,
+    committed: Option<paydirt::watch::Event>,
     namer: Box<dyn naming::Namer>,
     db: Connection,
     session: Option<session::Session>,
@@ -171,11 +174,20 @@ impl Store {
         })?;
         Ok(Self {
             namer: Box::new(naming::names),
+            outbox: true,
+            committed: None,
             db,
             session: None,
             model,
             policies,
         })
+    }
+    pub fn with_outbox(mut self, enabled: bool) -> Self {
+        self.outbox = enabled;
+        self
+    }
+    pub fn take_committed(&mut self) -> Option<paydirt::watch::Event> {
+        self.committed.take()
     }
     pub fn with_namer(mut self, namer: impl naming::Namer + 'static) -> Self {
         self.namer = Box::new(namer);
@@ -253,8 +265,12 @@ impl Store {
             return Err(Fault::aborted("another request owns this connection"));
         }
         let (model, policies) = (&self.model, &self.policies);
-        self.db.transaction(|db| {
+        let mut changes = Vec::new();
+        self.committed = None;
+        let result = self.db.transaction(|db| {
             let mut tx = Transaction {
+                changes: &mut changes,
+                outbox: self.outbox,
                 namer: &*self.namer,
                 db,
                 model,
@@ -268,10 +284,19 @@ impl Store {
                 Some(err) => Err(err),
                 None => result,
             }
-        })
+        })?;
+        if !changes.is_empty() {
+            self.committed = Some(paydirt::watch::Event {
+                changes,
+                ..Default::default()
+            });
+        }
+        Ok(result)
     }
 }
 pub struct Transaction<'a> {
+    changes: &'a mut Vec<paydirt::watch::Change>,
+    outbox: bool,
     namer: &'a dyn naming::Namer,
     db: &'a mut dyn Driver,
     model: &'a Model,
