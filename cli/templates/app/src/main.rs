@@ -67,10 +67,53 @@ struct Config {
     allow_general_writes: bool,
 }
 
+impl Config {
+    fn load() -> Result<Self, Box<dyn Error>> {
+        let mut config: Self = serde_json::from_slice(&fs::read("app.json")?)?;
+        if let Some(broker) = std::env::var_os(paydirt::environment::PAYDIRT_WATCH_BROKER) {
+            config.watch.broker = broker.into_string().map_err(|_| "invalid watch broker")?;
+        }
+        if let Some(lease) = std::env::var_os(paydirt::environment::PAYDIRT_WORKER_LEASE) {
+            config.worker_lease = Some(lease.into_string().map_err(|_| "invalid worker lease")?);
+        }
+        Ok(config)
+    }
+
+    fn print_environment(&self, state: bool) -> Result<(), Box<dyn Error>> {
+        let mut names: std::collections::BTreeSet<_> =
+            paydirt::environment::NAMES.iter().copied().collect();
+        names.extend(self.authentication.as_ref().and_then(|v| v.introspection.as_ref()).map(|v| v.bearer_env.as_str()));
+        names.extend(self.grant_source.as_ref().and_then(|v| v.bearer_env.as_deref()));
+        for name in &names {
+            if name.is_empty() || !name.bytes().enumerate().all(|(i,c)| c.is_ascii_alphabetic() || c == b'_' || (i > 0 && c.is_ascii_digit())) {
+                return Err("invalid environment variable name in app.json".into());
+            }
+        }
+        for name in names {
+            if state {
+                let mark = if std::env::var_os(name).is_some() { "set" } else { "-" };
+                println!("{name}\t{mark}");
+            } else {
+                println!("{name}");
+            }
+        }
+        Ok(())
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "paydirt.sqlite3".into());
+    let url = std::env::var(paydirt::environment::DATABASE_URL).unwrap_or_else(|_| "paydirt.sqlite3".into());
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("config") {
+        return match args.as_slice() {
+            [_, cmd] if cmd == "env" => Config::load()?.print_environment(false),
+            [_, cmd, flag] if cmd == "env" && flag == "--set" => Config::load()?.print_environment(true),
+            [_] | [_, _] if args.len() == 1 || matches!(args[1].as_str(), "-h" | "--help") => { println!("env"); Ok(()) },
+            [_, cmd, flag] if cmd == "env" && matches!(flag.as_str(), "-h" | "--help") => { println!("config env [--set]"); Ok(()) },
+            _ => Err("usage: config env [--set]".into()),
+        };
+    }
     if let [command, tenant, config]=args.as_slice() && command=="past-expire" {
         #[derive(Deserialize)]
         struct Expiry {window:paydirt_store::past_expiry::Window,#[serde(default)]dry_run:bool}
@@ -88,8 +131,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if let [command, argument] = args.as_slice() && matches!(command.as_str(),"trail"|"trail-check") {
         use paydirt_store::archive_files::Archive;
         let archive=Archive::from_environment;
-        let vault=archive("PAYDIRT_ARCHIVE_DIR","PAYDIRT_ARCHIVE_KEY")?;
-        let export=std::env::var_os("PAYDIRT_EXPORT_DIR").map(|_|archive("PAYDIRT_EXPORT_DIR","PAYDIRT_EXPORT_KEY")).transpose()?;
+        let vault=archive(paydirt::environment::PAYDIRT_ARCHIVE_DIR,paydirt::environment::PAYDIRT_ARCHIVE_KEY)?;
+        let export=std::env::var_os(paydirt::environment::PAYDIRT_EXPORT_DIR).map(|_|archive(paydirt::environment::PAYDIRT_EXPORT_DIR,paydirt::environment::PAYDIRT_EXPORT_KEY)).transpose()?;
         let mut store=__APP_CRATE__::resource::record(paydirt_store::Store::open(&url,MODEL,POLICIES)?)?;
         if command=="trail-check"{
             let advance=match argument.as_str(){"checkpoint"=>true,"verify"=>false,_=>return Err("expected verify or checkpoint".into())};
@@ -108,7 +151,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let [entity, method, argument] = args.as_slice() else {
             return Err("usage: APP ENTITY METHOD JSON".into());
         };
-        let config: Config = serde_json::from_slice(&fs::read("app.json")?)?;
+        let config = Config::load()?;
         let broker = config.watch.connect(&url).await?;
         let mut store =
             __APP_CRATE__::resource::record(paydirt_store::Store::open(&url, MODEL, POLICIES)?)?
@@ -127,13 +170,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("{}", result);
         return Ok(());
     }
-    let config: Config = serde_json::from_slice(&fs::read("app.json")?)?;
-    let addr = match std::env::var("PAYDIRT_LISTEN") {
+    let config = Config::load()?;
+    let addr = match std::env::var(paydirt::environment::PAYDIRT_LISTEN) {
         Ok(addr) => addr.parse()?,
         Err(std::env::VarError::NotPresent) => config.listen,
         Err(e) => return Err(e.into()),
     };
-    let principals = std::env::var("PAYDIRT_PRINCIPALS").unwrap_or_else(|_| "{}".into());
+    let principals = std::env::var(paydirt::environment::PAYDIRT_PRINCIPALS).unwrap_or_else(|_| "{}".into());
     let broker = config.watch.connect(&url).await?;
     let store =
         __APP_CRATE__::resource::record(paydirt_store::Store::open(&url, MODEL, POLICIES)?)?
@@ -147,8 +190,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if let Some(auth) = config.authentication {
         db = db.with_authentication(auth)?;
     }
-    if let Ok(path) = std::env::var("PAYDIRT_POLICY_FILE") {
-        let refresh = std::env::var("PAYDIRT_POLICY_REFRESH_MS")
+    if let Ok(path) = std::env::var(paydirt::environment::PAYDIRT_POLICY_FILE) {
+        let refresh = std::env::var(paydirt::environment::PAYDIRT_POLICY_REFRESH_MS)
             .ok()
             .map(|s| s.parse())
             .transpose()?
@@ -158,7 +201,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             std::time::Duration::from_millis(refresh),
         )?);
     }
-    if let Ok(header) = std::env::var("PAYDIRT_ACCOUNT_HEADER") {
+    if let Ok(header) = std::env::var(paydirt::environment::PAYDIRT_ACCOUNT_HEADER) {
         db = db.with_account_header(header)?;
     }
     use paydirt::spin::{Lease, Placement};

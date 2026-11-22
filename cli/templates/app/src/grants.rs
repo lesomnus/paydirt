@@ -15,7 +15,7 @@ use tokio::time::{Instant, sleep};
 #[derive(Deserialize)]
 pub struct Source {
     url: String,
-    bearer_env: Option<String>,
+    pub(crate) bearer_env: Option<String>,
     every_ms: Option<u64>,
     retry_ms: Option<u64>,
 }

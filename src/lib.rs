@@ -1,4 +1,5 @@
 //! Core types shared by native and WebAssembly Payday applications.
+pub mod environment;
 pub mod page;
 pub mod rbac;
 #[cfg(all(feature = "watch-postgres", not(target_arch = "wasm32")))]

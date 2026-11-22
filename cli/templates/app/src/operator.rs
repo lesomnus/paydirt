@@ -284,7 +284,7 @@ pub async fn run(args: &[String]) -> Result<()> {
     let mut output = "pretty";
     let mut input = "json";
     let mut retry = false;
-    let default_zone = env::var("APP_TZ").unwrap_or_else(|_| "UTC".into());
+    let default_zone = env::var(paydirt::environment::APP_TZ).unwrap_or_else(|_| "UTC".into());
     let mut zone = default_zone.as_str();
     let mut args = tail.iter();
     while let Some(a) = args.next() {
@@ -462,7 +462,7 @@ pub(crate) fn rpc_client(
 }
 
 fn connection() -> Result<(HttpClient, ClientConfig)> {
-    let endpoint = env::var("PAYDIRT_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".into());
-    let (client, config) = rpc_client(&endpoint, env::var("PAYDIRT_TOKEN").ok().as_deref())?;
+    let endpoint = env::var(paydirt::environment::PAYDIRT_URL).unwrap_or_else(|_| "http://127.0.0.1:8080".into());
+    let (client, config) = rpc_client(&endpoint, env::var(paydirt::environment::PAYDIRT_TOKEN).ok().as_deref())?;
     Ok((client, config))
 }

@@ -367,10 +367,10 @@ impl Archive {
             std::env::var(dir).map_err(bad)?,
             &hex::decode(std::env::var(key).map_err(bad)?).map_err(bad)?,
         )?;
-        if dir == "PAYDIRT_ARCHIVE_DIR" {
+        if dir == paydirt::environment::PAYDIRT_ARCHIVE_DIR {
             let signer: Option<Box<dyn Signer>> = match (
-                std::env::var_os("PAYDIRT_SIGNING_KEY"),
-                std::env::var_os("PAYDIRT_SIGNER_PROGRAM"),
+                std::env::var_os(paydirt::environment::PAYDIRT_SIGNING_KEY),
+                std::env::var_os(paydirt::environment::PAYDIRT_SIGNER_PROGRAM),
             ) {
                 (Some(path), None) => Some(Box::new(Ed25519::from_pkcs8(
                     &fs::read(path).map_err(bad)?,
@@ -378,11 +378,13 @@ impl Archive {
                 (None, Some(program)) => Some(Box::new(ProgramSigner {
                     executable: program.into(),
                     arguments: serde_json::from_str(
-                        &std::env::var("PAYDIRT_SIGNER_ARGS").unwrap_or_else(|_| "[]".into()),
+                        &std::env::var(paydirt::environment::PAYDIRT_SIGNER_ARGS)
+                            .unwrap_or_else(|_| "[]".into()),
                     )
                     .map_err(bad)?,
                     public_key_der: fs::read(
-                        std::env::var("PAYDIRT_SIGNER_PUBLIC_KEY").map_err(bad)?,
+                        std::env::var(paydirt::environment::PAYDIRT_SIGNER_PUBLIC_KEY)
+                            .map_err(bad)?,
                     )
                     .map_err(bad)?,
                 })),
@@ -390,10 +392,11 @@ impl Archive {
                 (None, None) => None,
             };
             if let Some(signer) = signer {
-                let witness = std::env::var_os("PAYDIRT_WITNESS_DIR")
+                let witness = std::env::var_os(paydirt::environment::PAYDIRT_WITNESS_DIR)
                     .ok_or_else(|| bad("missing external witness directory"))?;
                 let trust: Vec<PathBuf> = serde_json::from_str(
-                    &std::env::var("PAYDIRT_TRUST_KEYS").unwrap_or_else(|_| "[]".into()),
+                    &std::env::var(paydirt::environment::PAYDIRT_TRUST_KEYS)
+                        .unwrap_or_else(|_| "[]".into()),
                 )
                 .map_err(bad)?;
                 let trust = trust
