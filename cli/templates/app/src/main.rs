@@ -49,6 +49,7 @@ struct Meter {
 struct Config {
     watch: Watch,
     meter: Option<Meter>,
+    notification_expiry_ms: Option<u64>,
     #[serde(default)]
     worker_lease: Option<String>,
     listen: std::net::SocketAddr,
@@ -116,6 +117,35 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
     use paydirt::spin::{Lease, Placement};
     let mut workers = __APP_CRATE__::workers(&db)?;
+    if let Some(ms) = config.notification_expiry_ms {
+        if ms == 0 {
+            return Err("notification expiry interval must be positive".into());
+        }
+        let url = url.clone();
+        let broker = broker.clone();
+        let outbox = config.watch.outbox;
+        workers.add("payday.notify.expire",Placement::Singleton,move |stop|{
+            let url=url.clone();
+            let broker=broker.clone();
+            async move {
+                let mut store=paydirt_store::Store::open(&url,MODEL,POLICIES).map_err(|e|e.to_string())?.with_outbox(outbox);
+                store.notification_keep().map_err(|e|e.to_string())?;
+                loop {
+                    if stop.stopped(){return Ok(())}
+                    match store.expire_notifications(None,500) {
+                        Ok(n)=>{
+                            if let (Some(event),Some(b))=(store.take_committed(),broker.as_ref()){
+                                if let Err(e)=b.publish(event).await{eprintln!("notification expiry invalidation: {e}")}
+                            }
+                            if n==500{tokio::task::yield_now().await;continue}
+                        }
+                        Err(e)=>eprintln!("notification expiry: {e}"),
+                    }
+                    tokio::select!{_=stop.cancelled()=>return Ok(()),_=tokio::time::sleep(Duration::from_millis(ms))=>{}}
+                }
+            }
+        })?;
+    }
     if let (Some(ms), Some(broker)) = (config.watch.drain_every_ms, broker) {
         let url = url.clone();
         workers.add("paydirt.outbox", Placement::Singleton, move |stop| {
