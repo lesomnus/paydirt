@@ -38,6 +38,7 @@ node generated-replicas.mjs
 cargo test --manifest-path "$repo/Cargo.toml" -p paydirt-store --features sqlite,postgres --test notify_policy --test past_expiry
 
 node generated-config.mjs
+node generated-slow.mjs
 node generated-serving.mjs
 node generated-authentication.mjs
 node generated-grant-follower.mjs
