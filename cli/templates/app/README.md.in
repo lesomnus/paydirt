@@ -27,6 +27,8 @@ Declare a domain operation in `proto/ext/`, run `paydirt gen`, then implement th
 
 The server reads `PAYDIRT_PRINCIPALS` when it starts. A simple tenant credential uses a JSON map such as `{"dev-token":"<32 hex digits>"}`. Set `PAYDIRT_TOKEN=dev-token` on a client to use that credential. Deployments can also supply a role policy with `PAYDIRT_POLICY_FILE` and select an account membership using the header configured by `PAYDIRT_ACCOUNT_HEADER`.
 
+For an RPC declared with `(payday.method).account`, derive a context with `database.account_reads(ctx, "/app.InvitationService/Accept", reads)` before calling another entity's typed Get or List. Build the scope with `AccountReads::default().allow("app.Invitation", ReadFilter::AccountField("recipient".into()))`. A second declaration can select specific IDs with `ReadFilter::Ids`. Each derived context retains its own scope. Undeclared entities return an empty list or NotFound. A call served as a tenant membership uses its tenant scope.
+
 ## Native background workers
 
 Register application workers in the `workers` function in `src/lib.rs`. Each named worker receives a stop token. Choose `Placement::Everywhere` or `Placement::Singleton`. Set `"worker_lease":"postgres"` in `app.json` to run each singleton on one PostgreSQL session across replicas. The default local lease runs workers in the current process. A fatal error shuts down the RPC listener and the other workers.

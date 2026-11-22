@@ -82,6 +82,10 @@ impl Transaction<'_> {
         if let Some(f) = e.erased() {
             parts.push(format!("r.{} IS NULL", quote(&f.column())))
         }
+        if let Scope::Account { id, reads } = self.scope {
+            parts.extend(reads.clauses(e, id, q, self.db.dialect())?);
+            return Ok(parts);
+        }
         if let Scope::Granted {
             sets: Some(sets), ..
         } = self.scope

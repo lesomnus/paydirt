@@ -17,6 +17,47 @@ impl Drop for Active {
 
 #[allow(refining_impl_trait)]
 impl<N: RobotService> RobotServiceLayer<N> for Pair {
+    async fn invited(
+        &self,
+        _: &N,
+        ctx: RequestContext,
+        _: ServiceRequest<'_, RobotAllowanceRequest>,
+    ) -> ServiceResult<InvitationCount> {
+        use crate::storage::InvitationCalls;
+        use paydirt_store::{AccountReads, ReadFilter};
+        let sink = self.0.app_invitation();
+        let undeclared = sink.list_owned(&ctx, Default::default()).await?;
+        if !undeclared.items.is_empty() {
+            return Err(connectrpc::ConnectError::internal(
+                "undeclared invitations visible",
+            ));
+        }
+        let reads = AccountReads::default().allow(
+            "app.Invitation",
+            ReadFilter::AccountField("recipient".into()),
+        );
+        let mine =
+            self.0
+                .0
+                .account_reads(ctx.clone(), "/app.RobotService/Invited", reads.clone())?;
+        let found = sink.list_owned(&mine, Default::default()).await?;
+        let ids = found
+            .items
+            .first()
+            .map(|v| vec![v.id.clone()])
+            .unwrap_or_default();
+        let selected = self.0.0.account_reads(
+            ctx,
+            "/app.RobotService/Invited",
+            reads.allow("app.Invitation", ReadFilter::Ids(ids)),
+        )?;
+        let one = sink.list_owned(&selected, Default::default()).await?;
+        Response::ok(InvitationCount {
+            mine: Some(found.items.len() as i32),
+            selected: Some(one.items.len() as i32),
+            ..Default::default()
+        })
+    }
     async fn in_flight(
         &self,
         _: &N,
