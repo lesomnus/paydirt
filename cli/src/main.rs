@@ -3,6 +3,7 @@ mod layers;
 mod new;
 mod payday;
 mod policy;
+mod sinks;
 use std::{env, path::PathBuf, process::ExitCode};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;

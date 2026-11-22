@@ -1,16 +1,10 @@
-mod core;
-#[path = "../generated/messages/mod.rs"]
-mod proto;
-#[path = "../generated/services/mod.rs"]
-mod services;
-mod sink;
-mod orm {
-    include!("../generated/orm/app/setting_svc.g.orm.rs");
-}
-
-use connectrpc::{Router, Server};
+use __APP_CRATE__::{
+    router,
+    transport::{Database, MODEL, POLICIES},
+};
+use connectrpc::Server;
 use serde::Deserialize;
-use std::{error::Error, fs, sync::Arc};
+use std::{error::Error, fs};
 
 #[derive(Deserialize)]
 struct Config {
@@ -20,26 +14,31 @@ struct Config {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "paydirt.sqlite3".into());
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    if !args.is_empty() {
+        let [entity, method, argument] = args.as_slice() else {
+            return Err("usage: APP ENTITY METHOD JSON".into());
+        };
+        let mut store = paydirt_store::Store::open(&url, MODEL, POLICIES)?;
+        let call = paydirt_store::Call {
+            entity: entity.clone(),
+            method: method.clone(),
+            request: serde_json::from_str(argument)?,
+        };
+        println!("{}", store.call(&paydirt_store::Scope::Internal, call)?);
+        return Ok(());
+    }
     let config: Config = serde_json::from_slice(&fs::read("app.json")?)?;
-    let address = match std::env::var("PAYDIRT_LISTEN") {
-        Ok(value) => value.parse()?,
+    let addr = match std::env::var("PAYDIRT_LISTEN") {
+        Ok(addr) => addr.parse()?,
         Err(std::env::VarError::NotPresent) => config.listen,
-        Err(err) => return Err(err.into()),
+        Err(e) => return Err(e.into()),
     };
-    use services::app::{SettingServiceOverlay, SettingServiceUnimplemented};
-    let settings = SettingServiceOverlay {
-        next: SettingServiceUnimplemented,
-        layer: sink::Settings {
-            name: config.service_name,
-        },
-    };
-    let service = Arc::new(SettingServiceOverlay {
-        next: settings,
-        layer: core::Core,
-    });
-    let router = orm::register_setting_service(Router::new(), service);
-    Server::new(router)
-        .serve(address)
+    let principals = std::env::var("PAYDIRT_PRINCIPALS").unwrap_or_else(|_| "{}".into());
+    let db = Database::open(&url, &principals)?;
+    Server::new(router(db, config.service_name))
+        .serve(addr)
         .await
         .map_err(|e| e as Box<dyn Error>)
 }

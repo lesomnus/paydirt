@@ -18,12 +18,17 @@ const TEMPLATE: &[(&str, &str)] = &[
     ),
     ("buf.yaml", include_str!("../templates/app/buf.yaml")),
     ("buf.lock", include_str!("../templates/app/buf.lock")),
+    ("src/lib.rs", include_str!("../templates/app/src/lib.rs")),
+    (
+        "src/transport.rs",
+        include_str!("../templates/app/src/transport.rs"),
+    ),
     ("src/main.rs", include_str!("../templates/app/src/main.rs")),
     ("src/sink.rs", include_str!("../templates/app/src/sink.rs")),
     ("src/core.rs", include_str!("../templates/app/src/core.rs")),
     ("client.mjs", include_str!("../templates/app/client.mjs")),
     ("README.md", include_str!("../templates/app/README.md.in")),
-    (".gitignore", "/target/\n"),
+    (".gitignore", "/target/\n/paydirt.sqlite3*\n"),
 ];
 
 fn valid_name(name: &str) -> bool {
@@ -63,7 +68,12 @@ pub fn run(name: &str, dest: &Path) -> Result<()> {
     for (path, contents) in TEMPLATE {
         let path = work.path().join(path);
         fs::create_dir_all(path.parent().unwrap())?;
-        fs::write(path, contents.replace("__APP_NAME__", name))?;
+        fs::write(
+            path,
+            contents
+                .replace("__APP_NAME__", name)
+                .replace("__APP_CRATE__", &name.replace('-', "_")),
+        )?;
     }
     generate::run(work.path(), false)?;
     // Leave an existing empty directory (even the caller's cwd) in place.

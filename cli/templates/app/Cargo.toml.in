@@ -4,13 +4,29 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+[lib]
+crate-type = ["rlib", "cdylib"]
+
 [features]
 client = ["connectrpc/client"]
 
 [dependencies]
 buffa = { version = "=0.8.1", features = ["json"] }
 buffa-types = { version = "=0.8.1", features = ["json"] }
-connectrpc = { version = "=0.8.2", default-features = false, features = ["json", "server"] }
+connectrpc = { version = "=0.8.2", default-features = false, features = ["json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+hex = "0.4"
+paydirt = {git="https://github.com/lesomnus/paydirt",rev="77a2313a30cacb4f638ad716e743f4a4254c5aa9"}
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+paydirt-store = {git="https://github.com/lesomnus/paydirt",rev="77a2313a30cacb4f638ad716e743f4a4254c5aa9",features=["postgres","sqlite"]}
+connectrpc = {version="=0.8.2",default-features=false,features=["server"]}
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+paydirt-store = {git="https://github.com/lesomnus/paydirt",rev="77a2313a30cacb4f638ad716e743f4a4254c5aa9"}
+wasm-bindgen = "=0.2.130"
+js-sys = "0.3"
+wasm-bindgen-futures = "0.4"
+send_wrapper = {version="0.6",features=["futures"]}

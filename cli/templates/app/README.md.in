@@ -2,4 +2,9 @@
 
 Run `cargo run` in this directory to start the Connect server at the address in `app.json`. In a second shell, use `node client.mjs` to read the public service setting. The response comes from the deployment configuration.
 
-Edit the entity in `proto/app/setting.proto` and run `paydirt gen` to regenerate the standard service contract and Rust bindings. Add domain RPCs in `proto/ext/app/setting_svc.ext.proto`. Implement only the methods you override on `SettingServiceLayer` in `src/core.rs`. Other methods pass to the next service, including the config-backed Get in `src/sink.rs`. The app owns these files and assembles the layers in `src/main.rs`. Use `paydirt gen --check` in CI.
+Edit the entity in `proto/app/setting.proto` and run `paydirt gen` to regenerate the standard service contract and Rust bindings. Add domain RPCs in `proto/ext/app/setting_svc.ext.proto`. Implement only the methods you override on `SettingServiceLayer` in `src/core.rs`. Other methods pass to the next service, including the config-backed Get in `src/sink.rs`. The app owns these files and assembles the layers in `src/lib.rs`. Use `paydirt gen --check` in CI.
+
+
+The native server creates its tables in `paydirt.sqlite3` by default. Set `DATABASE_URL` to a PostgreSQL URL to use that backend. For a tenanted entity, provision a tenant using the local app binary and put its hex ID in the `PAYDIRT_PRINCIPALS` token-to-tenant JSON map. Only the operator with database access can invoke the binary's internal commands. The public Connect services resolve their caller from the bearer token.
+
+`cargo run -- app.Tenant Add '{"alias":"my-team"}'` prints the new tenant with its protobuf JSON (base64) ID. App-owned entities declared in `proto/` receive a generated Diesel sink and registration in the app router. Customize a service by wrapping its typed next service in the app's `storage::Layers` implementation.

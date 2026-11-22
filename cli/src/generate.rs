@@ -110,6 +110,7 @@ fn build(root: &Path, work: &Path) -> Result<()> {
     fs::write(storage.join("tables.rs"), model.diesel_tables()?)?;
     if schema.is_some() {
         crate::policy::generate(work)?;
+        crate::sinks::generate(work)?;
         crate::layers::generate(&work.join("generated/services"))?;
     }
     fs::write(work.join("generated").join(MARKER), STAMP)?;
