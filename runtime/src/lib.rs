@@ -16,6 +16,7 @@ mod notify;
 pub mod outbox;
 mod past;
 mod relations;
+mod seen;
 mod session;
 mod tenancy;
 mod trail;
@@ -271,7 +272,9 @@ impl Store {
         let mut changes = Vec::new();
         self.committed = None;
         let result = self.db.transaction(|db| {
+            let mut seen = seen::Seen::default();
             let mut tx = Transaction {
+                seen: Some(&mut seen),
                 changes: &mut changes,
                 outbox: self.outbox,
                 namer: &*self.namer,
@@ -298,6 +301,7 @@ impl Store {
     }
 }
 pub struct Transaction<'a> {
+    seen: Option<&'a mut seen::Seen>,
     changes: &'a mut Vec<paydirt::watch::Change>,
     outbox: bool,
     namer: &'a dyn naming::Namer,

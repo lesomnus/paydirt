@@ -47,6 +47,7 @@ pub enum Packet {
     },
 }
 pub(crate) struct Session {
+    pub seen: crate::seen::Seen,
     changes: Vec<paydirt::watch::Change>,
     pub id: String,
     pub frame: Frame,
@@ -85,6 +86,7 @@ impl Store {
                     "BEGIN"
                 })?;
                 self.session = Some(Session {
+                    seen: Default::default(),
                     changes: Vec::new(),
                     id,
                     frame,
@@ -110,6 +112,7 @@ impl Store {
                     sets: session.frame.sets.clone(),
                 };
                 let mut tx = Transaction {
+                    seen: (!session.frame.tenant.is_empty()).then_some(&mut session.seen),
                     changes: &mut session.changes,
                     outbox: self.outbox,
                     namer: &*self.namer,
@@ -143,6 +146,7 @@ impl Store {
                         && call.method == "Memberships"
                     {
                         let mut reader = Transaction {
+                            seen: None,
                             changes: tx.changes,
                             outbox: tx.outbox,
                             namer: tx.namer,

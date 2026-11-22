@@ -162,7 +162,7 @@ impl Transaction<'_> {
             return value::bind(f, input);
         }
         let target = self.model.entity(&f.target).map_err(Fault::invalid)?;
-        let row = self.lookup(target, input, false)?;
+        let row = self.reference_row(target, input)?;
         let key = target.key().map_err(Fault::invalid)?;
         value::bind(key, &row[&key.json])
     }
@@ -450,6 +450,9 @@ impl Transaction<'_> {
                 return Err(Fault::missing());
             }
         }
+        if !sets.is_empty() {
+            self.forget_references();
+        }
         let edges_changed = self.write_edges(e, &row[&key.json], req, false)?;
         let updated = self.lookup(e, &reference, false)?;
         if !sets.is_empty() || edges_changed {
@@ -490,6 +493,7 @@ impl Transaction<'_> {
         };
         let erased = self.db.exec(q)? == 1;
         if erased {
+            self.forget_references();
             self.record(e, "Erase", Some(&row), None)?;
         }
         Ok(json!({"erased":erased}))

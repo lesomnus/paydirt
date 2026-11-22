@@ -62,6 +62,7 @@ impl Transaction<'_> {
         }
         let outbox = json!({"actorId":actor,"tenantId":tenant,"method":frame.action,"by":by,"objectId":object});
         let mut recorder = Transaction {
+            seen: None,
             changes: self.changes,
             outbox: self.outbox,
             namer: self.namer,

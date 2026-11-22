@@ -218,6 +218,7 @@ impl Transaction<'_> {
                             )
                         }
                     };
+                    self.forget_references();
                     if self.db.exec(q)? != 1 {
                         return Err(Fault::precondition(
                             "edge changed concurrently or belongs to another owner",

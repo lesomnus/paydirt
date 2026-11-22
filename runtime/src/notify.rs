@@ -180,6 +180,7 @@ impl Transaction<'_> {
         };
         let scope = Scope::Tenant(tenant);
         let mut db = Transaction {
+            seen: None,
             changes: self.changes,
             outbox: self.outbox,
             namer: self.namer,
@@ -399,6 +400,7 @@ impl Transaction<'_> {
         if self.outbox {
             let e = self.owned_entity("OWN_OUTBOX")?.clone();
             let mut queue = Transaction {
+                seen: None,
                 db: self.db,
                 model: self.model,
                 policies: self.policies,
