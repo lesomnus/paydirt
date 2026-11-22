@@ -16,6 +16,7 @@ async-lock = "3"
 async-stream = "0.3"
 futures-timer = {version="3",features=["wasm-bindgen"]}
 futures-channel = "0.3"
+futures-util = "0.3"
 buffa = { version = "=0.8.1", features = ["json"] }
 buffa-types = { version = "=0.8.1", features = ["json"] }
 connectrpc = { version = "=0.8.2", default-features = false, features = ["json"] }
@@ -25,6 +26,7 @@ hex = "0.4"
 paydirt = {git="https://github.com/lesomnus/paydirt",rev="f30cee51d5ca216f2da5e85cc4ca6bbea2fd71ce"}
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+paydirt = {git="https://github.com/lesomnus/paydirt",rev="f30cee51d5ca216f2da5e85cc4ca6bbea2fd71ce",features=["watch-postgres","watch-nats"]}
 paydirt-store = {git="https://github.com/lesomnus/paydirt",rev="f30cee51d5ca216f2da5e85cc4ca6bbea2fd71ce",features=["postgres","sqlite"]}
 connectrpc = {version="=0.8.2",default-features=false,features=["server","client-tls"]}
 buffa-reflect = {version="0.9.2", default-features=false, features=["serde","text-format"]}

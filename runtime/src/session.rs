@@ -47,6 +47,7 @@ pub enum Packet {
     },
 }
 pub(crate) struct Session {
+    changes: Vec<paydirt::watch::Change>,
     pub id: String,
     pub frame: Frame,
     pub failed: Option<Fault>,
@@ -84,6 +85,7 @@ impl Store {
                     "BEGIN"
                 })?;
                 self.session = Some(Session {
+                    changes: Vec::new(),
                     id,
                     frame,
                     failed: None,
@@ -108,6 +110,8 @@ impl Store {
                     sets: session.frame.sets.clone(),
                 };
                 let mut tx = Transaction {
+                    changes: &mut session.changes,
+                    outbox: self.outbox,
                     namer: &*self.namer,
                     db: self.db.driver()?,
                     policies: &self.policies,
@@ -139,6 +143,8 @@ impl Store {
                         && call.method == "Memberships"
                     {
                         let mut reader = Transaction {
+                            changes: tx.changes,
+                            outbox: tx.outbox,
                             namer: tx.namer,
                             db: tx.db,
                             model: tx.model,
@@ -176,11 +182,28 @@ impl Store {
                 } else {
                     db.batch("ROLLBACK")?;
                 }
-                self.session = None;
-                if commit && let Some(err) = failed {
+                let session = self.session.take().expect("validated session");
+                if !commit {
+                    return Ok(Value::Null);
+                }
+                if let Some(err) = failed {
                     return Err(err);
                 }
-                Ok(Value::Null)
+                if session.changes.is_empty() {
+                    return Ok(Value::Null);
+                }
+                let event = paydirt::watch::Event {
+                    actor: session
+                        .frame
+                        .actor
+                        .as_deref()
+                        .and_then(paydirt::format_id)
+                        .unwrap_or_default(),
+                    tenant: paydirt::format_id(&session.frame.tenant).unwrap_or_default(),
+                    method: session.frame.action,
+                    changes: session.changes,
+                };
+                serde_json::to_value(event).map_err(|e| Fault::internal(e.to_string()))
             }
         }
     }

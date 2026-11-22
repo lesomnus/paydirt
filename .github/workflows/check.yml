@@ -7,6 +7,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
+      nats:
+        image: nats:2
+        ports: ["4222:4222"]
       postgres:
         image: postgres:17
         env:
@@ -26,6 +29,9 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: rustup target add wasm32-unknown-unknown
       - run: python3 scripts/test-storage-schema.py
+      - run: cargo test --locked -p paydirt --features watch-postgres,watch-nats --test watch
+        env:
+          NATS_URL: nats://127.0.0.1:4222
       - run: cargo test --locked -p paydirt-store --features sqlite,postgres
       - run: cargo fmt --all --check && cargo test --locked --workspace
       - run: cargo build --locked -p paydirt-robot --features native-server --bin robot-server
