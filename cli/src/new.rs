@@ -1,0 +1,101 @@
+use crate::{Result, generate};
+use std::{
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+};
+
+const TEMPLATE: &[(&str, &str)] = &[
+    ("Cargo.toml", include_str!("../templates/app/Cargo.toml.in")),
+    ("app.json", include_str!("../templates/app/app.json.in")),
+    (
+        "proto/app/setting.proto",
+        include_str!("../templates/app/proto/app/setting.proto"),
+    ),
+    ("buf.yaml", include_str!("../templates/app/buf.yaml")),
+    ("buf.lock", include_str!("../templates/app/buf.lock")),
+    ("src/main.rs", include_str!("../templates/app/src/main.rs")),
+    ("src/core.rs", include_str!("../templates/app/src/core.rs")),
+    ("client.mjs", include_str!("../templates/app/client.mjs")),
+    ("README.md", include_str!("../templates/app/README.md.in")),
+    (".gitignore", "/target/\n"),
+];
+
+fn valid_name(name: &str) -> bool {
+    // The package name is also used as the executable name.
+    name.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+        && ![
+            "test",
+            "build",
+            "deps",
+            "examples",
+            "incremental",
+            "benches",
+        ]
+        .contains(&name)
+}
+fn empty(dir: &Path) -> Result<bool> {
+    for entry in fs::read_dir(dir)? {
+        if entry?.file_name() != ".git" {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+pub fn run(name: &str, dest: &Path) -> Result<()> {
+    if !valid_name(name) {
+        return Err(format!("invalid Cargo application name: {name}").into());
+    }
+    let existed = dest.try_exists()?;
+    if existed && !empty(dest)? {
+        return Err(format!("{} must be an empty directory", dest.display()).into());
+    }
+    let work = tempfile::tempdir()?;
+    for (path, contents) in TEMPLATE {
+        let path = work.path().join(path);
+        fs::create_dir_all(path.parent().unwrap())?;
+        fs::write(path, contents.replace("__APP_NAME__", name))?;
+    }
+    generate::run(work.path(), false)?;
+    // Leave an existing empty directory (even the caller's cwd) in place.
+    // Create each object exclusively, and roll back only paths created by this call.
+    let mut created = Vec::new();
+    let result = (|| {
+        if !existed {
+            fs::create_dir(dest)?;
+            created.push((dest.to_owned(), true));
+        }
+        install(work.path(), dest, &mut created)
+    })();
+    if result.is_err() {
+        for (path, dir) in created.into_iter().rev() {
+            if dir {
+                let _ = fs::remove_dir(path);
+            } else {
+                let _ = fs::remove_file(path);
+            }
+        }
+    }
+    result
+}
+
+fn install(src: &Path, dest: &Path, created: &mut Vec<(PathBuf, bool)>) -> Result<()> {
+    for item in fs::read_dir(src)? {
+        let item = item?;
+        let out = dest.join(item.file_name());
+        if item.file_type()?.is_dir() {
+            fs::create_dir(&out)?;
+            created.push((out.clone(), true));
+            install(&item.path(), &out, created)?;
+        } else {
+            let mut file = fs::File::create_new(&out)?;
+            created.push((out, false));
+            file.write_all(&fs::read(item.path())?)?;
+        }
+    }
+    Ok(())
+}

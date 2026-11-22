@@ -1,11 +1,14 @@
 mod generate;
+mod new;
 use std::{env, path::PathBuf, process::ExitCode};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
-const HELP: &str = "Usage: paydirt gen [--check] [DIRECTORY]";
+const HELP: &str = "Usage: paydirt new NAME [DIRECTORY]\n       paydirt gen [--check] [DIRECTORY]";
 
 fn run(args: &[String]) -> Result<()> {
     match args {
+        [cmd, name] if cmd == "new" => new::run(name, std::path::Path::new(name)),
+        [cmd, name, dir] if cmd == "new" => new::run(name, std::path::Path::new(dir)),
         [help] if help == "--help" || help == "-h" => {
             println!("{HELP}");
             Ok(())

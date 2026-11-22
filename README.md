@@ -16,6 +16,8 @@ The root crate contains the reusable ID and tenant-token primitives. The robot a
 
 Install the CLI with `cargo install --path cli --locked`. Generation uses Buf 1.72, Buffa 0.8.1 (including its packaging plugin), Connect Rust 0.8.2, and the ORM service and Rust plugins. On Linux x86_64, `scripts/install-codegen-linux.sh "$HOME/.local/bin"` installs the pinned plugins. Put that directory and `buf` on your path.
 
+Create a standalone project with `paydirt new inventory` (or `paydirt new inventory .` in an empty directory). In the project run `cargo run`. Run `node client.mjs` in another terminal to query the service setting over Connect. The initial handler reads the deployment name from `app.json`. The server and its assembly are application-owned Rust code.
+
 Place the app's entity declarations in `proto/` with a v2 `buf.yaml` at the project root and pin the dependencies in `buf.lock`. Run `paydirt gen` there or pass the project directory. The CLI first generates standard ORM service contracts, then compiles messages, services and Rust lookup helpers from those contracts. It stages all outputs before replacing its owned `generated/` tree. Use `paydirt gen --check` in CI. The Robot interoperability fixture below still uses its original Buf template.
 
 ## Browser sandbox
