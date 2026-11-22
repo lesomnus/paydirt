@@ -1,0 +1,2 @@
+generated/** linguist-generated=true
+cli/upstream/** linguist-vendored=true

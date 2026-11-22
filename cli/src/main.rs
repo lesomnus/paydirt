@@ -1,5 +1,6 @@
 mod generate;
 mod new;
+mod payday;
 use std::{env, path::PathBuf, process::ExitCode};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
