@@ -71,6 +71,15 @@ struct Config {
 async fn main() -> Result<(), Box<dyn Error>> {
     let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "paydirt.sqlite3".into());
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if let [command, argument] = args.as_slice() && command=="trail" {
+        use paydirt_store::archive_files::Archive;
+        let archive=|dir:&str,key:&str|->Result<Archive,Box<dyn Error>>{Ok(Archive::open(std::env::var(dir)?,&hex::decode(std::env::var(key)?)?)?)};
+        let vault=archive("PAYDIRT_ARCHIVE_DIR","PAYDIRT_ARCHIVE_KEY")?;
+        let export=std::env::var_os("PAYDIRT_EXPORT_DIR").map(|_|archive("PAYDIRT_EXPORT_DIR","PAYDIRT_EXPORT_KEY")).transpose()?;
+        let mut store=paydirt_store::Store::open(&url,MODEL,POLICIES)?;
+        println!("{}",serde_json::to_string(&store.manage_trail(&vault,export.as_ref(),serde_json::from_str(argument)?)?)?);
+        return Ok(())
+    }
     if !args.is_empty() {
         // Preserve the host-only provisioning command. Ordinary lowercase verbs use the deployed API.
         if !matches!(args.as_slice(),[entity,method,_] if entity.contains('.') && method.as_bytes().first().is_some_and(u8::is_ascii_uppercase))
