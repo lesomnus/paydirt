@@ -83,3 +83,5 @@ main.write_text(source.replace(point, """let store=store.with_admission(ADMISSIO
 
 with (app / "src/operator.rs").open("a") as operator:
     operator.write((repo / "tests/fleet/operator-types.rs").read_text())
+
+(app / "resources.json").write_text('{"entities":["app.Cell","app.Robot"],"previous":true}\n')

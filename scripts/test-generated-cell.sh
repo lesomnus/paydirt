@@ -30,7 +30,7 @@ cp "$CELL_PROJECT/src/robot.rs" "$work/original.rs"
 "$repo/target/debug/paydirt" gen "$CELL_PROJECT"
 "$repo/target/debug/paydirt" gen --check "$CELL_PROJECT"
 cmp "$work/original.rs" "$CELL_PROJECT/src/robot.rs"
-cargo build --quiet --manifest-path "$CELL_PROJECT/Cargo.toml"
+cargo build --quiet --features resource-cel --manifest-path "$CELL_PROJECT/Cargo.toml"
 export PAYDIRT_TEST_MOVE=1 CELL_SQLITE_PATH="$work/fleet.sqlite3"
 node generated-cell.mjs
 cargo test --quiet --manifest-path "$CELL_PROJECT/Cargo.toml" --bin fleet operator_tests

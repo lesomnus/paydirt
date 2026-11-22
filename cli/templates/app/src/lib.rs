@@ -1,4 +1,5 @@
 mod core;
+pub mod resource;
 #[path = "../generated/messages/mod.rs"]
 pub mod proto;
 #[path = "../generated/services/mod.rs"]
@@ -31,7 +32,9 @@ pub fn router(database: transport::Database, name: String) -> connectrpc::Router
             }
         }
     }
-    storage::mount(connectrpc::Router::new(), database, &App(name))
+    let subscription = database.clone();
+    let router=storage::mount(connectrpc::Router::new(), database, &App(name));
+    resource::mount(router,subscription)
 }
 
 #[cfg(target_arch = "wasm32")]

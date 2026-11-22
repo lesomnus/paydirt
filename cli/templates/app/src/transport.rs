@@ -231,7 +231,7 @@ pub struct Database {
     #[cfg(not(target_arch = "wasm32"))]
     rate: Option<Arc<paydirt_server::Limiter>>,
     capture_origin: bool,
-    broker: Option<Arc<dyn Broker>>,
+    pub(crate) broker: Option<Arc<dyn Broker>>,
     principals: Arc<HashMap<String, Principal>>,
     lock: Arc<async_lock::Mutex<()>>,
     general_writes: bool,
@@ -526,7 +526,7 @@ impl Database {
             ));
         }
         #[cfg(not(target_arch = "wasm32"))]
-        if let Some(limiter) = &self.rate {
+        if let Some(limiter) = &self.rate && cost>0 {
             let tenant = if frame.tenant.is_empty() {
                 frame.account.as_deref().unwrap_or_default()
             } else {

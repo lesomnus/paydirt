@@ -1,3 +1,4 @@
+import {resourceCases} from "./generated-resource.js";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { spawn,execFileSync } from "node:child_process";
@@ -84,6 +85,9 @@ try {
         const robotType=createFileRegistry(descriptors).getService("app.RobotService");
         const typed=createClient(robotType,createConnectTransport({baseUrl,useBinaryFormat:true}));
         const holder=createClient(createFileRegistry(descriptors).getService("app.HolderService"),createConnectTransport({baseUrl,useBinaryFormat:true}));
+        const registry=createFileRegistry(descriptors);
+        const resources=createClient(registry.getService("payday.ResourceService"),createConnectTransport({baseUrl,useBinaryFormat:true}));
+        await resourceCases(registry,resources,cell,typed,own,foreign,primary.id,other.id,true);
         await accountCases(holder,typed,tenantNames);
         const revealed=await typed.reveal({},own);
         assert.equal(revealed.alias,"public:inner:outer");

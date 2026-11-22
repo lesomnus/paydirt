@@ -9,6 +9,7 @@ crate-type = ["rlib", "cdylib"]
 
 [features]
 client = ["connectrpc/client"]
+resource-cel=["paydirt-store/resource-cel"]
 
 [dependencies]
 base64="0.22"
@@ -23,12 +24,12 @@ connectrpc = { version = "=0.8.2", default-features = false, features = ["json"]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 hex = "0.4"
-paydirt = {git="https://github.com/lesomnus/paydirt",rev="b53a750f95a96340b1b08e3cefe457abc219bcf8"}
+paydirt = {git="https://github.com/lesomnus/paydirt",rev="f2bcc674fd143bf7ad9e4a39bf1fcfdabd258dd6"}
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-paydirt-server = {git="https://github.com/lesomnus/paydirt",rev="b53a750f95a96340b1b08e3cefe457abc219bcf8"}
-paydirt = {git="https://github.com/lesomnus/paydirt",rev="b53a750f95a96340b1b08e3cefe457abc219bcf8",features=["watch-postgres","watch-nats"]}
-paydirt-store = {git="https://github.com/lesomnus/paydirt",rev="b53a750f95a96340b1b08e3cefe457abc219bcf8",features=["postgres","sqlite","workers"]}
+paydirt-server = {git="https://github.com/lesomnus/paydirt",rev="f2bcc674fd143bf7ad9e4a39bf1fcfdabd258dd6"}
+paydirt = {git="https://github.com/lesomnus/paydirt",rev="f2bcc674fd143bf7ad9e4a39bf1fcfdabd258dd6",features=["watch-postgres","watch-nats"]}
+paydirt-store = {git="https://github.com/lesomnus/paydirt",rev="f2bcc674fd143bf7ad9e4a39bf1fcfdabd258dd6",features=["postgres","sqlite","workers"]}
 connectrpc = {version="=0.8.2",default-features=false,features=["server","client-tls"]}
 buffa-reflect = {version="0.9.2", default-features=false, features=["serde","text-format"]}
 gtmpl = "0.7.1"
@@ -41,15 +42,15 @@ uuid="1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-paydirt-store = {git="https://github.com/lesomnus/paydirt",rev="b53a750f95a96340b1b08e3cefe457abc219bcf8"}
+paydirt-store = {git="https://github.com/lesomnus/paydirt",rev="f2bcc674fd143bf7ad9e4a39bf1fcfdabd258dd6"}
 wasm-bindgen = "=0.2.130"
 js-sys = "0.3"
 wasm-bindgen-futures = "0.4"
 send_wrapper = {version="0.6",features=["futures"]}
-drpc-rs = { git = "https://github.com/lesomnus/drpc-rs", rev = "b16f80c57663205c3d812aaea8a082db101e7d74" }
+drpc-rs = { git = "https://github.com/lesomnus/drpc-rs", rev = "4b8d42cbab7fe29d78eba73f9f7d2c6edd560e12" }
 web-sys = { version = "0.3", features = ["MessagePort"] }
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-paydirt-test = {git="https://github.com/lesomnus/paydirt",rev="b53a750f95a96340b1b08e3cefe457abc219bcf8"}
+paydirt-test = {git="https://github.com/lesomnus/paydirt",rev="f2bcc674fd143bf7ad9e4a39bf1fcfdabd258dd6"}
 chrono = "0.4"
 
 [profile.release]
