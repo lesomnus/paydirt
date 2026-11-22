@@ -205,7 +205,11 @@ impl Transaction<'_> {
                 "SELECT '1' AS value FROM pg_advisory_xact_lock(102774192,51)",
             ))?;
         }
-        self.db.batch(TABLES)
+        self.db.batch(TABLES)?;
+        if self.db.dialect() == Dialect::Postgres {
+            self.db.batch(r#"CREATE INDEX IF NOT EXISTS paydirt_trail_owed_seek ON paydirt_trail_owed (id COLLATE "C")"#)?;
+        }
+        Ok(())
     }
     /// Queue a subject erasure in the same transaction as the host's business write.
     /// The maintenance pass services the obligation after commit and respects holds.
@@ -269,8 +273,13 @@ impl Transaction<'_> {
                 Dialect::Postgres => "json_build_array(id,doc)::text",
                 Dialect::Sqlite => "json_array(id,doc)",
             };
+            let id = if d == Dialect::Postgres {
+                r#"id COLLATE "C""#
+            } else {
+                "id COLLATE BINARY"
+            };
             q.sql = format!(
-                "SELECT {projection} AS value FROM paydirt_trail_owed WHERE id>{start} AND id<{end} ORDER BY id LIMIT 256"
+                "SELECT {projection} AS value FROM paydirt_trail_owed WHERE {id}>{start} AND {id}<{end} ORDER BY {id} LIMIT 256"
             );
             let page = self.db.rows(q)?;
             let count = page.len();
