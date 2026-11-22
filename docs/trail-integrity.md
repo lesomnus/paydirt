@@ -21,3 +21,8 @@ For a record shared by several tenants, the online window and final destruction 
 Run `APP trail-scan app.Cell` to check current rows and the latest recorded digest of each object, including a recorded object that disappeared. Reports include the number checked, heads found in the archive, skipped-kind reasons and per-object findings. `APP trail-record app.Cell '{"ids":["UUID"],"action":"/ops/Reviewed"}'` accepts the current state as a distinct signed act. Use `"erased":true` for an absent object with a prior audit line. A host may call `Transaction::record_objects` inside its business transaction.
 
 Configure the archive directory to include it in `trail-scan` and `trail-row`. New signed objects bind the digest evidence and the hash of the encrypted file to the manifest signature. They can be checked with the configured signing identity and witness while the archive decryption key is withheld. Checking older objects without signed evidence requires their archive key.
+
+
+Set `PAYDIRT_AUDIT_PREVIOUS_KEYS` to a JSON list of hexadecimal verification keys after rotation. `PAYDIRT_AUDIT_RETIRED` accepts released eight-byte fingerprints in the same format. `PAYDIRT_AUDIT_SINCE` marks the RFC 3339 start of digesting. A scan rejects a start time later than an authenticated digest. Reports distinguish retired keys, unavailable keys, forgotten seals and rows written before sealing started.
+
+When maintenance destroys the last evidence of a live row, it carries the authenticated digest into a new audit entry before deleting the old evidence. A carry preserves the evidence of the original state, including a forgotten seal. A subsequent business write records the new state.
