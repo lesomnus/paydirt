@@ -7,6 +7,9 @@ import { createClient,Code } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 
 import { exerciseTenancy } from "./generated-tenancy.mjs";
+import {queryScenario} from "./generated-query.js";
+import {goReference} from "./compare-queries.mjs";
+import {writeFile} from "node:fs/promises";
 import { exerciseMove } from "./generated-move.js";
 const app = process.env.GENERATED_APP;
 const [primary,other] = Array.from({length:2},()=>{
@@ -21,6 +24,8 @@ const schema="pd_accept_"+randomBytes(10).toString("hex");
 const ddl=sql=>execFileSync("psql",[process.env.DATABASE_URL,"-Xq","-v","ON_ERROR_STOP=1","-c",sql],{stdio:"pipe"});
 const tenantRef=id=>({key:{case:"id",value:id}});
 const opts=token=>({headers:{authorization:"Bearer "+token}});
+const reference=process.env.PAYDIRT_TEST_MOVE==="1" && process.env.PAYDIRT_GO_REFERENCE ? await goReference(sandbox) : undefined;
+if(reference)await writeFile(process.env.CELL_PROJECT+"/query-reference.json",JSON.stringify(reference));
 let created = false;
 try {
   for(const engine of ["postgres","sqlite"]){
@@ -59,6 +64,8 @@ try {
       await assert.rejects(cell.get({ref},own),e=>e.code===Code.NotFound);
       if(process.env.PAYDIRT_TEST_MOVE==="1"){
         const robots=createClient(RobotService,createConnectTransport({baseUrl,useBinaryFormat:true}));
+        const report=await queryScenario(robots,primary.id,own);
+        if(reference){assert.deepEqual(report,reference);console.log(engine,"matches the Go reference for List and Watch",report);}
         await exerciseMove(robots,cell,own,foreign,opts("represented"),opts("reader"),primary.id,other.id);
         await exerciseTenancy(services,createConnectTransport({baseUrl,useBinaryFormat:true}),primary,other,allowedSet);
         console.log(engine,"served the user-written Move and enforced the dispatched method grant");

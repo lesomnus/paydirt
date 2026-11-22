@@ -263,6 +263,58 @@ impl Database {
         serde_json::from_value(out)
             .map_err(|_| ConnectError::internal("invalid response from storage"))
     }
+    async fn read(
+        &self,
+        ctx: &RequestContext,
+        entity: &str,
+        op: &str,
+        request: &Value,
+    ) -> Result<Value, ConnectError> {
+        let mut ctx = ctx.clone();
+        let guard = self
+            .begin(&mut ctx)
+            .await?
+            .ok_or_else(|| ConnectError::unauthenticated("watch requires a caller"))?;
+        let response = self.rpc(&ctx, entity, op, request).await;
+        guard.finish(response.is_ok()).await?;
+        response
+    }
+
+    pub async fn watch<I: Serialize, O: DeserializeOwned + Send + 'static>(
+        &self,
+        ctx: RequestContext,
+        entity: &'static str,
+        request: &I,
+    ) -> connectrpc::ServiceResult<connectrpc::ServiceStream<O>> {
+        let request = serde_json::to_value(request)
+            .map_err(|_| ConnectError::invalid_argument("invalid watch request"))?;
+        let start = self.read(&ctx, entity, "$watch_start", &request).await?;
+        let db = self.clone();
+        let stream = async_stream::try_stream! {
+            let mut seen=std::collections::HashSet::new();
+            for page in start["pages"].as_array().into_iter().flatten(){
+                for item in page["items"].as_array().into_iter().flatten(){seen.insert(item["id"].as_str().unwrap().to_owned());}
+                yield serde_json::from_value(page.clone()).map_err(|_|ConnectError::internal("invalid watch snapshot"))?;
+            }
+            let mut poll=serde_json::json!({"ids":start["ids"],"revision":start["revision"]});
+            loop {
+                let batch=db.read(&ctx,entity,"$watch_poll",&poll).await?;
+                poll["revision"]=batch["revision"].clone();
+                let mut items=Vec::new();
+                for item in batch["items"].as_array().into_iter().flatten(){
+                    let id=item["id"].as_str().unwrap();
+                    if item.get("value").is_some(){seen.insert(id.to_owned());}
+                    else if !seen.remove(id){continue;}
+                    items.push(item);
+                }
+                if !items.is_empty(){
+                    yield serde_json::from_value(serde_json::json!({"items":items})).map_err(|_|ConnectError::internal("invalid watch response"))?;
+                }
+                futures_timer::Delay::new(std::time::Duration::from_millis(80)).await;
+            }
+        };
+        connectrpc::Response::stream_ok(stream)
+    }
     // Enqueue synchronously. A dropped RPC always queues its rollback before the lock passes to the next call.
     #[cfg(not(target_arch = "wasm32"))]
     fn send(&self, packet: Packet) -> Reply {

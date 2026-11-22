@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { cp,writeFile } from "node:fs/promises";
+import { cp,readFile,writeFile } from "node:fs/promises";
 import { join,resolve } from "node:path";
 import { createServer } from "vite";
 import { chromium } from "playwright";
 
 const root=join(process.env.CELL_PROJECT,"sandbox");
 await cp(resolve("upstream/internal/apptest/ts/gen"),join(root,"test-client"),{recursive:true});
+await cp(resolve("generated-query.js"),join(root,"query.js"));
 await cp(resolve("generated-move.js"),join(root,"moves.js"));
 await writeFile(join(root,"harness.js"),`
 import { openSandbox } from "./client.js";
@@ -57,14 +58,20 @@ try{
       if(code!==5)throw Error("another tenant could reach the Cell");
       if(move){
         const {exerciseMove}=await import("/moves.js");
+        const {queryScenario}=await import("/query.js");
+        const report=await queryScenario(app.robots,bytes,opts(a));
         const otherBytes=Uint8Array.from(other.match(/../g),s=>parseInt(s,16));
-        return {cell:Array.from(cell.id),...await exerciseMove(app.robots,app.client,opts(a),opts(b),opts("represented"),opts("reader"),bytes,otherBytes)};
+        return {report,cell:Array.from(cell.id),...await exerciseMove(app.robots,app.client,opts(a),opts(b),opts("represented"),opts("reader"),bytes,otherBytes)};
       }
       return {cell:Array.from(cell.id)};
     }finally{app.close()}
   };
   const id=await page.evaluate(check,{tenants,move:process.env.PAYDIRT_TEST_MOVE==="1"});
   assert.equal(id.cell[9],10);
+  if(id.report && process.env.PAYDIRT_GO_REFERENCE){
+    assert.deepEqual(id.report,JSON.parse(await readFile(join(process.env.CELL_PROJECT,"query-reference.json"),"utf8")));
+    console.log("Browser dRPC List and Watch match the Go reference");
+  }
   await page.reload();
   assert.equal(await page.evaluate(check,{tenants,id}),"persisted");
   console.log("Generated app served upstream CellService on dRPC and reloaded its SQLite row after both Workers restarted.");

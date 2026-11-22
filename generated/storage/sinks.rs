@@ -364,6 +364,16 @@ mod sink_app_robot {
                 self.0.rpc(&ctx, "app.Robot", "Get", &request.to_owned_message()).await?,
             )
         }
+        async fn list(
+            &self,
+            _: &N,
+            ctx: RequestContext,
+            request: ServiceRequest<'_, crate::proto::r#app::r#RobotListRequest>,
+        ) -> ServiceResult<crate::proto::r#app::r#RobotListResponse> {
+            Response::ok(
+                self.0.rpc(&ctx, "app.Robot", "List", &request.to_owned_message()).await?,
+            )
+        }
         async fn patch(
             &self,
             _: &N,
@@ -376,6 +386,16 @@ mod sink_app_robot {
                     .rpc(&ctx, "app.Robot", "Patch", &request.to_owned_message())
                     .await?,
             )
+        }
+        async fn watch(
+            &self,
+            _: &N,
+            ctx: RequestContext,
+            request: ServiceRequest<'_, crate::proto::r#app::r#RobotWatchRequest>,
+        ) -> ServiceResult<
+            ::connectrpc::ServiceStream<crate::proto::r#app::r#RobotWatchResponse>,
+        > {
+            self.0.watch(ctx, "app.Robot", &request.to_owned_message()).await
         }
     }
     impl<
