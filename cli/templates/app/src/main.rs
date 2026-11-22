@@ -40,8 +40,15 @@ impl Watch {
     }
 }
 #[derive(Deserialize)]
+struct Meter {
+    directory: std::path::PathBuf,
+    every_ms: Option<u64>,
+    retry_ms: Option<u64>,
+}
+#[derive(Deserialize)]
 struct Config {
     watch: Watch,
+    meter: Option<Meter>,
     #[serde(default)]
     worker_lease: Option<String>,
     listen: std::net::SocketAddr,
@@ -125,6 +132,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         eprintln!("outbox drain failed: {err}");
                     }
                 }
+            }
+        })?;
+    }
+    if let Some(meter) = config.meter {
+        let every = Duration::from_millis(meter.every_ms.unwrap_or(86_400_000));
+        let retry = Duration::from_millis(meter.retry_ms.unwrap_or(60_000));
+        if every.is_zero() || retry.is_zero() || meter.directory.as_os_str().is_empty() {
+            return Err("meter intervals and directory are required".into());
+        }
+        let url = url.clone();
+        workers.add("payday.meter.read", Placement::Singleton, move |stop| {
+            let url = url.clone();
+            let dir = meter.directory.clone();
+            async move {
+                let mut store =
+                    paydirt_store::Store::open(&url, MODEL, POLICIES).map_err(|e| e.to_string())?;
+                paydirt_store::meter::periodic(stop, every, retry, |pass| {
+                    pass.run(&mut store, |rows| {
+                        paydirt_store::meter::directory_sink(&dir, rows)
+                    })
+                })
+                .await
+                .map_err(|e| e.to_string())
             }
         })?;
     }

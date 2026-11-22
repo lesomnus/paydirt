@@ -32,7 +32,7 @@ jobs:
       - run: cargo test --locked -p paydirt --features watch-postgres,watch-nats --test watch --test spin
         env:
           NATS_URL: nats://127.0.0.1:4222
-      - run: cargo test --locked -p paydirt-store --features sqlite,postgres
+      - run: cargo test --locked -p paydirt-store --features sqlite,postgres,workers
       - run: cargo fmt --all --check && cargo test --locked --workspace
       - run: cargo build --locked -p paydirt-robot --features native-server --bin robot-server
       - name: Build service and storage workers
