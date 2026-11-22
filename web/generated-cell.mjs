@@ -85,6 +85,15 @@ try {
         const typed=createClient(robotType,createConnectTransport({baseUrl,useBinaryFormat:true}));
         const holder=createClient(createFileRegistry(descriptors).getService("app.HolderService"),createConnectTransport({baseUrl,useBinaryFormat:true}));
         await accountCases(holder,typed,tenantNames);
+        const revealed=await typed.reveal({},own);
+        assert.equal(revealed.alias,"public:inner:outer");
+        assert.equal(revealed.secret.length,0);
+        const frames=[];
+        for await (const item of typed.revealStream({},own)) {
+          assert.equal(item.secret.length,0);
+          frames.push(item.alias);
+        }
+        assert.deepEqual(frames,["public:inner:outer","public:inner:outer"]);
         await billingCases(app,process.env.CELL_PROJECT,env,typed,primary,other);
         const {violations} = await sandbox.ssrLoadModule("/upstream/ts/src/pderr/index.ts");
         await assert.rejects(typed.renamePair({},own),error=>{

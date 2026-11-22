@@ -28,8 +28,12 @@ copyfile(repo / "tests/fleet/readings.rs", app / "src/readings.rs")
 copyfile(repo / "tests/fleet/robot.rs", app / "src/robot.rs")
 lib = app / "src/lib.rs"
 source = lib.read_text()
-source = "mod readings;\nmod robot;\n" + source.replace("struct App(String);", "struct App(String, storage::Next);")
+copyfile(repo / "tests/fleet/interceptors.rs", app / "src/interceptors.rs")
+source = "mod interceptors;\nmod readings;\nmod robot;\n" + source.replace("struct App(String);", "struct App(String, storage::Next);")
 source = source.replace("impl storage::Layers for App {", """impl storage::Layers for App {
+        fn interceptors(&self) -> storage::intercept::Layer {
+            interceptors::layers()
+        }
         fn app_computed_reading(&self) -> impl services::app::ComputedReadingService {
             readings::PublicReadings
         }
@@ -41,7 +45,7 @@ source = source.replace("database, &App(name)", "database.clone(), &App(name, st
 copyfile(repo / "tests/fleet/invitation.proto", app / "proto/app/invitation.proto")
 copyfile(repo / "tests/fleet/pair.rs", app / "src/pair.rs")
 overlay = app / "proto/ext/app/robot_svc.ext.proto"
-overlay.write_text(overlay.read_text().replace("service RobotService {", "service RobotService {\n  rpc InFlight(StreamNumber) returns (StreamNumber);\n  rpc Pause(StreamNumber) returns (StreamNumber);\n  rpc Collect(stream StreamNumber) returns (StreamNumber);\n  rpc Converse(stream StreamNumber) returns (stream StreamNumber);\n  rpc RenamePair(RobotRenamePairRequest) returns (Robot);\n  rpc Invited(RobotAllowanceRequest) returns (InvitationCount) { option (payday.method) = {account:{}}; }\n  rpc Allowance(RobotAllowanceRequest) returns (RobotAllowanceResponse);") + "\n" + (repo / "tests/fleet/pair.proto").read_text())
+overlay.write_text(overlay.read_text().replace("service RobotService {", "service RobotService {\n  rpc Reveal(StreamNumber) returns (Robot);\n  rpc RevealStream(StreamNumber) returns (stream Robot);\n  rpc InFlight(StreamNumber) returns (StreamNumber);\n  rpc Pause(StreamNumber) returns (StreamNumber);\n  rpc Collect(stream StreamNumber) returns (StreamNumber);\n  rpc Converse(stream StreamNumber) returns (stream StreamNumber);\n  rpc RenamePair(RobotRenamePairRequest) returns (Robot);\n  rpc Invited(RobotAllowanceRequest) returns (InvitationCount) { option (payday.method) = {account:{}}; }\n  rpc Allowance(RobotAllowanceRequest) returns (RobotAllowanceResponse);") + "\n" + (repo / "tests/fleet/pair.proto").read_text())
 source = "mod pair;\n" + source.replace("services::app::RobotServiceOverlay { next, layer: robot::Fleet(self.1.clone()) }", """let core=services::app::RobotServiceOverlay { next, layer: robot::Fleet(self.1.clone()) };
             services::app::RobotServiceOverlay { next:core, layer:pair::Pair(self.1.clone()) }""")
 lib.write_text(source)

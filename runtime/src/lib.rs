@@ -18,6 +18,7 @@ mod notify;
 pub mod outbox;
 mod past;
 mod relations;
+pub mod secrets;
 mod seen;
 mod session;
 mod tenancy;
