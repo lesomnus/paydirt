@@ -187,6 +187,7 @@ pub(crate) fn deployment(tenant: Vec<u8>, action: &str) -> Frame {
         topics: Default::default(),
         caller: None,
         caller_tenant: None,
+        presence: None,
         tenants: None,
         sets: None,
         trace: vec![],

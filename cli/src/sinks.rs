@@ -328,9 +328,21 @@ pub fn generate(work: &Path) -> Result<()> {
                     "authorize(ctx,{name:?},{rpc:?},self.public.contains(&{action:?}),{direct},{account})"
                 )
             };
+            let capture = if method["client_stream"] == true {
+                String::new()
+            } else {
+                format!("let ctx=Database::presence_request(ctx,||{arg}.to_owned_message())?;")
+            };
+            let deliver = if method["server_stream"] == true {
+                format!(
+                    "let response=next.{fun}(ctx.clone(),{arg}).await?;Ok(response.map_body(|body|Database::enforce_presence(&ctx,body)))"
+                )
+            } else {
+                format!("next.{fun}(ctx,{arg}).await")
+            };
             writeln!(
                 gate,
-                "{sig} {{async move {{let ctx=self.db.{authorize}.await?;next.{fun}(ctx,{arg}).await}}}}"
+                "{sig} {{async move {{{capture}let ctx=self.db.{authorize}.await?;{deliver}}}}}"
             )?;
             if method["server_stream"] == false && method["client_stream"] == false {
                 writeln!(

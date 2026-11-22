@@ -90,6 +90,9 @@ impl Transaction<'_> {
         if let Some(id) = &frame.caller {
             audit["callerId"] = value::encoded(id)
         }
+        if let Some(reference) = &frame.presence {
+            audit["presence"] = json!(reference);
+        }
         if let Some(id) = &frame.caller_tenant {
             audit["callerTenantId"] = value::encoded(id)
         }
