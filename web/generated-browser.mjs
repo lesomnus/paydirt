@@ -7,15 +7,20 @@ import { chromium } from "playwright";
 
 const root=join(process.env.CELL_PROJECT,"sandbox");
 await cp(resolve("upstream/internal/apptest/ts/gen"),join(root,"test-client"),{recursive:true});
+await cp(resolve("generated-pair.js"),join(root,"pair.js"));
 await cp(resolve("generated-query.js"),join(root,"query.js"));
 await cp(resolve("generated-move.js"),join(root,"moves.js"));
 await writeFile(join(root,"harness.js"),`
 import { openSandbox } from "./client.js";
+import { fromBinary, createFileRegistry } from "@bufbuild/protobuf";
+import {FileDescriptorSetSchema} from "@bufbuild/protobuf/wkt";
 import { CellService, RobotService } from "./test-client/app/robot_svc_pb.ts";
 import {createClient} from "@connectrpc/connect";
 export async function open(principals){
   const sandbox=await openSandbox(principals,"paydirt",{allowGeneralWrites:true});
-  return {robots:createClient(RobotService,sandbox.link.transport),client:createClient(CellService,sandbox.link.transport),close:()=>sandbox.close()};
+  const bytes=new Uint8Array(await (await fetch("./pkg/descriptors.binpb")).arrayBuffer());
+  const robot=createFileRegistry(fromBinary(FileDescriptorSetSchema,bytes)).getService("app.RobotService");
+  return {typed:robot && createClient(robot,sandbox.link.transport),robots:createClient(RobotService,sandbox.link.transport),client:createClient(CellService,sandbox.link.transport),close:()=>sandbox.close()};
 }
 `);
 const server=await createServer({root,optimizeDeps:{entries:["index.html","harness.js"]},server:{hmr:false,host:"127.0.0.1",port:0},logLevel:"error"});
@@ -57,6 +62,8 @@ try{
       try {await app.client.get({ref},opts(b))}catch(e){code=e.code}
       if(code!==5)throw Error("another tenant could reach the Cell");
       if(move){
+        const {runPair}=await import("/pair.js");
+        await runPair(app.typed,opts(a),bytes);
         const {exerciseMove}=await import("/moves.js");
         const {queryScenario}=await import("/query.js");
         const report=await queryScenario(app.robots,bytes,opts(a));

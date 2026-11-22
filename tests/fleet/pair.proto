@@ -1,0 +1,6 @@
+message RobotRenamePairRequest {
+  RobotRef first = 1;
+  string first_alias = 2;
+  RobotRef second = 3;
+  string second_alias = 4;
+}
