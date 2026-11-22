@@ -3,6 +3,7 @@ mod core;
 mod proto;
 #[path = "../generated/services/mod.rs"]
 mod services;
+mod sink;
 mod orm {
     include!("../generated/orm/app/setting_svc.g.orm.rs");
 }
@@ -25,8 +26,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Err(std::env::VarError::NotPresent) => config.listen,
         Err(err) => return Err(err.into()),
     };
-    let service = Arc::new(core::Settings {
-        name: config.service_name,
+    use services::app::{SettingServiceOverlay, SettingServiceUnimplemented};
+    let settings = SettingServiceOverlay {
+        next: SettingServiceUnimplemented,
+        layer: sink::Settings {
+            name: config.service_name,
+        },
+    };
+    let service = Arc::new(SettingServiceOverlay {
+        next: settings,
+        layer: core::Core,
     });
     let router = orm::register_setting_service(Router::new(), service);
     Server::new(router)

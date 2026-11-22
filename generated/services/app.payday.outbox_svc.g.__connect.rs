@@ -282,3 +282,4 @@ where
         &mut self.config
     }
 }
+include!("app.payday.outbox_svc.g.__layers.rs");

@@ -99,6 +99,9 @@ fn build(root: &Path, work: &Path) -> Result<()> {
         write_file(&dest, &bytes)?;
     }
     buf(work, include_str!("../templates/bindings.yaml"))?;
+    if schema.is_some() {
+        crate::layers::generate(&work.join("generated/services"))?;
+    }
     fs::write(work.join("generated").join(MARKER), STAMP)?;
     Ok(())
 }

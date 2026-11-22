@@ -24,6 +24,9 @@ struct Robots {
     principals: paydirt::tenant::TenantTokens,
 }
 
+struct Core;
+impl<N: services::app::RobotService> services::app::RobotServiceLayer<N> for Core {}
+
 pub fn router(backend: Backend, config: &str) -> Result<Router, String> {
     let pairs: HashMap<String, String> = serde_json::from_str(config).map_err(|e| e.to_string())?;
     let mut principals = HashMap::new();
@@ -34,9 +37,12 @@ pub fn router(backend: Backend, config: &str) -> Result<Router, String> {
     let principals = paydirt::tenant::TenantTokens::new(principals, 1)?;
     Ok(orm::register_robot_service(
         Router::new(),
-        Arc::new(Robots {
-            backend,
-            principals,
+        Arc::new(services::app::RobotServiceOverlay {
+            next: Robots {
+                backend,
+                principals,
+            },
+            layer: Core,
         }),
     ))
 }

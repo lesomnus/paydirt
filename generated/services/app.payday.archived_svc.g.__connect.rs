@@ -282,3 +282,4 @@ where
         &mut self.config
     }
 }
+include!("app.payday.archived_svc.g.__layers.rs");

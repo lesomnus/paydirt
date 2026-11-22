@@ -1,4 +1,5 @@
 mod generate;
+mod layers;
 mod new;
 mod payday;
 use std::{env, path::PathBuf, process::ExitCode};
