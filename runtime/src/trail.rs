@@ -11,13 +11,14 @@ impl Transaction<'_> {
         before: Option<&Value>,
         after: Option<&Value>,
     ) -> Result<()> {
+        let row = after
+            .or(before)
+            .ok_or_else(|| Fault::internal("missing changed row"))?;
+        self.changed(e, row, method)?;
         let Some(frame) = self.frame else {
             return Ok(());
         };
         let p = &self.policies[&e.name].entity;
-        let row = after
-            .or(before)
-            .ok_or_else(|| Fault::internal("missing changed row"))?;
         let key = e.key().map_err(Fault::internal)?;
         let object = &row[&key.json];
         let actor = value::encoded(frame.actor.as_deref().unwrap_or(&[0; 16]));

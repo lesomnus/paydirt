@@ -1,11 +1,13 @@
 //! Transactional entity storage for generated Payday applications.
 mod crud;
 mod driver;
+mod list;
 mod migrate;
 mod session;
 mod tenancy;
 mod trail;
 mod value;
+mod watch;
 pub use driver::Connection;
 use driver::Driver;
 use paydirt_model::Model;
@@ -73,7 +75,10 @@ impl Store {
         let policies =
             serde_json::from_str(policy_json).map_err(|e| Fault::invalid(e.to_string()))?;
         let mut db = Connection::open(url)?;
-        db.transaction(|tx| migrate::install(tx, &model))?;
+        db.transaction(|tx| {
+            migrate::install(tx, &model)?;
+            watch::install(tx)
+        })?;
         Ok(Self {
             db,
             session: None,

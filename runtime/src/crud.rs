@@ -17,7 +17,7 @@ impl Transaction<'_> {
             .and_then(Entity::key)
             .map_err(Fault::invalid)
     }
-    fn project_sql(&self, e: &Entity) -> Result<String> {
+    pub(crate) fn project_sql(&self, e: &Entity) -> Result<String> {
         let d = self.db.dialect();
         let mut cols = Vec::new();
         for f in e.fields.iter().filter(|f| f.is_column()) {
@@ -41,7 +41,7 @@ impl Transaction<'_> {
             format!("json_array({cols})")
         })
     }
-    fn decode_row(&self, e: &Entity, row: &str) -> Result<Value> {
+    pub(crate) fn decode_row(&self, e: &Entity, row: &str) -> Result<Value> {
         let values: Vec<Option<String>> =
             serde_json::from_str(row).map_err(|e| Fault::internal(e.to_string()))?;
         let mut out = Object::new();
@@ -77,7 +77,7 @@ impl Transaction<'_> {
             quote(&target.key().map_err(Fault::invalid)?.column())
         ))
     }
-    fn wall(&self, e: &Entity, q: &mut Query) -> Result<Vec<String>> {
+    pub(crate) fn wall(&self, e: &Entity, q: &mut Query) -> Result<Vec<String>> {
         let mut parts = Vec::new();
         if let Some(f) = e.erased() {
             parts.push(format!("r.{} IS NULL", quote(&f.column())))
@@ -157,7 +157,7 @@ impl Transaction<'_> {
         parts.push(format!("({})", any.join(" OR ")));
         Ok(parts)
     }
-    fn resolved(&mut self, f: &Field, input: &Value) -> Result<Bind> {
+    pub(crate) fn resolved(&mut self, f: &Field, input: &Value) -> Result<Bind> {
         if f.target.is_empty() {
             return value::bind(f, input);
         }
@@ -166,7 +166,11 @@ impl Transaction<'_> {
         let key = target.key().map_err(Fault::invalid)?;
         value::bind(key, &row[&key.json])
     }
-    fn key_parts<'a>(&self, e: &'a Entity, key: &'a Value) -> Result<Vec<(&'a Field, &'a Value)>> {
+    pub(crate) fn key_parts<'a>(
+        &self,
+        e: &'a Entity,
+        key: &'a Value,
+    ) -> Result<Vec<(&'a Field, &'a Value)>> {
         let o = key
             .as_object()
             .filter(|o| o.len() == 1)
@@ -432,6 +436,23 @@ impl Transaction<'_> {
                     .collect::<Result<Vec<_>>>()?;
                 Ok(json!({"items":rows}))
             }
+            "$watch_start"
+                if self
+                    .policies
+                    .get(&e.name)
+                    .is_some_and(|p| p.entity.get("watch").is_some()) =>
+            {
+                self.watch_start(e, req)
+            }
+            "$watch_poll"
+                if self
+                    .policies
+                    .get(&e.name)
+                    .is_some_and(|p| p.entity.get("watch").is_some()) =>
+            {
+                self.watch_poll(e, req)
+            }
+            "List" => self.list(e, req),
             "Get" => {
                 let row = self.lookup(e, &req["ref"], false)?;
                 self.image(e, row, &req["select"])
