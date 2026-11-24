@@ -47,6 +47,9 @@ jobs:
       - run: scripts/test-gen.sh && scripts/test-new.sh && scripts/test-project-cli.sh
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/app-target
+      - run: scripts/test-read-resources.sh
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/app-target
       - name: Install browser and Worker build tools
         run: |
           rustup target add wasm32-unknown-unknown
