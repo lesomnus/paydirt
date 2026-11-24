@@ -100,9 +100,6 @@ pub(crate) fn build(root: &Path, work: &Path) -> Result<()> {
     buf(work, include_str!("../templates/bindings.yaml"))?;
     let storage = work.join("generated/storage");
     let model = paydirt_model::Model::parse(&fs::read(storage.join("model.json"))?)?;
-    if schema.as_ref().is_some_and(|s| !s.entities) && !model.entities.is_empty() {
-        return Err("entities: false permits computed resources, not stored ORM entities".into());
-    }
     for (file, dialect) in [
         ("postgres.sql", paydirt_model::Dialect::Postgres),
         ("sqlite.sql", paydirt_model::Dialect::Sqlite),
@@ -113,6 +110,7 @@ pub(crate) fn build(root: &Path, work: &Path) -> Result<()> {
     if schema.is_some() {
         crate::policy::generate(work)?;
         crate::layers::generate(&work.join("generated/services"))?;
+        crate::server::generate(work)?;
         crate::sinks::generate(work)?;
     }
     fs::write(work.join("generated").join(MARKER), STAMP)?;

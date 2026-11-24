@@ -90,23 +90,55 @@ snapshot, and chooses its pagination and revision semantics. List can return met
 even for an empty page. Watch replaces the complete collection on each message. The
 same provider is mounted by the native and sandbox routers. [Runnable example](tests/fleet/readings.rs)
 
-An application with computed resources and no stored entities can set
-`"entities": false` in `paydirt.schema.json`:
+### Compose servers independently of storage
 
-```json
-{"package":"app","go_package":"example.org/readings","entities":false}
+An entity declaration defines identifiers, tenancy and service contracts. It does
+not select a database implementation. `paydirt gen` generates `server.rs` with
+`Server`, `Layer`, `Overlay`, an `Unimplemented` base, and registration functions.
+The last layer added handles a request first; service methods not overridden by
+a layer continue to the next service.
+
+```rust
+// Include the generated contracts, services, and application composition.
+pub mod server { include!("../generated/server.rs"); }
+use server::Server;
+
+let stack = server::Unimplemented
+    .layer(memory)  // Implements entity methods over application state.
+    .layer(policy);
+let router = server::mount(connectrpc::Router::new(), &stack);
 ```
 
-This keeps the standard `(payday.resource)` contract generation, service layers,
-and `proto/ext/*_svc.ext.proto` extensions, without installing built-in stored
-entities. Implement the generated service trait and provide it through
-`storage::Layers`; `storage::mount(router, &layers)` registers those providers
-without a `Database` argument. An omitted provider returns `Unimplemented`.
-The provider still owns authorization, filtering and pagination. Stored ORM
-declarations are rejected in this mode. Omitting `entities` retains the existing
-entity application defaults and `storage::mount(router, database, &layers)` API.
-The [resource-only consumer test](scripts/test-read-resources.sh) compiles and
-calls generated services without an ORM runtime or SQL driver.
+Implement `server::Layer<N>` for each application layer. Its service accessor
+can return `<Entity>ServiceOverlay { next: next.app_entity(), layer: ... }` to
+use the generated per-method forwarding defaults. An omitted method eventually
+answers Unimplemented. `mount_if` selects services at registration; request
+authorization still belongs to the chosen layers.
+
+Keep the ordinary `(orm.message)` and `(payday.entity)` declarations, including
+ID domains, tenant edges and field-number conventions, for entities backed by
+memory or an external service. The generated SQL/storage artifacts can remain
+unused. This path compiles without a `Database` type, SQL driver or ORM runtime.
+A custom backend must enforce tenant scope **before** filtering and pagination;
+omitting the SQL Sink also omits its SQL wall. It must implement the declared
+reference, selection and pagination semantics itself.
+
+For a database application, `storage::server` exposes the same composition API,
+and `storage::Sink`, `storage::Audit`, `storage::Gate::new(db, public_methods)`
+and `storage::intercept::Layer` are explicit choices. The existing
+`storage::mount(router, database, &layers)` remains a convenience preset built
+from that API, retaining its service visibility and request order. Applications
+can instead assemble their own stack and select the layers they need.
+
+Computed read projections participate in the same server composition; they are
+not required merely because an entity has no SQL backend. The short-lived
+`entities: false` schema switch has been removed: remove it from the schema and
+select the implementation in the server stack instead.
+
+The [composition consumer](tests/composition/lib.rs), run by
+[`scripts/test-composition.sh`](scripts/test-composition.sh), declares a tenanted
+entity and a computed projection, then tests layer order, authorization,
+forwarding and default Unimplemented responses without linking any database.
 
 ### Watch brokers and the outbox
 
