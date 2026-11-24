@@ -233,6 +233,13 @@ impl Host {
             telemetry,
         })
     }
+    /// Actual address of the primary listener, including the assigned port
+    /// when `bind` was called with port zero. Additional web listeners are
+    /// independent of this address.
+    pub fn local_addr(&self) -> std::io::Result<SocketAddr> {
+        self.listeners[0].socket.local_addr()
+    }
+
     pub async fn serve(self, stop: Stop) -> Result<()> {
         let mut tasks = JoinSet::new();
         for l in self.listeners {
