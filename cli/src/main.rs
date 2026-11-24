@@ -3,10 +3,10 @@ mod generate;
 mod layers;
 mod new;
 mod payday;
-mod server;
 mod policy;
 mod project;
 mod sandbox;
+mod server;
 mod sinks;
 use std::{env, path::PathBuf, process::ExitCode};
 
