@@ -3,6 +3,7 @@ mod generate;
 mod layers;
 mod new;
 mod payday;
+mod server;
 mod policy;
 mod project;
 mod sandbox;

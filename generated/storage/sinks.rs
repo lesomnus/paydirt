@@ -1,3 +1,5 @@
+#[path = "../server.rs"]
+pub mod server;
 #[path = "intercept.rs"]
 pub mod intercept;
 use crate::transport::Database;
@@ -3883,45 +3885,54 @@ mod sink_app_tenant {
         }
     }
 }
-struct Gate {
+#[derive(Clone)]
+pub struct Gate {
     db: Database,
     public: &'static [&'static str],
 }
-struct Audit(Database);
+impl Gate {
+    pub fn new(db: Database, public: &'static [&'static str]) -> Self {
+        Self { db, public }
+    }
+}
+#[derive(Clone)]
+pub struct Audit(pub Database);
+#[derive(Clone)]
+pub struct Sink(pub Database);
 #[derive(Clone)]
 pub struct Next(pub Database);
 impl Next {
-    pub fn app_access(&self) -> impl crate::services::r#app::AccessService {
+    pub fn app_access(&self) -> impl crate::services::r#app::AccessService + use<> {
         crate::services::r#app::AccessServiceOverlay {
             next: crate::services::r#app::AccessServiceUnimplemented,
             layer: sink_app_access::Sink(self.0.clone()),
         }
     }
-    pub fn app_audit(&self) -> impl crate::services::r#app::AuditService {
+    pub fn app_audit(&self) -> impl crate::services::r#app::AuditService + use<> {
         crate::services::r#app::AuditServiceOverlay {
             next: crate::services::r#app::AuditServiceUnimplemented,
             layer: sink_app_audit::Sink(self.0.clone()),
         }
     }
-    pub fn app_cell(&self) -> impl crate::services::r#app::CellService {
+    pub fn app_cell(&self) -> impl crate::services::r#app::CellService + use<> {
         crate::services::r#app::CellServiceOverlay {
             next: crate::services::r#app::CellServiceUnimplemented,
             layer: sink_app_cell::Sink(self.0.clone()),
         }
     }
-    pub fn app_holder(&self) -> impl crate::services::r#app::HolderService {
+    pub fn app_holder(&self) -> impl crate::services::r#app::HolderService + use<> {
         crate::services::r#app::HolderServiceOverlay {
             next: crate::services::r#app::HolderServiceUnimplemented,
             layer: sink_app_holder::Sink(self.0.clone()),
         }
     }
-    pub fn app_robot(&self) -> impl crate::services::r#app::RobotService {
+    pub fn app_robot(&self) -> impl crate::services::r#app::RobotService + use<> {
         crate::services::r#app::RobotServiceOverlay {
             next: crate::services::r#app::RobotServiceUnimplemented,
             layer: sink_app_robot::Sink(self.0.clone()),
         }
     }
-    pub fn app_tenant(&self) -> impl crate::services::r#app::TenantService {
+    pub fn app_tenant(&self) -> impl crate::services::r#app::TenantService + use<> {
         crate::services::r#app::TenantServiceOverlay {
             next: crate::services::r#app::TenantServiceUnimplemented,
             layer: sink_app_tenant::Sink(self.0.clone()),
@@ -4607,6 +4618,140 @@ pub trait TenantCalls: crate::services::r#app::TenantService {
     }
 }
 impl<N: crate::services::r#app::TenantService> TenantCalls for N {}
+impl<N: server::Server> server::Layer<N> for Sink {
+    fn app_access(&self, _: &N) -> impl crate::services::r#app::AccessService {
+        Next(self.0.clone()).app_access()
+    }
+    fn app_audit(&self, _: &N) -> impl crate::services::r#app::AuditService {
+        Next(self.0.clone()).app_audit()
+    }
+    fn app_cell(&self, _: &N) -> impl crate::services::r#app::CellService {
+        Next(self.0.clone()).app_cell()
+    }
+    fn app_holder(&self, _: &N) -> impl crate::services::r#app::HolderService {
+        Next(self.0.clone()).app_holder()
+    }
+    fn app_robot(&self, _: &N) -> impl crate::services::r#app::RobotService {
+        Next(self.0.clone()).app_robot()
+    }
+    fn app_tenant(&self, _: &N) -> impl crate::services::r#app::TenantService {
+        Next(self.0.clone()).app_tenant()
+    }
+}
+impl<N: server::Server> server::Layer<N> for Gate {
+    fn app_access(&self, next: &N) -> impl crate::services::r#app::AccessService {
+        crate::services::r#app::AccessServiceOverlay {
+            next: next.app_access(),
+            layer: self.clone(),
+        }
+    }
+    fn app_audit(&self, next: &N) -> impl crate::services::r#app::AuditService {
+        crate::services::r#app::AuditServiceOverlay {
+            next: next.app_audit(),
+            layer: self.clone(),
+        }
+    }
+    fn app_cell(&self, next: &N) -> impl crate::services::r#app::CellService {
+        crate::services::r#app::CellServiceOverlay {
+            next: next.app_cell(),
+            layer: self.clone(),
+        }
+    }
+    fn app_holder(&self, next: &N) -> impl crate::services::r#app::HolderService {
+        crate::services::r#app::HolderServiceOverlay {
+            next: next.app_holder(),
+            layer: self.clone(),
+        }
+    }
+    fn app_robot(&self, next: &N) -> impl crate::services::r#app::RobotService {
+        crate::services::r#app::RobotServiceOverlay {
+            next: next.app_robot(),
+            layer: self.clone(),
+        }
+    }
+    fn app_tenant(&self, next: &N) -> impl crate::services::r#app::TenantService {
+        crate::services::r#app::TenantServiceOverlay {
+            next: next.app_tenant(),
+            layer: self.clone(),
+        }
+    }
+}
+impl<N: server::Server> server::Layer<N> for Audit {
+    fn app_access(&self, next: &N) -> impl crate::services::r#app::AccessService {
+        crate::services::r#app::AccessServiceOverlay {
+            next: next.app_access(),
+            layer: self.clone(),
+        }
+    }
+    fn app_audit(&self, next: &N) -> impl crate::services::r#app::AuditService {
+        crate::services::r#app::AuditServiceOverlay {
+            next: next.app_audit(),
+            layer: self.clone(),
+        }
+    }
+    fn app_cell(&self, next: &N) -> impl crate::services::r#app::CellService {
+        crate::services::r#app::CellServiceOverlay {
+            next: next.app_cell(),
+            layer: self.clone(),
+        }
+    }
+    fn app_holder(&self, next: &N) -> impl crate::services::r#app::HolderService {
+        crate::services::r#app::HolderServiceOverlay {
+            next: next.app_holder(),
+            layer: self.clone(),
+        }
+    }
+    fn app_robot(&self, next: &N) -> impl crate::services::r#app::RobotService {
+        crate::services::r#app::RobotServiceOverlay {
+            next: next.app_robot(),
+            layer: self.clone(),
+        }
+    }
+    fn app_tenant(&self, next: &N) -> impl crate::services::r#app::TenantService {
+        crate::services::r#app::TenantServiceOverlay {
+            next: next.app_tenant(),
+            layer: self.clone(),
+        }
+    }
+}
+impl<N: server::Server> server::Layer<N> for intercept::Layer {
+    fn app_access(&self, next: &N) -> impl crate::services::r#app::AccessService {
+        crate::services::r#app::AccessServiceOverlay {
+            next: next.app_access(),
+            layer: self.clone(),
+        }
+    }
+    fn app_audit(&self, next: &N) -> impl crate::services::r#app::AuditService {
+        crate::services::r#app::AuditServiceOverlay {
+            next: next.app_audit(),
+            layer: self.clone(),
+        }
+    }
+    fn app_cell(&self, next: &N) -> impl crate::services::r#app::CellService {
+        crate::services::r#app::CellServiceOverlay {
+            next: next.app_cell(),
+            layer: self.clone(),
+        }
+    }
+    fn app_holder(&self, next: &N) -> impl crate::services::r#app::HolderService {
+        crate::services::r#app::HolderServiceOverlay {
+            next: next.app_holder(),
+            layer: self.clone(),
+        }
+    }
+    fn app_robot(&self, next: &N) -> impl crate::services::r#app::RobotService {
+        crate::services::r#app::RobotServiceOverlay {
+            next: next.app_robot(),
+            layer: self.clone(),
+        }
+    }
+    fn app_tenant(&self, next: &N) -> impl crate::services::r#app::TenantService {
+        crate::services::r#app::TenantServiceOverlay {
+            next: next.app_tenant(),
+            layer: self.clone(),
+        }
+    }
+}
 pub trait Layers {
     fn interceptors(&self) -> crate::storage::intercept::Layer {
         Default::default()
@@ -4651,152 +4796,48 @@ pub trait Layers {
         next
     }
 }
+struct Application<'a, L>(&'a L);
+impl<N: server::Server, L: Layers> server::Layer<N> for Application<'_, L> {
+    fn app_access(&self, next: &N) -> impl crate::services::r#app::AccessService {
+        self.0.app_access(next.app_access())
+    }
+    fn app_audit(&self, next: &N) -> impl crate::services::r#app::AuditService {
+        self.0.app_audit(next.app_audit())
+    }
+    fn app_cell(&self, next: &N) -> impl crate::services::r#app::CellService {
+        self.0.app_cell(next.app_cell())
+    }
+    fn app_holder(&self, next: &N) -> impl crate::services::r#app::HolderService {
+        self.0.app_holder(next.app_holder())
+    }
+    fn app_robot(&self, next: &N) -> impl crate::services::r#app::RobotService {
+        self.0.app_robot(next.app_robot())
+    }
+    fn app_tenant(&self, next: &N) -> impl crate::services::r#app::TenantService {
+        self.0.app_tenant(next.app_tenant())
+    }
+}
+/// The database-backed default stack. Use server::Server::layer to choose
+/// the base and layers explicitly, including a stack without a DB Sink.
 pub fn mount(router: Router, db: Database, layers: &impl Layers) -> Router {
-    let next = Next(db.clone());
-    let interceptors = layers.interceptors().public();
-    let router = if crate::transport::access::OPTIONS.reads {
-        let core = layers.app_access(next.app_access());
-        let core = crate::services::r#app::AccessServiceOverlay {
-            next: core,
-            layer: interceptors.clone(),
-        };
-        let audit = crate::services::r#app::AccessServiceOverlay {
-            next: core,
-            layer: Audit(db.clone()),
-        };
-        let gate = crate::services::r#app::AccessServiceOverlay {
-            next: audit,
-            layer: Gate {
-                db: db.clone(),
-                public: layers.public_methods(),
-            },
-        };
-        crate::services::r#app::AccessServiceExt::register(
-            ::std::sync::Arc::new(gate),
-            router,
-        )
-    } else {
-        router
-    };
-    let router = if crate::transport::access::OPTIONS.reads {
-        let core = layers.app_audit(next.app_audit());
-        let core = crate::services::r#app::AuditServiceOverlay {
-            next: core,
-            layer: interceptors.clone(),
-        };
-        let audit = crate::services::r#app::AuditServiceOverlay {
-            next: core,
-            layer: Audit(db.clone()),
-        };
-        let gate = crate::services::r#app::AuditServiceOverlay {
-            next: audit,
-            layer: Gate {
-                db: db.clone(),
-                public: layers.public_methods(),
-            },
-        };
-        crate::services::r#app::AuditServiceExt::register(
-            ::std::sync::Arc::new(gate),
-            router,
-        )
-    } else {
-        router
-    };
-    let router = if true {
-        let core = layers.app_cell(next.app_cell());
-        let core = crate::services::r#app::CellServiceOverlay {
-            next: core,
-            layer: interceptors.clone(),
-        };
-        let audit = crate::services::r#app::CellServiceOverlay {
-            next: core,
-            layer: Audit(db.clone()),
-        };
-        let gate = crate::services::r#app::CellServiceOverlay {
-            next: audit,
-            layer: Gate {
-                db: db.clone(),
-                public: layers.public_methods(),
-            },
-        };
-        crate::services::r#app::CellServiceExt::register(
-            ::std::sync::Arc::new(gate),
-            router,
-        )
-    } else {
-        router
-    };
-    let router = if true {
-        let core = layers.app_holder(next.app_holder());
-        let core = crate::services::r#app::HolderServiceOverlay {
-            next: core,
-            layer: interceptors.clone(),
-        };
-        let audit = crate::services::r#app::HolderServiceOverlay {
-            next: core,
-            layer: Audit(db.clone()),
-        };
-        let gate = crate::services::r#app::HolderServiceOverlay {
-            next: audit,
-            layer: Gate {
-                db: db.clone(),
-                public: layers.public_methods(),
-            },
-        };
-        crate::services::r#app::HolderServiceExt::register(
-            ::std::sync::Arc::new(gate),
-            router,
-        )
-    } else {
-        router
-    };
-    let router = if true {
-        let core = layers.app_robot(next.app_robot());
-        let core = crate::services::r#app::RobotServiceOverlay {
-            next: core,
-            layer: interceptors.clone(),
-        };
-        let audit = crate::services::r#app::RobotServiceOverlay {
-            next: core,
-            layer: Audit(db.clone()),
-        };
-        let gate = crate::services::r#app::RobotServiceOverlay {
-            next: audit,
-            layer: Gate {
-                db: db.clone(),
-                public: layers.public_methods(),
-            },
-        };
-        crate::services::r#app::RobotServiceExt::register(
-            ::std::sync::Arc::new(gate),
-            router,
-        )
-    } else {
-        router
-    };
-    let router = if true {
-        let core = layers.app_tenant(next.app_tenant());
-        let core = crate::services::r#app::TenantServiceOverlay {
-            next: core,
-            layer: interceptors.clone(),
-        };
-        let audit = crate::services::r#app::TenantServiceOverlay {
-            next: core,
-            layer: Audit(db.clone()),
-        };
-        let gate = crate::services::r#app::TenantServiceOverlay {
-            next: audit,
-            layer: Gate {
-                db: db.clone(),
-                public: layers.public_methods(),
-            },
-        };
-        crate::services::r#app::TenantServiceExt::register(
-            ::std::sync::Arc::new(gate),
-            router,
-        )
-    } else {
-        router
-    };
-    router
+    use server::Server;
+    let stack = server::Unimplemented
+        .layer(Sink(db.clone()))
+        .layer(Application(layers))
+        .layer(layers.interceptors().public())
+        .layer(Audit(db.clone()))
+        .layer(Gate::new(db, layers.public_methods()));
+    server::mount_if(
+        router,
+        &stack,
+        |service| match service {
+            "app.AccessService" => crate::transport::access::OPTIONS.reads,
+            "app.AuditService" => crate::transport::access::OPTIONS.reads,
+            "app.CellService" => true,
+            "app.HolderService" => true,
+            "app.RobotService" => true,
+            "app.TenantService" => true,
+            _ => false,
+        },
+    )
 }
