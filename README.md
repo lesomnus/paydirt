@@ -90,6 +90,24 @@ snapshot, and chooses its pagination and revision semantics. List can return met
 even for an empty page. Watch replaces the complete collection on each message. The
 same provider is mounted by the native and sandbox routers. [Runnable example](tests/fleet/readings.rs)
 
+An application with computed resources and no stored entities can set
+`"entities": false` in `paydirt.schema.json`:
+
+```json
+{"package":"app","go_package":"example.org/readings","entities":false}
+```
+
+This keeps the standard `(payday.resource)` contract generation, service layers,
+and `proto/ext/*_svc.ext.proto` extensions, without installing built-in stored
+entities. Implement the generated service trait and provide it through
+`storage::Layers`; `storage::mount(router, &layers)` registers those providers
+without a `Database` argument. An omitted provider returns `Unimplemented`.
+The provider still owns authorization, filtering and pagination. Stored ORM
+declarations are rejected in this mode. Omitting `entities` retains the existing
+entity application defaults and `storage::mount(router, database, &layers)` API.
+The [resource-only consumer test](scripts/test-read-resources.sh) compiles and
+calls generated services without an ORM runtime or SQL driver.
+
 ### Watch brokers and the outbox
 
 Generated native apps select their Watch broker in `app.json`. Add a `watch` entry

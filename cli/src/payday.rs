@@ -16,6 +16,14 @@ use std::{
 pub struct Schema {
     pub(crate) package: String,
     pub(crate) go_package: String,
+    /// Include the framework's stored entities. Resource-only applications can
+    /// opt out while retaining the standard contract and layer generators.
+    #[serde(default = "include_entities")]
+    pub(crate) entities: bool,
+}
+
+fn include_entities() -> bool {
+    true
 }
 
 const OWN: &[(&str, &str)] = &[
@@ -93,6 +101,9 @@ impl Schema {
             }
         }
         library(&LIBRARY, work, &mut shipped)?;
+        if !self.entities {
+            return Ok(());
+        }
         let dir = PathBuf::from(self.package.replace('.', "/")).join("payday");
         for &(name, source) in OWN {
             self.copy_entity(work, &dir, name, source, overlays, &mut shipped)?;
